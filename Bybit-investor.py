@@ -5,7 +5,8 @@ import sys
 import urllib.request
 import json
 import pandas as pd
-from datetime import datetime
+# from datetime import datetime
+import requests
 
 # === CONFIG ===
 api_key = "pFjYU5BrYyM6yzWkgx"
@@ -333,6 +334,7 @@ def scalping_bot(symbol):
     place_order(side, current_price, tp_price, sl_price)
   else:
     print("No action taken (no clear signal)")
+  display_status(current_price, tp_price, sl_price)
     
 def display_status(entry, tp, sl, timeout=600):
   start_time = time.time()
