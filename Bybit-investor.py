@@ -1,10 +1,11 @@
 import time
-import curses
 from pybit.unified_trading import HTTP
 import os
 import sys
 import urllib.request
 import json
+import pandas as pd
+from datetime import datetime
 
 # === CONFIG ===
 api_key = "pFjYU5BrYyM6yzWkgx"
@@ -29,7 +30,7 @@ BYBIT_API_URL = "https://api.bybit.com/v5/market/kline"
 
 # === FUNCTIONS ===
 # Function to get the latest price using the Bybit API
-def get_latest_price(symbol="BTCUSDT"):
+def get_latest_price(symbol="XRPUSDT"):
   try:
     # Use Bybit V5 market ticker endpoint
     url = "https://api.bybit.com/v5/market/tickers"
@@ -79,7 +80,7 @@ def place_order(side, entry_price, tp, sl):
   except Exception as e:
     return {"error": str(e)}
 
-def get_market_data(symbol='BTCUSDT', interval='1', limit=200):
+def get_market_data(symbol='XRPUSDT', interval='1', limit=200):
   # Prepare the URL with the query parameters
   url = f"{BYBIT_API_URL}?symbol={symbol}&interval={interval}&limit={limit}"
 
@@ -128,13 +129,28 @@ def get_market_data(symbol='BTCUSDT', interval='1', limit=200):
       'highs': highs,
       'lows': lows,
       'closes': closes,
-      'volumes': volumes
-      
+      'volumes': volumes    
     }
   
   except Exception as e:
     print(f"Error fetching market data: {e}")
     return {}
+
+def get_closes(market_data):
+  closes = []
+  for item in market_data:
+    # Ensure the item has at least 5 elements (index 4 must exist for close price)
+    if len(item) >= 5:
+      try:
+        # Try to convert the closing price (index 4) to float
+        close_price = float(item[4])
+        closes.append(close_price)
+      except ValueError:
+        print(f"Skipping invalid closing price: {item[4]}")
+        continue  # Skip invalid entries
+      else:
+        print(f"Skipping incomplete data: {item}")
+  return closes
 
 def calculate_rsi(closes, period=14):
   if len(closes) < period + 1:
@@ -236,37 +252,89 @@ def find_swing_points(candles):
 def calculate_moving_average(data, period):
     return sum(data[-period:]) / period
 
-# Update your scalping_bot function to incorporate MA logic
-def moving_average_bot(symbol, interval):
+def check_entry_signals(prices):
+  # Calculate moving averages
+  ma7 = calculate_moving_average(prices, 7)
+  ma14 = calculate_moving_average(prices, 14)
+  ma28 = calculate_moving_average(prices, 28)
+    
+  # Logic for buy/sell signals
+  if ma7 > ma14:
+    print("Buy signal: 7-min MA crossed above 14-min MA")
+    return "Buy"
+  elif ma7 < ma14:
+    print("Sell signal: 7-min MA crossed below 14-min MA")
+    return "Sell"
+  else:
+    print("No signal")
+    return None
+
+def calculate_volatility(closes, period=10):
+  price_changes = []
+    
+  for i in range(1, period):
+    price_changes.append(abs(closes[-i] - closes[-(i + 1)]))
+    
+    avg_price_change = sum(price_changes) / len(price_changes) if price_changes else 0
+  return avg_price_change
+
+def set_sl_tp(current_price, volatility, side="Buy"):
+  # SL: 2 times the volatility below current price for Buy
+  # SL: 2 times the volatility above current price for Sell
+  if side == "Buy":
+    sl_price = current_price - (2 * volatility)
+    tp_price = current_price + (2 * volatility)  # Example TP logic
+  else:
+    sl_price = current_price + (2 * volatility)
+    tp_price = current_price - (2 * volatility)  # Example TP logic
+    
+  return sl_price, tp_price
+
+def scalping_bot(symbol):
   # Fetch market data (already implemented)
   market_data = get_market_data()
-  closes = [float(item[4]) for item in market_data]  # Closing prices
+  df = pd.DataFrame(market_data)
+  print(df.head())
+  print(df.index.name)  # should be 'timestamp'
+  print(df.columns)
+  
+  # df.set_index('timestamp', inplace=True)  # if 'timestamp' is a column
 
-  # Calculate short-term and long-term moving averages
-  seven_ma = calculate_moving_average(closes, 7)  # e.g., 50-period MA
-  fourteen_ma = calculate_moving_average(closes, 14)  # e.g., 200-period MA
-  twentyeight_ma = calculate_moving_average(closes, 28)
+  closes = df['closes']
+  print(closes.tail())
 
-  # Set order_side based on moving averages
-  order_side = None
-  if seven_ma > fourteen_ma > twentyeight_ma:
-    order_side = 'Buy'  # Bullish trend
-  elif seven_ma < fourteen_ma < twentyeight_ma:
-    order_side = 'Sell'  # Bearish trend
+  # Get closing prices (filter out invalid entries)
+  closes = get_closes(market_data)
+
+  if len(closes) == 0:
+    print("No valid closing prices found.")
+    return
+  
+  # Check for buy/sell signal
+  side = check_entry_signals(closes)
+  
+  if side:
+    # Get current price (latest closing price)
+    current_price = closes[-1]
+    
+    # Calculate the average volatility (price movement) over the last 10 candles
+    volatility = calculate_volatility(closes, period=10)
+    
+    # Set SL and TP
+    sl_price, tp_price = set_sl_tp(current_price, volatility, side)
+
+    # Print entry, SL, and TP details
+    print(f"Entry Price: {current_price}")
+    print(f"Stop-Loss (SL) Price: {sl_price}")
+    print(f"Take-Profit (TP) Price: {tp_price}")
+    
+    # Simulate order placement (for example purposes)
+    print(f"Placing {side} order at {current_price} with SL at {sl_price} and TP at {tp_price}")
+    place_order(side, current_price, tp_price, sl_price)
   else:
-    order_side = 'Hold'  # No clear trend, no action
-
-  # You can then use the order_side to place orders based on this logic
-  if order_side == 'Buy':
-    # Place buy order (your existing buy order logic here)
-    print("Placing Buy order...")
-  elif order_side == 'Sell':
-    # Place sell order (your existing sell order logic here)
-    print("Placing Sell order...")
-  else:
-    print("No action taken (no clear trend)")
-
-def display_status(entry, tp, sl, timeout):
+    print("No action taken (no clear signal)")
+    
+def display_status(entry, tp, sl, timeout=600):
   start_time = time.time()
   while True:
     current_price = get_latest_price()
@@ -290,9 +358,8 @@ def display_status(entry, tp, sl, timeout):
     time.sleep(1)
 
 def main():
-  symbol = 'BNBUSDT'
-  interval = '1'
-  moving_average_bot(symbol, interval)
+  symbol = 'XRPUSDT'
+  scalping_bot(symbol)
   # data = get_market_data(symbol, interval)
   
   # Calculate indicators
@@ -314,3 +381,4 @@ def main():
 #=== START ===
 # if __name__ == "__main__":
 #     scalping_bot()
+main()
