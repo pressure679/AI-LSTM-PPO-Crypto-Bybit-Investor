@@ -79,67 +79,6 @@ def place_order(side, entry_price, tp, sl):
   except Exception as e:
     return {"error": str(e)}
 
-def find_swing_points(candles):
-  highs = [float(c['high']) for c in candles]
-  lows = [float(c['low']) for c in candles]
-  swing_highs, swing_lows = [], []
-
-  for i in range(2, len(highs) - 2):
-    if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
-      swing_highs.append(highs[i])
-    if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
-      swing_lows.append(lows[i])
-
-  return swing_highs[-3:], swing_lows[-3:] if swing_highs and swing_lows else ([], [])
-
-def scalping_bot():
-  candles = client.get_kline(
-    category="linear",
-    symbol=symbol,
-    interval="1",
-    limit=50
-  )["result"]["list"]
-
-  candles = [{"high": c[3], "low": c[4]} for c in candles]
-  swing_highs, swing_lows = find_swing_points(candles)
-
-  if not swing_highs or not swing_lows:
-    print("Not enough swing points found.")
-    return
-
-  entry = swing_highs[-1] if order_side == "Sell" else swing_lows[-1]
-  tp = entry * (1 - tp_percent) if order_side == "Sell" else entry * (1 + tp_percent)
-  sl = entry * (1 + sl_percent) if order_side == "Sell" else entry * (1 - sl_percent)
-
-  print(f"Entry: {entry:.2f}, TP: {tp:.2f}, SL: {sl:.2f}")
-  time.sleep(2)
-
-  # curses.wrapper(lambda stdscr: display_status(stdscr, entry, tp, sl, timeout_seconds))
-  curses.wrapper(lambda stdscr: display_status(entry, tp, sl, timeout_seconds))
-
-def display_status(entry, tp, sl, timeout):
-  start_time = time.time()
-  while True:
-    current_price = get_latest_price()
-    os.system("clear")  # Clear the screen each loop
-
-    sys.stdout.write("=== Scalping Bot Active ===\r\n")
-    sys.stdout.write(f"Entry Price   : {entry}\r\n")
-    sys.stdout.write(f"Take Profit   : {tp}\r\n")
-    sys.stdout.write(f"Stop Loss     : {sl}\r\n")
-    sys.stdout.write(f"Current Price : {current_price}\r\n")
-    elapsed = int(time.time() - start_time)
-    sys.stdout.write(f"Elapsed Time  : {elapsed}s / {timeout}s\r\n")
-
-    sys.stdout.flush()  # Force immediate output
-
-    if elapsed >= timeout:
-      sys.stdout.write("\r\n[!] Timeout reached.\r\n")
-      sys.stdout.flush()
-      break
-
-    time.sleep(1)
-
 def get_market_data(symbol='BTCUSDT', interval='1', limit=200):
   # Prepare the URL with the query parameters
   url = f"{BYBIT_API_URL}?symbol={symbol}&interval={interval}&limit={limit}"
@@ -280,26 +219,97 @@ def calculate_stochastic(highs, lows, closes, period=14):
     stoch_values.append(stoch)
   return stoch_values
 
+def find_swing_points(candles):
+  highs = [float(c['high']) for c in candles]
+  lows = [float(c['low']) for c in candles]
+  swing_highs, swing_lows = [], []
+
+  for i in range(2, len(highs) - 2):
+    if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+      swing_highs.append(highs[i])
+    if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+      swing_lows.append(lows[i])
+
+  return swing_highs[-3:], swing_lows[-3:] if swing_highs and swing_lows else ([], [])
+
+# Function to calculate Moving Average (MA)
+def calculate_moving_average(data, period):
+    return sum(data[-period:]) / period
+
+# Update your scalping_bot function to incorporate MA logic
+def moving_average_bot(symbol, interval):
+  # Fetch market data (already implemented)
+  market_data = get_market_data()
+  closes = [float(item[4]) for item in market_data]  # Closing prices
+
+  # Calculate short-term and long-term moving averages
+  seven_ma = calculate_moving_average(closes, 7)  # e.g., 50-period MA
+  fourteen_ma = calculate_moving_average(closes, 14)  # e.g., 200-period MA
+  twentyeight_ma = calculate_moving_average(closes, 28)
+
+  # Set order_side based on moving averages
+  order_side = None
+  if seven_ma > fourteen_ma > twentyeight_ma:
+    order_side = 'Buy'  # Bullish trend
+  elif seven_ma < fourteen_ma < twentyeight_ma:
+    order_side = 'Sell'  # Bearish trend
+  else:
+    order_side = 'Hold'  # No clear trend, no action
+
+  # You can then use the order_side to place orders based on this logic
+  if order_side == 'Buy':
+    # Place buy order (your existing buy order logic here)
+    print("Placing Buy order...")
+  elif order_side == 'Sell':
+    # Place sell order (your existing sell order logic here)
+    print("Placing Sell order...")
+  else:
+    print("No action taken (no clear trend)")
+
+def display_status(entry, tp, sl, timeout):
+  start_time = time.time()
+  while True:
+    current_price = get_latest_price()
+    os.system("clear")  # Clear the screen each loop
+
+    sys.stdout.write("=== Scalping Bot Active ===\r\n")
+    sys.stdout.write(f"Entry Price   : {entry}\r\n")
+    sys.stdout.write(f"Take Profit   : {tp}\r\n")
+    sys.stdout.write(f"Stop Loss     : {sl}\r\n")
+    sys.stdout.write(f"Current Price : {current_price}\r\n")
+    elapsed = int(time.time() - start_time)
+    sys.stdout.write(f"Elapsed Time  : {elapsed}s / {timeout}s\r\n")
+
+    sys.stdout.flush()  # Force immediate output
+
+    if elapsed >= timeout:
+      sys.stdout.write("\r\n[!] Timeout reached.\r\n")
+      sys.stdout.flush()
+      break
+
+    time.sleep(1)
+
 def main():
-  symbol = 'BTCUSDT'
+  symbol = 'BNBUSDT'
   interval = '1'
-  data = get_market_data(symbol, interval)
+  moving_average_bot(symbol, interval)
+  # data = get_market_data(symbol, interval)
   
   # Calculate indicators
-  rsi = calculate_rsi(data['closes'])
-  macd, signal = calculate_macd(data['closes'])
-  upper_band, middle_band, lower_band = calculate_bollinger_bands(data['closes'])
-  stoch = calculate_stochastic(data['highs'], data['lows'], data['closes'])
+  # rsi = calculate_rsi(data['closes'])
+  # macd, signal = calculate_macd(data['closes'])
+  # upper_band, middle_band, lower_band = calculate_bollinger_bands(data['closes'])
+  # stoch = calculate_stochastic(data['highs'], data['lows'], data['closes'])
   
   # Print the results
-  print("RSI:", rsi[-5:])
-  print("MACD:", macd[-5:])
-  print("Signal:", signal[-5:])
-  print("Bollinger Bands:", upper_band, middle_band, lower_band)
-  print("Stochastic:", stoch[-5:])
+  # print("RSI:", rsi[-5:])
+  # print("MACD:", macd[-5:])
+  # print("Signal:", signal[-5:])
+  # print("Bollinger Bands:", upper_band, middle_band, lower_band)
+  # print("Stochastic:", stoch[-5:])
   
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
     
 #=== START ===
 # if __name__ == "__main__":
