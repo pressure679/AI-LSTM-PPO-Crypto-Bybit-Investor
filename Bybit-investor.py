@@ -11,7 +11,7 @@ import requests
 # === CONFIG ===
 api_key = "pFjYU5BrYyM6yzWkgx"
 api_secret = "CfExgMdMqzZ8CcpmWozrhOlyBrvpBaNKGaiQ"
-symbol = "BTCUSDT"
+symbol = "XRPUSDT"
 order_side = "Sell"  # "Buy" or "Sell"
 qty = 0.01
 entry_price = 786.0  # Example entry price
