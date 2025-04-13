@@ -316,7 +316,7 @@ def scalping_bot(symbol):
   
   if side:
     # Get current price (latest closing price)
-    current_price = closes[-1]
+    current_price = get_latest_price(symbol)
     
     # Calculate the average volatility (price movement) over the last 10 candles
     volatility = calculate_volatility(closes, period=10)
