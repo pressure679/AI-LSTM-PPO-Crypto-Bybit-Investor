@@ -7,4 +7,4 @@ It is to use methos
 (created with ChatGPT)
 I started it to oearn about day-trading.
 
-It still needs some developing before testing (set order_side in the scalping_bot based on moving average, and use method 2)
+It still needs some developing before testing.
