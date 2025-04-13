@@ -300,11 +300,11 @@ def scalping_bot(symbol):
   
   # df.set_index('timestamp', inplace=True)  # if 'timestamp' is a column
 
-  closes = df['closes']
-  print(closes.tail())
+  closes = df['closes'].tolist()
+  # print(closes.tail())
 
   # Get closing prices (filter out invalid entries)
-  closes = get_closes(market_data)
+  # closes = get_closes(market_data)
 
   if len(closes) == 0:
     print("No valid closing prices found.")
