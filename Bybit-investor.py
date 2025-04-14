@@ -106,6 +106,7 @@ def scalping_bot():
   balance = fetch_balance()
   qty = calculate_position_size(balance, last_price, RISK_PERCENT)
   sl, tp = calculate_sl_tp(last_price, SL_PERCENT, TP_PERCENT, side)
+  qty = round(qty, 1)
   last_price = round(last_price, 4)
   tp = round(tp, 4)
   sl = round(sl, 4)
