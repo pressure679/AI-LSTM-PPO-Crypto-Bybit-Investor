@@ -1,88 +1,19 @@
-# ai_scalping_bot.py
-
 import requests
 import time
 import hmac
 import hashlib
 import json
-import uuid
-import sys
-import os
+import numpy as np
 from datetime import datetime
 
-# === CONFIGURATION ===
+# Constants
 API_KEY = "pFjYU5BrYyM6yzWkgx"
 API_SECRET = "CfExgMdMqzZ8CcpmWozrhOlyBrvpBaNKGaiQ"
 BASE_URL = "https://api-testnet.bybit.com"
 SYMBOL = "XRPUSDT"
+RISK_PERCENT = 2
+CANDLE_LIMIT = 100
 INTERVAL = "1"
-SL_PERCENT = 30.0
-TP_PERCENT = 30.0
-TRAILING_STOP_PERCENT = 0.5
-RISK_PERCENT = 5.0
-
-# === UTILITY FUNCTIONS ===
-def generate_signature(params, api_secret):
-  sorted_params = sorted(params.items())
-  query_string = "&".join([f"{k}={v}" for k, v in sorted_params])
-  return hmac.new(api_secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
-
-def send_signed_request(http_method, endpoint, params):
-  params["api_key"] = API_KEY
-  params["timestamp"] = int(time.time() * 1000)
-  params["recv_window"] = 5000
-  params["sign"] = generate_signature(params, API_SECRET)
-  url = f"{BASE_URL}{endpoint}"
-  response = requests.request(http_method, url, params=params)
-  return response
-
-def fetch_latest_price(symbol):
-  endpoint = f"/v5/market/tickers"
-  params = {"category": "linear", "symbol": symbol}
-  response = requests.get(f"{BASE_URL}{endpoint}", params=params)
-  if response.status_code == 200:
-    try:
-      last_price = float(response.json()["result"]["list"][0]["lastPrice"])
-      return last_price
-    except:
-      print("Error parsing last price.")
-      return None
-    print("Error fetching price.")
-    return None
-
-def calculate_position_size(balance, price, risk_percent):
-  risk_amount = balance * (risk_percent / 100.0)
-  return round(risk_amount / price)
-
-def calculate_sl_tp(entry_price, sl_percent, tp_percent, side):
-  if side == "Buy":
-    sl = entry_price * (1 - sl_percent / 100)
-    tp = entry_price * (1 + tp_percent / 100)
-  else:
-    sl = entry_price * (1 + sl_percent / 100)
-    tp = entry_price * (1 - tp_percent / 100)
-  return round(sl, 4), round(tp, 4)
-
-def place_order(symbol, side, qty, price, sl, tp):
-  endpoint = "/v5/order/create"
-  params = {
-    "category": "linear",
-    "symbol": symbol,
-    "side": side,
-    "order_type": "Limit",
-    "qty": str(qty),
-    "price": str(price),
-    "take_profit": str(tp),
-    "stop_loss": str(sl),
-    "time_in_force": "GTC"
-  }
-  response = send_signed_request("POST", endpoint, params)
-  if response.status_code == 200 and response.json()["retCode"] == 0:
-    print(f"{side} order placed at {price}, order ID: {response.json()['result']['orderId']}")
-    return response.json()["result"]["orderId"]
-  else:
-    print("Error placing order:", response.text)
-    return None
 
 def fetch_balance():
   endpoint = "/v5/account/wallet-balance"
@@ -97,22 +28,141 @@ def fetch_balance():
       return 0
     return 0
 
-# === MAIN TRADING FUNCTION ===
-def scalping_bot():
-  last_price = fetch_latest_price(SYMBOL)
-  if last_price is None:
-    return
-  side = "Buy"  # This should be calculated by your MA logic in full version
-  balance = fetch_balance()
-  qty = calculate_position_size(balance, last_price, RISK_PERCENT)
-  sl, tp = calculate_sl_tp(last_price, SL_PERCENT, TP_PERCENT, side)
-  qty = round(qty, 1)
-  last_price = round(last_price, 4)
-  tp = round(tp, 4)
-  sl = round(sl, 4)
-  place_order(SYMBOL, side, qty, last_price, sl, tp)
+def send_signed_request(http_method, endpoint, params):
+  params["api_key"] = API_KEY
+  params["timestamp"] = int(time.time() * 1000)
+  params["recv_window"] = 5000
+  params["sign"] = generate_signature(params, API_SECRET)
+  url = f"{BASE_URL}{endpoint}"
+  response = requests.request(http_method, url, params=params)
+  return response
+
+# Signature
+def generate_signature(api_key, secret, req_time, sign_params):
+  sign_params["api_key"] = api_key
+  sign_params["timestamp"] = str(req_time)
+  sorted_params = sorted(sign_params.items())
+  sign_string = "&".join([f"{key}={value}" for key, value in sorted_params])
+  return hmac.new(secret.encode(), sign_string.encode(), hashlib.sha256).hexdigest()
+
+# Get OHLCV data
+def get_ohlcv():
+  url = f"{BASE_URL}/v5/market/kline"
+  params = {
+    "category": "linear",
+    "symbol": SYMBOL,
+    "interval": INTERVAL,
+    "limit": CANDLE_LIMIT
+    
+  }
+  response = requests.get(url, params=params)
+  data = response.json()
+  if "result" in data and "list" in data["result"]:
+    ohlcv = data["result"]["list"][::-1]  # newest last
+    return np.array(ohlcv, dtype=float)
+  return None
+
+# Moving Average
+def moving_average(values, period):
+  return np.convolve(values, np.ones(period)/period, mode='valid')
+
+# Candlestick patterns
+def is_bullish_engulfing(open_, close):
+  return close[-2] < open_[-2] and close[-1] > open_[-1] and close[-1] > open_[-2] and open_[-1] < close[-2]
+
+def is_bearish_engulfing(open_, close):
+  return close[-2] > open_[-2] and close[-1] < open_[-1] and close[-1] < open_[-2] and open_[-1] > close[-2]
+
+# Position Size Calculation
+def calculate_position_size(balance, price, risk_percent):
+  risk_amount = balance * (risk_percent / 100.0)
+  position_size = risk_amount / price
+  return round(position_size)
+
+# Order placement
+def place_order(side, qty, price=None, sl=None, tp=None):
+  endpoint = "/v5/order/create"
+  url = BASE_URL + endpoint
+  req_time = int(time.time() * 1000)
+  params = {
+    "category": "linear",
+    "symbol": SYMBOL,
+    "side": side,
+    "order_type": "Market" if price is None else "Limit",
+    "qty": str(qty),
+    "time_in_force": "GTC"
+    
+  }
+  if price: params["price"] = str(price)
+  if tp: params["take_profit"] = str(tp)
+  if sl: params["stop_loss"] = str(sl)
+
+  signature = generate_signature(API_KEY, API_SECRET, req_time, params)
+  headers = {
+    "Content-Type": "application/json",
+    "X-BAPI-API-KEY": API_KEY,
+    "X-BAPI-SIGN": signature,
+    "X-BAPI-TIMESTAMP": str(req_time)
+    
+  }
+  response = requests.post(url, headers=headers, json=params)
+  print("Order response:", response.text)
   
 
-# === START ===
+# Track position globally
+position = {"side": None, "qty": 0}
+
+# Main strategy
+def scalping_bot():
+  global position
+  ohlcv = get_ohlcv()
+  if ohlcv is None:
+    print("Failed to fetch OHLCV")
+    return
+  
+  timestamps, open_, high, low, close, vol = ohlcv[:, :6].T
+  ma7 = moving_average(close, 7)
+  ma14 = moving_average(close, 14)
+
+  if len(ma7) < 2 or len(ma14) < 2:
+    return
+  
+  ma7_prev, ma7_curr = ma7[-2], ma7[-1]
+  ma14_prev, ma14_curr = ma14[-2], ma14[-1]
+  last_price = close[-1]
+  balance = fetch_balance()
+  qty = calculate_position_size(balance, last_price, RISK_PERCENT)
+
+  buy_signal = ma7_prev < ma14_prev and ma7_curr > ma14_curr
+  sell_signal = ma7_prev > ma14_prev and ma7_curr < ma14_curr
+
+  if position["side"] == "Buy" and sell_signal:
+    print("Closing Buy due to Sell Signal")
+    place_order("Sell", position["qty"], last_price, None, None)
+    position = {"side": None, "qty": 0}
+    
+  elif position["side"] == "Sell" and buy_signal:
+    print("Closing Sell due to Buy Signal")
+    place_order("Buy", position["qty"], last_price, None, None)
+    position = {"side": None, "qty": 0}
+    
+  elif position["side"] is None:
+    if buy_signal:
+      print("Opening Buy Position")
+      place_order("Buy", qty, last_price, None, None)
+      position = {"side": "Buy", "qty": qty}
+    elif sell_signal:
+      print("Opening Sell Position")
+      place_order("Sell", qty, last_price, None, None)
+      position = {"side": "Sell", "qty": qty}
+    else:
+      print("Holding current position")
+      
+      
 if __name__ == "__main__":
-  scalping_bot()
+  while True:
+    try:
+      scalping_bot()
+    except Exception as e:
+      print("Error:", e)
+    time.sleep(60)
