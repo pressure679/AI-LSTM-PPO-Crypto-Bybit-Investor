@@ -13,8 +13,8 @@ import ta
 from pybit.unified_trading import HTTP
 
 # --- Configuration ---
-API_KEY = "wLqYZxlM27F01smJFS"
-API_SECRET = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
+API_KEY = "w"
+API_SECRET = ""
 BASE_URL = "https://api.bybit.com"  # Mainnet
 SYMBOL = "SPXUSDT"
 INTERVAL = "1"
