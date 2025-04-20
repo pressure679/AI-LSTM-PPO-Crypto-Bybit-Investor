@@ -146,11 +146,11 @@ def scalping_bot():
       else:
         log("No crossover trend signal.")
         
-        # === GRID SCALPING ===
-    else:
-      if position["side"] is None:
-        upper_price = last_price + grid_size
-        lower_price = last_price - grid_size
-        log(f"Placing grid orders: Buy {lower_price:.2f}, Sell {upper_price:.2f}")
-        place_order("Buy", 1, price=round(lower_price, 2),
-                    sl=round(lower_price - lower_price * STOP_LOSS_PERCENT, 2))
+  # === GRID SCALPING ===
+  else:
+    if position["side"] is None:
+      upper_price = last_price + grid_size
+      lower_price = last_price - grid_size
+      log(f"Placing grid orders: Buy {lower_price:.2f}, Sell {upper_price:.2f}")
+      place_order("Buy", 1, price=round(lower_price, 2),
+                  sl=round(lower_price - lower_price * STOP_LOSS_PERCENT, 2))
