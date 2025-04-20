@@ -7,8 +7,8 @@ from datetime import datetime
 from pybit.unified_trading import HTTP
 
 # === CONFIGURATION ===
-API_KEY = "wLqYZxlM27F01smJFS"
-API_SECRET = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
+API_KEY = ""
+API_SECRET = ""
 SYMBOL = "SPXUSDT"
 RISK_PERCENT = 1
 CANDLE_LIMIT = 100
