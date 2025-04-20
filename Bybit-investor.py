@@ -1,228 +1,135 @@
-import requests
 import time
-import hmac
-import hashlib
-import json
-import urllib.parse
-import numpy as np
-import pandas as pd
-import ta  # Ensure you have the 'ta' package installed
-from datetime import datetime
+import math
+import logging
 from pybit.unified_trading import HTTP
+from datetime import datetime
 
-# Constants
-API_KEY = ""
-API_SECRET = ""
-BASE_URL = "https://api.bybit.com"  # mainnet base URL
-SYMBOL = "XRPUSDT"
-RISK_PERCENT = 1
-CANDLE_LIMIT = 100
-INTERVAL = "1"
-TIMEOUT_THRESHOLD = 600  # in seconds, for cancelling old orders
-ATR_MULTIPLIER = 1.5  # ATR change threshold to re-evaluate grid spacing
-STOP_LOSS_PERCENT = 0.1  # Stop Loss at 10% of the capital
+# CONFIG
+symbol = "BTCUSDT"
+timeframe = "1m"
+api_key = "YOUR_API_KEY"
+api_secret = "YOUR_API_SECRET"
 
-# Helper Functions
-def send_signed_request(http_method, endpoint, params):
-    timestamp = str(int(time.time() * 1000))  # current timestamp in milliseconds
-    params["timestamp"] = timestamp
-    params["api_key"] = API_KEY
-    params["recv_window"] = "5000"
+risk_amount = 0.01  # 1% of balance per position
+grids = 3
+max_active_grid_orders = 3
+min_qty = 0.001
 
-    sign = generate_signature(API_KEY, API_SECRET, timestamp, params)
+# INIT
+session = HTTP(api_key=api_key, api_secret=api_secret)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
-    headers = {
-        "X-BAPI-API-KEY": API_KEY,
-        "X-BAPI-SIGN": sign,
-        "X-BAPI-TIMESTAMP": timestamp,
-        "X-BAPI-RECV-WINDOW": "5000",
-        "Content-Type": "application/json"
+order_map = {
+    "grid_orders": []
+}
+
+def get_klines(symbol, interval, limit=50):
+    return session.get_kline(category="linear", symbol=symbol, interval=interval, limit=limit)['result']['list']
+
+def get_balance():
+    balance_info = session.get_wallet_balance(accountType="UNIFIED")
+    return float(balance_info['result']['list'][0]['totalEquity'])
+
+def get_position():
+    position_info = session.get_positions(category="linear", symbol=symbol)
+    pos = position_info['result']['list'][0]
+    return {
+        "size": float(pos['size']),
+        "side": pos['side'],
+        "entry_price": float(pos['avgPrice']) if pos['avgPrice'] else 0
     }
 
-    url = f"{BASE_URL}{endpoint}"
-    print("Request URL:", url)
-    print("Request Params:", params)
+def place_grid_orders(direction, price, grid_size_pct, qty):
+    order_map['grid_orders'].clear()
+    for i in range(1, grids + 1):
+        if direction == "Buy":
+            order_price = price * (1 - grid_size_pct * i)
+        else:
+            order_price = price * (1 + grid_size_pct * i)
 
-    if http_method == "GET":
-        response = requests.get(url, params=params, headers=headers)
-    else:
-        response = requests.request(http_method, url, json=params, headers=headers)
+        order = session.place_order(
+            category="linear",
+            symbol=symbol,
+            side=direction,
+            order_type="Limit",
+            qty=round(qty, 4),
+            price=round(order_price, 2),
+            time_in_force="GTC",
+            reduce_only=False
+        )
+        order_map['grid_orders'].append(order['result']['orderId'])
+        logging.info(f"Placed {direction} grid order at {order_price}")
 
-    return response
+def cancel_grid_orders():
+    for order_id in order_map['grid_orders']:
+        session.cancel_order(category="linear", symbol=symbol, orderId=order_id)
+        logging.info(f"Canceled grid order: {order_id}")
+    order_map['grid_orders'].clear()
 
+def close_position(position):
+    if position['size'] > 0:
+        close_side = "Sell" if position['side'] == "Buy" else "Buy"
+        session.place_order(
+            category="linear",
+            symbol=symbol,
+            side=close_side,
+            order_type="Market",
+            qty=round(position['size'], 4),
+            reduce_only=True
+        )
+        logging.info(f"Closed {position['side']} position using market order")
 
-def generate_signature(api_key, api_secret, timestamp, params):
-    # Add necessary parameters to the sign request
-    params["timestamp"] = timestamp
-    params["api_key"] = api_key
-    params["recv_window"] = "5000"
-
-    # Sort parameters
-    sorted_params = sorted(params.items())
-    query_string = urllib.parse.urlencode(sorted_params)
-
-    # Create the payload for HMAC SHA256 hashing
-    payload = f"{timestamp}{api_key}{params['recv_window']}{query_string}"
-
-    # Generate HMAC SHA256 signature
-    return hmac.new(api_secret.encode('utf-8'), payload.encode('utf-8'), hashlib.sha256).hexdigest()
-
-
-# Get OHLCV data
-def get_ohlcv():
-    url = f"{BASE_URL}/v5/market/kline"
-    params = {
-        "category": "linear",
-        "symbol": SYMBOL,
-        "interval": INTERVAL,
-        "limit": CANDLE_LIMIT
-    }
-    response = requests.get(url, params=params)
-    data = response.json()
-    if "result" in data and "list" in data["result"]:
-        ohlcv = data["result"]["list"][::-1]  # newest last
-        return np.array(ohlcv, dtype=float)
-    return None
-
-
-# Moving Average
-def moving_average(values, period):
-    return np.convolve(values, np.ones(period) / period, mode='valid')
-
-
-# ATR Calculation (using ta)
-def calculate_atr(df):
-    df['atr'] = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close']).average_true_range()
-    return df['atr'].iloc[-1]
-
-
-# Get Volatility (dynamic grid size based on volatility)
-def get_volatility(prices):
-    high = max(prices)
-    low = min(prices)
-    return max((high - low) / prices[-1], 0.001)  # ensure a min grid size of 0.1%
-
-
-# Get Current Position (Buy or Sell)
-def get_current_position(symbol):
-    try:
-        result = send_signed_request("GET", "/v2/private/position/list", {"symbol": symbol})
-        if result["ret_code"] == 0:
-            data = result["result"]
-            for pos in data:
-                size = float(pos["size"])
-                if size > 0:
-                    return pos["side"].lower()  # "buy" or "sell"
-        return None
-    except Exception as e:
-        print(f"Position check error: {e}")
-        return None
-
-
-# Order placement with Stop Loss
-def place_order(side, qty, price=None, sl=None, tp=None):
-    endpoint = "/v5/order/create"
-    url = BASE_URL + endpoint
-    req_time = int(time.time() * 1000)
-    params = {
-        "category": "linear",
-        "symbol": SYMBOL,
-        "side": side,
-        "order_type": "Market" if price is None else "Limit",
-        "qty": str(qty),
-        "time_in_force": "GTC"
-    }
-    if price:
-        params["price"] = str(price)
-    if tp:
-        params["take_profit"] = str(tp)
-    if sl:
-        params["stop_loss"] = str(sl)
-
-    signature = generate_signature(API_KEY, API_SECRET, req_time, params)
-    headers = {
-        "Content-Type": "application/json",
-        "X-BAPI-API-KEY": API_KEY,
-        "X-BAPI-SIGN": signature,
-        "X-BAPI-TIMESTAMP": str(req_time)
-    }
-    response = requests.post(url, headers=headers, json=params)
-    print("Order response:", response.text)
-
-
-# Cancel all orders
-def cancel_all_orders():
-    endpoint = "/v5/order/cancel"
-    url = BASE_URL + endpoint
-    params = {"symbol": SYMBOL, "category": "linear"}
-    response = send_signed_request("POST", endpoint, params)
-    print("Cancel orders response:", response.text)
-
-
-# Main strategy
-def scalping_bot():
-    ohlcv = get_ohlcv()
-    if ohlcv is None:
-        print("Failed to fetch OHLCV")
-        return
-
-    timestamps, open_, high, low, close, vol = ohlcv[:, :6].T
-    ma7 = moving_average(close, 7)
-    ma14 = moving_average(close, 14)
+def detect_trend(close):
+    ma7 = sum(close[-7:]) / 7
+    ma14 = sum(close[-14:]) / 14
     last_price = close[-1]
 
-    if len(ma7) < 2 or len(ma14) < 2:
-        print("Insufficient MA data")
-        return
-
-    # Calculate ATR for volatility-based grid size
-    df = pd.DataFrame({"high": high, "low": low, "close": close})
-    current_atr = calculate_atr(df)
-    print("Current ATR:", current_atr)
-
-    grid_size = current_atr * ATR_MULTIPLIER
-    print(f"Grid Size: {grid_size:.2f}")
-
-    # Check if we have a trend or consolidation
     price_range = max(close[-10:]) - min(close[-10:])
     range_pct = price_range / last_price
-    is_trending = range_pct > 0.01  # Example threshold for low volatility
+    is_trending = range_pct > 0.01
 
-    if is_trending:
-        print("Trend detected. Cancelling grid orders.")
-        cancel_all_orders()
+    if not is_trending:
+        return None, ma7, ma14  # Consolidating market
 
-    # Detect if we need to place grid orders
-    position_side = get_current_position(SYMBOL)
-    if position_side:
-        print(f"Existing position detected: {position_side}, skipping new order.")
-        return
+    return ("Buy" if ma7 > ma14 else "Sell"), ma7, ma14
 
-    # MA crossover strategy for buy/sell decision
-    ma7_prev, ma7_curr = ma7[-2], ma7[-1]
-    ma14_prev, ma14_curr = ma14[-2], ma14[-1]
-    buy_signal = ma7_prev < ma14_prev and ma7_curr > ma14_curr
-    sell_signal = ma7_prev > ma14_prev and ma7_curr < ma14_curr
-
-    # Get balance and calculate qty based on risk
-    client = HTTP(testnet=False, api_key=API_KEY, api_secret=API_SECRET)
-    balance = float(client.get_wallet_balance(accountType="UNIFIED")["result"]["list"][0]["totalEquity"])
-    qty = round(balance * (RISK_PERCENT / 100.0) / last_price, 2)
-
-    if buy_signal:
-        print("Placing Buy order")
-        place_order("Buy", qty, last_price, sl=round(last_price - (last_price * STOP_LOSS_PERCENT), 2))
-    elif sell_signal:
-        print("Placing Sell order")
-        place_order("Sell", qty, last_price, sl=round(last_price + (last_price * STOP_LOSS_PERCENT), 2))
-    else:
-        print("No clear crossover signal. No action taken.")
-
-
-if __name__ == "__main__":
+def main():
     while True:
         try:
-            scalping_bot()
+            logging.info("Checking market condition...")
+            klines = get_klines(symbol, timeframe)
+            close = [float(c[4]) for c in klines]  # close prices
+            last_price = close[-1]
+
+            trend, ma7, ma14 = detect_trend(close)
+            position = get_position()
+
+            if trend:
+                grid_size_pct = (max(close[-10:]) - min(close[-10:])) / last_price / grids
+                grid_size_pct = max(grid_size_pct, 0.001)
+
+                balance = get_balance()
+                qty = balance * risk_amount / last_price
+                qty = max(qty, min_qty)
+
+                # Check and handle trend flip
+                if position['size'] > 0:
+                    if (trend == "Buy" and position['side'] == "Sell") or (trend == "Sell" and position['side'] == "Buy"):
+                        cancel_grid_orders()
+                        close_position(position)
+
+                if not order_map['grid_orders']:
+                    place_grid_orders(trend, last_price, grid_size_pct, qty)
+
+            else:
+                cancel_grid_orders()
+                logging.info("Market is consolidating. Waiting for trend...")
+
+            time.sleep(60)
+
         except Exception as e:
-            print("Error:", e)
-        time.sleep(60)
+            logging.error(f"Error: {e}")
+            time.sleep(60)
+
+if __name__ == "__main__":
+    main()
