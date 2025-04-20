@@ -14,7 +14,7 @@ from pybit.unified_trading import HTTP
 API_KEY = ""
 API_SECRET = ""
 BASE_URL = "https://api.bybit.com"  # mainnet base URL
-SYMBOL = "SPXUSDT"
+SYMBOL = "XRPUSDT"
 RISK_PERCENT = 1
 CANDLE_LIMIT = 100
 INTERVAL = "1"
