@@ -4,11 +4,11 @@ import requests
 from pybit import HTTP
 
 # Constants
-symbol = "BTCUSDT"
+symbol = "XRPUSDT"
 interval = 1  # in minutes
 risk_amount = 0.01  # risk per trade as a fraction of balance
 ema_fast_period = 7
-ema_slow_period = 14
+ema_slow_period = 21
 atr_period = 14
 atr_threshold = 0.005  # 0.5% volatility filter threshold
 
