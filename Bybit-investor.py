@@ -8,7 +8,7 @@ symbol = "XRPUSDT"
 interval = 1  # in minutes
 risk_amount = 0.01  # risk per trade as a fraction of balance
 ema_fast_period = 7
-ema_slow_period = 21
+ema_slow_period = 14
 atr_period = 14
 atr_threshold = 0.005  # 0.5% volatility filter threshold
 
@@ -48,6 +48,12 @@ def open_trade(side, qty):
         close_on_trigger=False
     )
 
+# Set leverage to 10x
+def set_leverage(symbol="BTCUSDT", leverage=10):
+    session.set_leverage(symbol=symbol, leverage=leverage)
+    print(f"Leverage for {symbol} set to {leverage}x")
+# Now you can continue with your trade execution logic
+
 # Main strategy loop
 def run_bot():
     while True:
@@ -79,6 +85,10 @@ def run_bot():
             print(f"Error: {e}")
 
         time.sleep(60)  # Sleep for 1 minute
+
+# Example usage: Set leverage before opening a position
+set_leverage(symbol="XRPUSDT", leverage=10)
+
 
 # Run
 run_bot()
