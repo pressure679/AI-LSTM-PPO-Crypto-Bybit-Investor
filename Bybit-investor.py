@@ -18,7 +18,7 @@ session = HTTP(api_key="iP9AxV2EGukKT7a8dQ", api_secret="QJwukHf8iDKtx5AQJRPgA1V
 
 # Utility functions
 def get_klines(symbol, interval, limit=100):
-  res = session.get_kline(symbol=symbol, interval=interval, limit=limit)
+  res = session.get_kline(category="linear", symbol=symbol, interval=str(interval), limit=limit)
   return res
 
 def ema(data, period):
@@ -45,6 +45,7 @@ def get_last_price():
 
 def open_trade(side, qty):
   session.place_order(
+    category="linear",
     symbol=symbol,
     side=side,
     order_type="Market",
@@ -58,6 +59,10 @@ def open_trade(side, qty):
 # Set leverage to 10x
 def set_leverage(symbol, leverage):
   try:
+    response = session.get_instruments_info(category="linear")
+    # for item in response["result"]["list"]:
+      # print(item["symbol"])
+          
     response = session.set_leverage(
       category="linear",  # required: 'linear' for USDT Perpetual, 'inverse' for Inverse Perpetual
       symbol=symbol,
@@ -74,7 +79,7 @@ def run_bot():
   
   while True:
     try:
-      klines = get_klines(symbol, interval, limit=100)["result"]["list"]
+      klines = get_klines(symbol=symbol, interval=str(interval), limit=100)["result"]["list"]
       # print("klines")
       closes = [float(c[4]) for c in klines]
       # print("closes")
@@ -87,7 +92,7 @@ def run_bot():
       atr = calculate_atr(highs, lows, closes, atr_period)
       last_price = closes[-1]
       volatility_ratio = atr / last_price
-      print(f"EMA Fast: {ema_fast}, EMA Slow: {ema_slow}, ATR: {atr}, Ratio: {volatility_ratio}")
+      # print(f"EMA Fast: {ema_fast}, EMA Slow: {ema_slow}, ATR: {atr}, Ratio: {volatility_ratio}")
       
       # if volatility_ratio < atr_threshold:
         # print("Volatility too low. Skipping trade.")
@@ -108,7 +113,7 @@ def run_bot():
     time.sleep(60)  # Sleep for 1 minute
 
 # Example usage: Set leverage before opening a position
-set_leverage(symbol=symbol, leverage=10)
+# set_leverage(symbol=symbol, leverage=10)
 
 # Run
 run_bot()
