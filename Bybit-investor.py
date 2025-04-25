@@ -59,7 +59,7 @@ def open_trade(side, qty):
 # Set leverage to 10x
 def set_leverage(symbol, leverage):
   try:
-    response = session.get_instruments_info(category="linear")
+    # response = session.get_instruments_info(category="linear")
     # for item in response["result"]["list"]:
       # print(item["symbol"])
           
@@ -72,6 +72,14 @@ def set_leverage(symbol, leverage):
     print(f"Leverage set response: {response}")
   except Exception as e:
     print(f"Error setting leverage for {symbol}: {e}")          
+
+def get_qty_step(symbol):
+  info = session.get_instruments_info(category="linear", symbol=symbol)
+  lot_size_filter = info["result"]["list"][0]["lotSizeFilter"]
+  step = float(lot_size_filter["qtyStep"])
+  min_qty = float(lot_size_filter["minOrderQty"])
+  return step, min_qty
+
 
 # Main strategy loop
 def run_bot():
@@ -101,7 +109,17 @@ def run_bot():
       
       if current_position != side:
         balance = get_balance()
+        # qty = balance * risk_amount / last_price
+        step, min_qty = get_qty_step(symbol)
         qty = balance * risk_amount / last_price
+
+        # Round down to the nearest allowed quantity step
+        qty = math.floor(qty / step) * step
+
+        if qty < min_qty:
+          print(f"Qty {qty} too small, skipping.")
+          return
+
         open_trade(side, qty)
         current_position = side
         print(f"Opened {side} trade for qty {qty}")
@@ -113,7 +131,7 @@ def run_bot():
     time.sleep(60)  # Sleep for 1 minute
 
 # Example usage: Set leverage before opening a position
-# set_leverage(symbol=symbol, leverage=10)
+set_leverage(symbol=symbol, leverage=10)
 
 # Run
 run_bot()
