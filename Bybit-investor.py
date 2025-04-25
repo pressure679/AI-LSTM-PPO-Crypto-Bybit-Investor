@@ -14,7 +14,7 @@ atr_threshold = 0.005  # 0.5% volatility filter threshold
 
 # Auth
 # session = HTTP(api_key="wLqYZxlM27F01smJFS", api_secret="tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7")
-session = HTTP(api_key="iP9AxV2EGukKT7a8dQ", api_secret="QJwukHf8iDKtx5AQJRPgA1VdQv2TIuCmxa00", testnet=True)
+session = HTTP(api_key="", api_secret="", testnet=True)
 
 # Utility functions
 def get_klines(symbol, interval, limit=100):
