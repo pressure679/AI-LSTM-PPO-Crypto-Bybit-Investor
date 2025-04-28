@@ -4,7 +4,7 @@ import requests
 from pybit.unified_trading import HTTP
 
 # Constants
-symbol = "XAUTUSDT"
+symbol = "SHIB1000USDT"
 interval = 1  # in minutes
 risk_amount = 1.0  # risk per trade as a fraction of balance
 ema_fast_period = 7
