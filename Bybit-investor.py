@@ -7,7 +7,7 @@ import pandas as pd
 # Constants
 symbol = "XRPUSDT"
 interval = 1  # in minutes
-risk_amount = 0.3  # risk per trade as a fraction of balance
+risk_amount = 1.0  # risk per trade as a fraction of balance
 ema_fast_period = 7
 ema_slow_period = 14
 atr_period = 14
@@ -124,28 +124,79 @@ def is_shooting_star(df):
 def is_piercing_line(df):
   return df['close'].iloc[-1] > df['open'].iloc[-1] and df['close'].iloc[-2] < df['open'].iloc[-2] and df['close'].iloc[-1] > (df['open'].iloc[-2] + df['close'].iloc[-2]) / 2
 
+def is_three_white_soldiers(df):
+    return (df['close'].iloc[-3] > df['open'].iloc[-3] and
+            df['close'].iloc[-2] > df['open'].iloc[-2] and
+            df['close'].iloc[-1] > df['open'].iloc[-1] and
+            df['close'].iloc[-2] > df['close'].iloc[-3] and
+            df['close'].iloc[-1] > df['close'].iloc[-2])
+
+def is_three_black_crows(df):
+    return (df['close'].iloc[-3] < df['open'].iloc[-3] and
+            df['close'].iloc[-2] < df['open'].iloc[-2] and
+            df['close'].iloc[-1] < df['open'].iloc[-1] and
+            df['close'].iloc[-2] < df['close'].iloc[-3] and
+            df['close'].iloc[-1] < df['close'].iloc[-2])
+
+def is_marubozu(df):
+    body_size = abs(df['close'].iloc[-1] - df['open'].iloc[-1])
+    candle_range = df['high'].iloc[-1] - df['low'].iloc[-1]
+    return body_size >= 0.9 * candle_range  # 90% body, very small wicks
+
+def is_hanging_man(df):
+    body = abs(df['close'].iloc[-1] - df['open'].iloc[-1])
+    lower_shadow = df['open'].iloc[-1] - df['low'].iloc[-1] if df['open'].iloc[-1] > df['close'].iloc[-1] else df['close'].iloc[-1] - df['low'].iloc[-1]
+    return lower_shadow > 2 * body and (df['high'].iloc[-1] - max(df['open'].iloc[-1], df['close'].iloc[-1])) < body
+
+def is_dark_cloud_cover(df):
+    return (df['close'].iloc[-2] > df['open'].iloc[-2] and  # previous candle bullish
+            df['open'].iloc[-1] > df['close'].iloc[-2] and   # current opens above previous close
+            df['close'].iloc[-1] < (df['open'].iloc[-1] + df['close'].iloc[-2]) / 2 and  # closes below midpoint
+            df['close'].iloc[-1] < df['open'].iloc[-1])  # current candle bearish
+
+def is_spinning_top(df):
+    body = abs(df['close'].iloc[-1] - df['open'].iloc[-1])
+    upper_shadow = df['high'].iloc[-1] - max(df['close'].iloc[-1], df['open'].iloc[-1])
+    lower_shadow = min(df['close'].iloc[-1], df['open'].iloc[-1]) - df['low'].iloc[-1]
+    total_range = df['high'].iloc[-1] - df['low'].iloc[-1]
+    return body <= 0.3 * total_range and upper_shadow >= 0.2 * total_range and lower_shadow >= 0.2 * total_range
+
+
 # Function to check for all candlestick patterns
 def check_candlestick_patterns(df):
-  patterns = []
-  if is_bullish_engulfing(df):
-    patterns.append('Bullish_Engulfing')
-  if is_bearish_engulfing(df):
-    patterns.append('Bearish_Engulfing')
-  if is_hammer(df):
-    patterns.append('Hammer')
-  if is_inverted_hammer(df):
-    patterns.append('Inverted_Hammer')
-  if is_doji(df):
-    patterns.append('Doji')
-  if is_morning_star(df):
-    patterns.append('Morning_Star')
-  if is_evening_star(df):
-    patterns.append('Evening_Star')
-  if is_shooting_star(df):
-    patterns.append('Shooting_Star')
-  if is_piercing_line(df):
-    patterns.append('Piercing_Line')
-  return patterns
+    patterns = []
+    if is_bullish_engulfing(df):
+        patterns.append('Bullish_Engulfing')
+    if is_bearish_engulfing(df):
+        patterns.append('Bearish_Engulfing')
+    if is_hammer(df):
+        patterns.append('Hammer')
+    if is_inverted_hammer(df):
+        patterns.append('Inverted_Hammer')
+    if is_doji(df):
+        patterns.append('Doji')
+    if is_morning_star(df):
+        patterns.append('Morning_Star')
+    if is_evening_star(df):
+        patterns.append('Evening_Star')
+    if is_shooting_star(df):
+        patterns.append('Shooting_Star')
+    if is_piercing_line(df):
+        patterns.append('Piercing_Line')
+    if is_three_white_soldiers(df):
+        patterns.append('Three_White_Soldiers')
+    if is_three_black_crows(df):
+        patterns.append('Three_Black_Crows')
+    if is_marubozu(df):
+        patterns.append('Marubozu')
+    if is_hanging_man(df):
+        patterns.append('Hanging_Man')
+    if is_dark_cloud_cover(df):
+        patterns.append('Dark_Cloud_Cover')
+    if is_spinning_top(df):
+        patterns.append('Spinning_Top')
+    return patterns
+
 
 # Main strategy loop
 def run_bot():
