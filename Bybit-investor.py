@@ -16,7 +16,7 @@ session = HTTP(api_key="YOUR_API_KEY", api_secret="YOUR_API_SECRET", testnet=Fal
 # Utility functions
 def get_klines(symbol, interval, limit=100):
   res = session.get_kline(category="linear", symbol=symbol, interval=str(interval), limit=limit)
-    return res
+  return res
 
 def ema(data, period):
   k = 2 / (period + 1)
@@ -27,10 +27,10 @@ def ema(data, period):
 
 def get_balance():
   res = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")
-    return float(res["result"]["list"][0]["coin"][0]["walletBalance"])
+  return float(res["result"]["list"][0]["coin"][0]["walletBalance"])
 
 def get_last_price():
-    return float(session.latest_information_for_symbol(symbol=symbol)["last_price"])
+  return float(session.latest_information_for_symbol(symbol=symbol)["last_price"])
 
 def open_trade(side, qty):
   session.place_order(
@@ -63,26 +63,26 @@ def get_position():
   pos = res["result"]["list"][0]
   size = float(pos["size"])
   side = pos["side"]  # "Buy", "Sell", or "None"
-    return side, size
+  return side, size
 
 def set_leverage(symbol, leverage):
-    try:
-      response = session.set_leverage(
-        category="linear",
-        symbol=symbol,
-        buyLeverage=str(leverage),
-        sellLeverage=str(leverage)
-      )
-      print(f"Leverage set response: {response}")
-    except Exception as e:
-      print(f"Error setting leverage for {symbol}: {e}")
+  try:
+    response = session.set_leverage(
+      category="linear",
+      symbol=symbol,
+      buyLeverage=str(leverage),
+      sellLeverage=str(leverage)
+    )
+    print(f"Leverage set response: {response}")
+  except Exception as e:
+    print(f"Error setting leverage for {symbol}: {e}")
 
 def get_qty_step(symbol):
   info = session.get_instruments_info(category="linear", symbol=symbol)
   lot_size_filter = info["result"]["list"][0]["lotSizeFilter"]
   step = float(lot_size_filter["qtyStep"])
   min_qty = float(lot_size_filter["minOrderQty"])
-    return step, min_qty
+  return step, min_qty
 
 # Main strategy loop
 def run_bot():
