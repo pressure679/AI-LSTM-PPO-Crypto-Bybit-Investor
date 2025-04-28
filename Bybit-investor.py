@@ -257,7 +257,11 @@ def run_bot():
     except Exception as e:
       print(f"Error: {e}")
       
-    time.sleep(60)  # Sleep for 1 minute
+    # Sleep until the next exact minute
+    now = datetime.utcnow()
+    seconds_to_sleep = 60 - now.second
+    print(f"Sleeping {seconds_to_sleep} seconds until next candle...")
+    time.sleep(seconds_to_sleep)
 
 # Example usage: Set leverage before opening a position
 set_leverage(symbol=symbol, leverage=10)
