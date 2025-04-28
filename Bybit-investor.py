@@ -144,8 +144,12 @@ def run_bot():
     except Exception as e:
       print(f"Error: {e}")
 
-        time.sleep(60)  # Sleep for 1 minute
-
+    now = datetime.utcnow()
+    sleep_time = 60 - now.second
+    if sleep_time == 60:
+        sleep_time = 0  # Edge case: exactly at 00 seconds
+    time.sleep(sleep_time)
+    
 # Example usage
 set_leverage(symbol=symbol, leverage=10)
 run_bot()
