@@ -21,7 +21,7 @@ session = HTTP(api_key="YOUR_API_KEY", api_secret="YOUR_API_SECRET", testnet=Fal
 # Utility functions
 def get_klines(symbol, interval, limit=100):
   res = session.get_kline(category="linear", symbol=symbol, interval=str(interval), limit=limit)
-  return res['result']
+  return res
 
 def ema(data, period):
   k = 2 / (period + 1)
@@ -205,7 +205,7 @@ def run_bot():
   while True:
     try:
       # Fetch recent 1-minute candlesticks
-      klines = get_klines(symbol=symbol, interval=str(interval), limit=100)["result"]
+      klines = get_klines(symbol=symbol, interval=str(interval), limit=100)["result"]["list"]
       closes = [float(c[4]) for c in klines]
       highs = [float(c[2]) for c in klines]
       lows = [float(c[3]) for c in klines]
