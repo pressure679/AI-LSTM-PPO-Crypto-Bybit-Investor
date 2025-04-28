@@ -4,13 +4,11 @@ import requests
 from pybit.unified_trading import HTTP
 
 # Constants
-symbol = "XRPUSDT"
+symbol = "XAUTUSDT"
 interval = 1  # in minutes
-risk_amount = 0.8  # risk per trade as a fraction of balance
+risk_amount = 1.0  # risk per trade as a fraction of balance
 ema_fast_period = 7
 ema_slow_period = 14
-atr_period = 14
-atr_threshold = 0.005  # 0.5% volatility filter threshold
 
 # Auth
 session = HTTP(api_key="YOUR_API_KEY", api_secret="YOUR_API_SECRET", testnet=False)
@@ -26,13 +24,6 @@ def ema(data, period):
   for price in data[1:]:
     ema_val = price * k + ema_val * (1 - k)
   return ema_val
-
-def calculate_atr(highs, lows, closes, period):
-  trs = [
-    max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
-        for i in range(1, len(highs))
-  ]
-    return sum(trs[-period:]) / period
 
 def get_balance():
   res = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")
@@ -115,16 +106,6 @@ def run_bot():
         if current_size > 0:
           # Close previous position first
           close_trade(current_side, current_size)
-          # Wait until the position is closed
-          retries = 10
-          while retries > 0:
-            time.sleep(1)
-            new_side, new_size = get_position()
-            if new_size == 0:
-              break
-            retries -= 1
-            if retries == 0:
-              print("Warning: Position not closed after retries!")
 
         # Now open new position
         balance = get_balance()
