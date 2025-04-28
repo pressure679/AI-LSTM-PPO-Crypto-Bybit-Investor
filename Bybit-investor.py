@@ -101,9 +101,7 @@ def run_bot():
       lows = [float(c[3]) for c in klines]
       ema_fast = ema(closes[-ema_fast_period:], ema_fast_period)
       ema_slow = ema(closes[-ema_slow_period:], ema_slow_period)
-      atr = calculate_atr(highs, lows, closes, atr_period)
       last_price = closes[-1]
-      volatility_ratio = atr / last_price
 
       side = "Buy" if ema_fast > ema_slow else "Sell"
 
