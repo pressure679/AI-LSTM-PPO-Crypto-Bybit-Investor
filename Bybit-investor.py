@@ -11,7 +11,7 @@ ema_fast_period = 7
 ema_slow_period = 14
 
 # Auth
-session = HTTP(api_key="YOUR_API_KEY", api_secret="YOUR_API_SECRET", testnet=False)
+session = HTTP(api_key="wLqYZxlM27F01smJFS", api_secret="tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7", testnet=False)
 
 # Utility functions
 def get_klines(symbol, interval, limit=100):
@@ -84,6 +84,13 @@ def get_qty_step(symbol):
   min_qty = float(lot_size_filter["minOrderQty"])
   return step, min_qty
 
+def wait_until_next_candle(interval_minutes):
+  now = time.time()
+  seconds_per_candle = interval_minutes * 60
+  sleep_seconds = seconds_per_candle - (now % seconds_per_candle)
+  print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
+  time.sleep(sleep_seconds)
+
 # Main strategy loop
 def run_bot():
   while True:
@@ -125,11 +132,8 @@ def run_bot():
     except Exception as e:
       print(f"Error: {e}")
 
-    now = datetime.utcnow()
-    sleep_time = 60 - now.second
-    if sleep_time == 60:
-        sleep_time = 0  # Edge case: exactly at 00 seconds
-    time.sleep(sleep_time)
+    # Wait smartly
+    wait_until_next_candle(interval)
     
 # Example usage
 set_leverage(symbol=symbol, leverage=10)
