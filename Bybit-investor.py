@@ -102,8 +102,8 @@ def run_bot():
       closes = [float(c[4]) for c in klines]
       highs = [float(c[2]) for c in klines]
       lows = [float(c[3]) for c in klines]
-      ema_fast_list = ema(closes[-ema_fast_period:], ema_fast_period)
-      ema_slow_list = ema(closes[-ema_slow_period:], ema_slow_period)
+      ema_fast_list = ema(closes, ema_fast_period)
+      ema_slow_list = ema(closes, ema_slow_period)
       ema_fast = ema_fast_list[-1]
       ema_slow = ema_slow_list[-1]
       last_price = closes[-1]  # We still use the actual last close price for position sizing etc.
