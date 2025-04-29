@@ -20,18 +20,14 @@ def get_klines(symbol, interval, limit=100):
 
 def ema(data, period):
   ema_values = []
-  k = 2 / (period + 1)
-
-  # Start with SMA for first EMA value
-  sma = sum(data[:period]) / period
+  # sma = sum(data[:period]) / period  # initial EMA = SMA
+  sma = sum(data) / len(data)  # initial EMA = SMA
+  ema_values.extend([None] * (period - 1))  # first values undefined
   ema_values.append(sma)
-
-  # Apply EMA formula from the next point
-  for price in data[period:]:
-    ema_prev = ema_values[-1]
-    ema_new = price * k + ema_prev * (1 - k)
-    ema_values.append(ema_new)
-
+    
+  k = 2 / (period + 1)
+  for price in data:
+    ema_values.append(price * k + ema_values[-1] * (1 - k))
   return ema_values
 
 
