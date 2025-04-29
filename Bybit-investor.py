@@ -19,18 +19,25 @@ def get_klines(symbol, interval, limit=100):
   return res
 
 def ema(data, period):
+  ema_values = []
   k = 2 / (period + 1)
-  ema_val = data[0]
-  for price in data[1:]:
-    ema_val = price * k + ema_val * (1 - k)
-  return ema_val
+
+  # Start with SMA for first EMA value
+  sma = sum(data[:period]) / period
+  ema_values.append(sma)
+
+  # Apply EMA formula from the next point
+  for price in data[period:]:
+    ema_prev = ema_values[-1]
+    ema_new = price * k + ema_prev * (1 - k)
+    ema_values.append(ema_new)
+
+  return ema_values
+
 
 def get_balance():
   res = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")
   return float(res["result"]["list"][0]["coin"][0]["walletBalance"])
-
-def get_last_price():
-  return float(session.latest_information_for_symbol(symbol=symbol)["last_price"])
 
 def open_trade(side, qty):
   session.place_order(
@@ -101,7 +108,7 @@ def run_bot():
       lows = [float(c[3]) for c in klines]
       ema_fast = ema(closes[-ema_fast_period:], ema_fast_period)
       ema_slow = ema(closes[-ema_slow_period:], ema_slow_period)
-      last_price = closes[-1]
+      last_price = closes[-1]  # We still use the actual last close price for position sizing etc.
 
       side = "Buy" if ema_fast > ema_slow else "Sell"
 
@@ -111,13 +118,13 @@ def run_bot():
         if current_size > 0:
           # Close previous position first
           close_trade(current_side, current_size)
-
+          
         # Now open new position
         balance = get_balance()
         step, min_qty = get_qty_step(symbol)
         qty = balance * risk_amount / last_price
         qty = math.floor(qty / step) * step
-        
+                
         if qty < min_qty:
           print(f"Qty {qty} too small, skipping.")
           return
@@ -132,6 +139,7 @@ def run_bot():
 
     # Wait smartly
     wait_until_next_candle(interval)
+
     
 # Example usage
 set_leverage(symbol=symbol, leverage=10)
