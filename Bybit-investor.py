@@ -20,7 +20,7 @@ def get_klines(symbol, interval, limit=100):
 
 def ema(data, period):
   ema_values = []
-  sma = sum(data[:period]) / period  # Initial EMA = SMA
+  sma = sum(data) / len(data)  # Initial EMA = SMA
   ema_values.append(sma)
   k = 2 / (period + 1)  # Smoothing constant
   for price in data[period:]:  # Start loop after 'period' values
