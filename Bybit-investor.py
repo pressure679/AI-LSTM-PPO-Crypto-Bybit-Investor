@@ -93,6 +93,8 @@ def wait_until_next_candle(interval_minutes):
 
 # Main strategy loop
 def run_bot():
+  previous_ema_fast = None
+  previous_ema_slow = None
   while True:
     try:
       klines = get_klines(symbol=symbol, interval=str(interval), limit=100)["result"]["list"]
@@ -133,6 +135,8 @@ def run_bot():
 
         open_trade(side, qty)
         print(f"Opened {side} trade for qty {qty}")
+        previous_ema_fast = ema_fast
+        previous_ema_slow = ema_slow
       else:
         print(f"No position change (still in {current_side}). Skipping trade.")
 
