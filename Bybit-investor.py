@@ -20,14 +20,11 @@ def get_klines(symbol, interval, limit=100):
 
 def ema(data, period):
   ema_values = []
-  # sma = sum(data[:period]) / period  # initial EMA = SMA
-  sma = sum(data) / len(data)  # initial EMA = SMA
-  ema_values.extend([None] * (period - 1))  # first values undefined
+  sma = sum(data[:period]) / period  # Initial EMA = SMA
   ema_values.append(sma)
-    
-  k = 2 / (period + 1)
-  for price in data:
-    ema_values.append(price * k + ema_values[-1] * (1 - k))
+  k = 2 / (period + 1)  # Smoothing constant
+  for price in data[period:]:  # Start loop after 'period' values
+    ema_values.append(price * k + ema_values[-1] * (1 - k))  # EMA formula
   return ema_values
 
 
@@ -102,19 +99,13 @@ def run_bot():
       closes = [float(c[4]) for c in klines]
       highs = [float(c[2]) for c in klines]
       lows = [float(c[3]) for c in klines]
-      typical_prices = [(h + l + c) / 3 for h, l, c in zip(highs, lows, closes)]
-      # ema_fast_list = ema_series(typical_prices[-(ema_fast_period + 20):], ema_fast_period)
-      # ema_slow_list = ema_series(typical_prices[-(ema_slow_period + 20):], ema_slow_period)
-      # ema_fast_list = ema(closes[-ema_fast_period:], ema_fast_period)
-      # ema_slow_list = ema(closes[-ema_slow_period:], ema_slow_period)
-      ema_fast_list = ema(closes, ema_fast_period)
-      ema_slow_list = ema(closes, ema_slow_period)
-      # ema_fast = [e for e in ema_fast_list if e][-1]
-      # ema_slow = [e for e in ema_slow_list if e][-1]
-      ema_fast = next(x for x in reversed(ema_fast_list) if x is not None)
-      ema_slow = next(x for x in reversed(ema_slow_list) if x is not None)
-      # ema_fast = ema_fast_list[-1]
-      # ema_slow = ema_slow_list[-1]
+      ema_fast_list = ema(closes[-ema_fast_period:], ema_fast_period)
+      ema_slow_list = ema(closes[-ema_slow_period:], ema_slow_period)
+      ema_fast = ema_fast_list[-1]
+      ema_slow = ema_slow_list[-1]
+
+      side = "Buy" if ema_fast > ema_slow and (previous_ema_fast is None or previous_ema_fast <= previous_ema_slow) else "Sell"
+
       last_price = closes[-1]  # We still use the actual last close price for position sizing etc.
 
       side = "Buy" if ema_fast > ema_slow else "Sell"
