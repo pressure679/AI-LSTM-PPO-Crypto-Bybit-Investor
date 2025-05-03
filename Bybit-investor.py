@@ -11,7 +11,7 @@ ema_fast_period = 7
 ema_slow_period = 14
 
 # Auth
-session = HTTP(api_key="wLqYZxlM27F01smJFS", api_secret="tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7", testnet=False)
+session = HTTP(api_key="", api_secret="", testnet=False)
 
 # Utility functions
 def get_klines(symbol, interval, limit=100):
