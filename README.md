@@ -1,61 +1,94 @@
+# Python Investor
 
-# Bybit Hybrid Scalping Bot
-
-This is a hybrid scalping bot for Bybit, written in Python using the Pybit V5 API. It combines two trading strategies in one:
-
-- **Trend Trading:** Uses moving average crossovers (MA7/MA14) to detect bullish/bearish trends and executes market orders accordingly.
-- **Grid Trading:** When no strong trend is detected, the bot switches to grid trading within a price range. It places layered limit buy/sell orders based on volatility.
+A Python-based crypto futures trading bot designed for Bybit that supports multiple trading strategies such as MACD and ADX trend detection. The bot can trade on Bybit’s testnet or mainnet, with features for automated position management, logging, and balance-aware trade sizing.
 
 ## Features
 
-- **Mainnet Support:** Fully functional on Bybit mainnet.
-- **MA Crossover Trend Strategy:** Trades long or short when a fast MA (7) crosses above or below a slower MA (14).
-- **Grid Trading for Sideways Markets:** Dynamically places grid orders during low-volatility periods.
-- **Volatility-Adaptive Grid Spacing:** Grid size percentage adapts based on recent 10-candle price range.
-- **Automatic Trend/Consolidation Detection:** Uses a 10-candle price range check to switch strategies.
-- **Dynamic Order Size:** Calculates position size based on account balance, risk amount, and entry price.
-- **Grid Order Tracking:** Tracks and manages grid orders separately to prevent accidental cancellation.
-- **Clean Logging:** Logs actions such as strategy mode, order placement, trend detection, and balance.
-
-## Strategy Logic
-
-**Trend Mode:**
-- Triggered when price range over last 10 candles > 1% of current price.
-- Checks MA7 and MA14 crossover to decide long (buy) or short (sell).
-- Cancels grid orders before placing market orders.
-
-**Grid Mode:**
-- Triggered when price range over last 10 candles ≤ 1%.
-- Places staggered buy/sell limit orders above and below current price.
-- Grid size is based on current volatility range.
-- Cancels previous trend orders to avoid overlap.
+- **Multiple strategies:** Currently supports MACD and ADX indicators for trade signals.
+- **Bybit API integration:** Place market orders, get wallet balances, and track positions via the official Bybit V5 API.
+- **Testnet & mainnet support:** Easily switch between Bybit testnet and mainnet environments.
+- **Automatic trade sizing:** Calculates trade quantity based on available USDT balance, using 5% or minimum $5 per trade.
+- **Trade management:** Avoids multiple simultaneous positions; switches orders on signal changes.
+- **Basic logging:** Prints trade entries, warnings, and errors to console with clear messages.
+- **Configurable symbol and parameters:** Customize trading symbol, API keys, and strategy settings in the main script.
 
 ## Requirements
 
-- Python 3.7+
-- `pybit`
-- `pandas`
+- Python 3.8+
+- `pybit` library (Bybit API wrapper)
+- Other dependencies as per `requirements.txt` (if applicable)
 
-Install dependencies:
+## Installation
+
+1. Clone the repository:
 
 ```bash
-pip install pybit pandas
+git clone https://github.com/pressure679/Python-investor.git
+cd Python-investor
 ```
+
+2. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+*If you don’t have a `requirements.txt`, install pybit manually:*
+
+```bash
+pip install pybit
+```
+
+## Setup
+
+1. **Get Bybit API keys:**
+
+- For testing, create API keys on [Bybit Testnet](https://testnet.bybit.com).
+- For live trading, create API keys on [Bybit Mainnet](https://bybit.com).
+
+2. **Configure API keys and settings:**
+
+Edit the main script (e.g., `crypto-bot.py`) and set your API key, secret, and choose the testnet or mainnet endpoint.
+
+Example snippet:
+
+```python
+api_key = "YOUR_API_KEY"
+api_secret = "YOUR_API_SECRET"
+is_testnet = True  # Set to False for mainnet
+
+endpoint = "https://api-testnet.bybit.com" if is_testnet else "https://api.bybit.com"
+session = HTTP(endpoint, api_key=api_key, api_secret=api_secret)
+```
+
+3. **Customize trading parameters:**
+
+- Symbol (e.g., `"XRPUSDT"`)
+- Trade size settings
+- Strategy selection
 
 ## Usage
 
-1. Clone this repo.
-2. Add your Bybit mainnet API keys in the script.
-3. Set your risk amount (`risk_amount = 0.01` for 1% of your balance).
-4. Run:
+Run the bot from the command line:
 
 ```bash
-python scalping_bot.py
+python crypto-bot.py
 ```
+
+The bot will:
+
+- Monitor the market using your selected strategy
+- Enter trades based on signals
+- Manage active positions and update orders when signals change
+- Print trade activity and profit information to the console
 
 ## Notes
 
-- This bot is aggressive and optimized for short timeframes (like 1m).
-- Works best in high volatility or choppy market conditions.
-- Does **not** use martingale.
-- Not financial advice — use at your own risk.
+- This bot is for educational and testing purposes only.
+- Trading crypto futures carries significant risk.
+- Use testnet API keys and funds to familiarize yourself before trading live.
+- Adjust strategy parameters and risk management carefully.
+
+## License
+
+MIT License — see `LICENSE` file for details.
