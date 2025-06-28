@@ -118,28 +118,21 @@ def get_ema_signal(df):
     return None
 
 def get_macd_signal(df):
-    if df is None or df.empty or len(df) < 35:
-        print("[ERROR] Not enough data to compute MACD")
+    macd_line, signal_line, _ = talib.MACD(df['Close'], fastperiod=12, slowperiod=26, signalperiod=9)
+
+    # Ensure enough data
+    if len(macd_line) < 2 or len(signal_line) < 2:
         return None
 
-    df['ema12'] = df['Close'].ewm(span=12, adjust=False).mean()
-    df['ema26'] = df['Close'].ewm(span=26, adjust=False).mean()
-    df['macd'] = df['ema12'] - df['ema26']
-    df['signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+    hist_now = macd_line.iloc[-1] - signal_line.iloc[-1]
+    hist_prev = macd_line.iloc[-2] - signal_line.iloc[-2]
 
-    macd_val = df['macd'].iloc[-1]
-    signal_val = df['signal'].iloc[-1]
-
-    if pd.isna(macd_val) or pd.isna(signal_val):
-        print("[ERROR] MACD or Signal is NaN")
-        return None
-
-    if macd_val > signal_val:
-        return "long"
-    elif macd_val < signal_val:
-        return "short"
+    if hist_now > hist_prev:
+        return "buy"
+    elif hist_now < hist_prev:
+        return "sell"
     else:
-        return "neutral"  # or just keep returning None if you want to skip sideways signals
+        return None
 
 def get_trade_qty():
     wallet = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
