@@ -2,6 +2,7 @@ import time
 import pandas as pd
 from pybit.unified_trading import HTTP
 from datetime import datetime
+from datetime import datetime, timedelta
 
 # Bybit credentials
 api_key = "wLqYZxlM27F01smJFS"
@@ -30,6 +31,24 @@ current_strategy = None
 entry_price = None
 entry_time = None
 
+def wait_for_next_candle(interval):
+    now = datetime.utcnow()
+
+    if interval == "15m":
+        next_minute = (now.minute // 15 + 1) * 15
+        if next_minute == 60:
+            next_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        else:
+            next_time = now.replace(minute=next_minute, second=0, microsecond=0)
+    elif interval == "1h":
+        next_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    else:
+        raise ValueError("Unsupported interval")
+
+    wait_seconds = (next_time - now).total_seconds()
+    print(f"Waiting {int(wait_seconds)}s until next {interval} candle at {next_time.strftime('%H:%M:%S')} UTC")
+    time.sleep(wait_seconds)
+    
 # ---------------------------------------------
 def get_klines_df(symbol, interval_sec, limit=150):
     interval_map = {
@@ -237,51 +256,39 @@ def enter_trade(signal, strategy):
 
 # ---------------------------------------------
 def run_bot():
-    global last_fetch_15m, last_fetch_1h
-
-    # Leverage setting skipped as requested
-    # session.set_leverage(
-    #     category="linear",
-    #     symbol=symbol,
-    #     buyLeverage=str(leverage),
-    #     sellLeverage=str(leverage)
-    # )
-
     while True:
-        now = time.time()
+        # Wait for next full 15m candle (00, 15, 30, 45)
+        wait_for_next_candle("15m")
 
-        # Update 15m data
-        if now - last_fetch_15m >= interval_15m:
-            df_15m = get_klines_df(symbol, interval_15m, limit=150)
-            df_15m['Close'] = df_15m['Close'].astype(float)
-            macd_signal = get_macd_signal(df_15m)
-            last_fetch_15m = now
+        # --- Fetch 15m MACD signal ---
+        df_15m = get_klines_df(symbol, interval_15m, limit=150)
+        df_15m['Close'] = df_15m['Close'].astype(float)
+        macd_signal = get_macd_signal(df_15m)
 
-            if macd_signal:
-                # If already in a trade with MACD, close it before entering
-                if current_strategy == "EMA":
-                    close_all_positions()
-                enter_trade(macd_signal, "MACD")
+        if macd_signal:
+            # If already in a trade with EMA, close it before switching to MACD
+            if current_strategy == "EMA":
+                close_all_positions()
+            enter_trade(macd_signal, "MACD")
 
-        # Update 1h data
-        if now - last_fetch_1h >= interval_1h:
+        # --- Every hour, also fetch ADX + EMA ---
+        now = datetime.utcnow()
+        if now.minute == 0:  # Only run on full hour
             df_1h = get_klines_df(symbol, interval_1h, limit=150)
             df_1h[["High", "Low", "Close"]] = df_1h[["High", "Low", "Close"]].astype(float)
             df_1h = calculate_adx(df_1h)
 
             adx_value = df_1h['ADX'].iloc[-1]
             ema_signal = get_ema_signal(df_1h)
-            last_fetch_1h = now
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ADX: {adx_value:.2f} | MACD Signal: {macd_signal}")
 
-            # if adx_value > 15 and ema_signal:
             if adx_value > 25 and ema_signal:
                 if current_strategy == "MACD":
                     close_all_positions()
                 enter_trade(ema_signal, "EMA")
 
-        time.sleep(5)
-
+        # Small pause before next iteration
+        time.sleep(1)
 
 # ---------------------------------------------
 if __name__ == "__main__":
