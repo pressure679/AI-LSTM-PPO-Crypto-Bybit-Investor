@@ -134,6 +134,18 @@ def get_macd_signal(df):
     else:
         return None
 
+def get_qty_step(symbol):
+    info = session.get_instruments_info(category="linear", symbol=symbol)
+    lot_size_filter = info["result"]["list"][0]["lotSizeFilter"]
+    return float(lot_size_filter["qtyStep"]), float(lot_size_filter["minOrderQty"])
+
+def get_balance():
+    balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
+    for item in balance_data:
+        if item["coin"] == "USDT":
+            return float(item["availableToTrade"])
+    return 0.0
+
 def get_trade_qty():
     wallet = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
     # wallet = session.get_wallet_balance(accountType="CONTRACT")["result"]["list"]
@@ -177,76 +189,65 @@ def close_all_positions():
 
 import time  # make sure you have this import at the top of your script
 
+def get_balance():
+    balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
+    for item in balance_data:
+        if item["coin"] == "USDT":
+            return float(item["availableToTrade"])
+    return 0.0
+
 def enter_trade(signal, strategy):
     global active_position, current_strategy
+
+    if active_position:
+        print("Already in a trade. Ignoring signal.")
+        return
 
     if signal is None:
         print(f"[WARN] Tried to enter trade with None signal using {strategy}. Skipping.")
         return
 
-    signal_cap = signal.capitalize()  # "buy" -> "Buy", "sell" -> "Sell"
-
-    # If already in a position but signal differs, close existing before entering new
-    if active_position and active_position != signal_cap:
-        # Close existing position first
-        side_to_close = "Sell" if active_position == "Buy" else "Buy"
-        print(f"Closing existing {active_position} position before entering new {signal_cap} position.")
-        session.place_order(
-            category="linear",
-            symbol=symbol,
-            side=side_to_close,
-            order_type="Market",
-            qty=quantity,  # Quantity will be calculated below, but you can set or reuse here if needed
-            reduce_only=True
-        )
-        active_position = None
-        current_strategy = None
-
-        time.sleep(1)  # wait 1 second to ensure order processing
-
-    # If already in the same position, do nothing
-    if active_position == signal_cap:
-        print(f"Already in a {signal_cap} position. No action taken.")
-        return
-
-    # Fetch wallet balance
-    balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
-    usdt_balance = 0
-    for item in balance_data:
-        if item["coin"] == "USDT":
-            usdt_balance = float(item["availableToTrade"])
-            break
-
-    if usdt_balance == 0:
+    # Get balance
+    balance = get_balance()
+    if balance == 0:
         print("[ERROR] USDT balance is 0")
         return
 
-    # Fetch market price
-    price_data = session.get_ticker(category="linear", symbol=symbol)["result"]
-    mark_price = float(price_data["markPrice"])
-
-    # Calculate 5% or $5, whichever is higher
-    trade_value = max(usdt_balance * 0.05, 5)
-    if trade_value > usdt_balance:
-        print(f"[WARN] Not enough balance for minimum trade. Available: ${usdt_balance:.2f}, Needed: ${trade_value:.2f}")
+    # Calculate trade value (5% of balance or $5 minimum)
+    trade_value = max(balance * 0.05, 5)
+    if trade_value > balance:
+        print(f"[WARN] Not enough balance for minimum trade. Available: ${balance:.2f}, Needed: ${trade_value:.2f}")
         return
 
-    # Calculate quantity, e.g., XRP allows 2 decimal places
-    quantity = round(trade_value / mark_price, 2)
+    # Get current price
+    price_data = session.get_ticker(category="linear", symbol=symbol)["result"]
+    last_price = float(price_data["markPrice"])
 
-    print(f"Entering {signal_cap} trade using {strategy} strategy with qty {quantity} (~${trade_value:.2f})")
+    # Get quantity step and minimum quantity
+    step, min_qty = get_qty_step(symbol)
 
+    # Calculate and round quantity
+    qty = trade_value / last_price
+    qty = math.floor(qty / step) * step
+
+    if qty < min_qty:
+        print(f"[WARN] Calculated qty {qty} is below min order qty {min_qty}")
+        return
+
+    print(f"Entering {signal.upper()} trade using {strategy} strategy with qty {qty:.4f} (~${trade_value:.2f})")
+
+    # Place market order
     session.place_order(
         category="linear",
         symbol=symbol,
-        side=signal_cap,
+        side=signal.capitalize(),
         order_type="Market",
-        qty=quantity
+        qty=qty
     )
 
-    active_position = signal_cap
+    # Track position
+    active_position = signal.capitalize()
     current_strategy = strategy
-
 # ---------------------------------------------
 def run_bot():
     while True:
