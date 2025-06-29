@@ -181,8 +181,6 @@ def close_all_positions():
         entry_price = None
         entry_time = None
 
-import time  # make sure you have this import at the top of your script
-
 def get_balance():
     balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
     # for item in balance_data:
