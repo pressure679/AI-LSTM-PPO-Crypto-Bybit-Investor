@@ -272,6 +272,7 @@ def run_bot():
                 if hist_range < mark_price * 0.02:
                     print("[INFO] Histogram range too small (<2% of price). Using 1m MACD instead.")
                     # macd_signal, _ = get_macd_signal(df_1m)
+                    close_all_positions()
                     time.sleep(5)
                     continue
 
