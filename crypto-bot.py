@@ -108,8 +108,8 @@ def calculate_adx(df, period=14):
 
 # ---------------------------------------------
 def get_ema_signal(df):
-    fast = df["Close"].ewm(span=5).mean()
-    slow = df["Close"].ewm(span=15).mean()
+    fast = df["Close"].ewm(span=7).mean()
+    slow = df["Close"].ewm(span=14).mean()
 
     if fast.iloc[-2] < slow.iloc[-2] and fast.iloc[-1] > slow.iloc[-1]:
         return "buy"
