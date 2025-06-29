@@ -135,10 +135,11 @@ def get_qty_step(symbol):
 
 def get_balance():
     balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
-    for item in balance_data:
-        if item["coin"] == "USDT":
-            return float(item["availableToTrade"])
-    return 0.0
+    # for item in balance_data:
+    #     if item["coin"] == "USDT":
+    #         return float(item["availableToTrade"])
+    # return 0.0
+    return float(balance_data[0]["totalEquity"])
 
 def get_trade_qty():
     wallet = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
@@ -185,10 +186,11 @@ import time  # make sure you have this import at the top of your script
 
 def get_balance():
     balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
-    for item in balance_data:
-        if item["coin"] == "USDT":
-            return float(item["availableToTrade"])
-    return 0.0
+    # for item in balance_data:
+    #     if item["coin"] == "USDT":
+    #         return float(item["availableToTrade"])
+    # return 0.0
+    return float(balance_data[0]["totalEquity"])
 
 def enter_trade(signal, strategy):
     global active_position, current_strategy
@@ -270,7 +272,7 @@ def run_bot():
 
             if adx_value <= 25 and macd_signal:
                 if hist_range < mark_price * 0.02:
-                    print("[INFO] Histogram range too small (<2% of price). Using 1m MACD instead.")
+                    print("[INFO] Histogram range too small (<2% of price).")
                     # macd_signal, _ = get_macd_signal(df_1m)
                     close_all_positions()
                     time.sleep(5)
