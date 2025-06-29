@@ -31,6 +31,8 @@ current_strategy = None
 entry_price = None
 entry_time = None
 
+adx_value
+
 def wait_for_next_candle(interval):
     now = datetime.utcnow()
 
@@ -242,48 +244,60 @@ def enter_trade(signal, strategy):
     current_strategy = strategy
 # ---------------------------------------------
 def run_bot():
+    # global last_fetch_15m, last_fetch_1h, last_fetch_1m
+    global last_fetch_15m, last_fetch_1h, adx_value
+
+    df_1m = None  # cache 1m df
+
     while True:
-        # Wait for next full 15m candle (00, 15, 30, 45)
-        wait_for_next_candle("15m")
+        now = time.time()
 
-        # --- Fetch 15m MACD signal ---
-        df_15m = get_klines_df(symbol, interval_15m, limit=150)
-        df_15m['Close'] = df_15m['Close'].astype(float)
-        # Inside run_bot() or wherever you handle MACD logic
-        macd_signal, histogram_values = get_macd_signal(df_15m)
+        # Update 1m data every minute
+        # if now - last_fetch_1m >= 60:
+        #     df_1m = get_klines_df(symbol, "1", limit=150)
+        #     df_1m['Close'] = df_1m['Close'].astype(float)
+        #     last_fetch_1m = now
 
-        if macd_signal:
-            hist_range = max(histogram_values) - min(histogram_values)
+        # Update 15m data every 15 minutes
+        if now - last_fetch_15m >= interval_15m:
+            df_15m = get_klines_df(symbol, interval_15m, limit=150)
+            df_15m['Close'] = df_15m['Close'].astype(float)
+            macd_signal, histogram_values = get_macd_signal(df_15m)
+            last_fetch_15m = now
+
             mark_price = float(session.get_ticker(category="linear", symbol=symbol)["result"]["markPrice"])
+            hist_range = max(histogram_values) - min(histogram_values)
 
-            if hist_range / mark_price < 0.05:
-                print(f"[INFO] Skipping trade. Histogram range {hist_range:.5f} is below 5% of price ${mark_price:.2f}")
-            else:
-                if current_strategy == "EMA":
-                    close_all_positions()
-                enter_trade(macd_signal, "MACD")
-                current_strategy = "MACD"
+            if adx_value <= 25 and macd_signal:
+                if hist_range < mark_price * 0.02:
+                    print("[INFO] Histogram range too small (<2% of price). Using 1m MACD instead.")
+                    # macd_signal, _ = get_macd_signal(df_1m)
+                    time.sleep(5)
+                    continue
 
+                if macd_signal:
+                    if current_strategy == "EMA":
+                        close_all_positions()
+                    enter_trade(macd_signal, "MACD")
 
-        # --- Every hour, also fetch ADX + EMA ---
-        now = datetime.utcnow()
-        if now.minute == 0:  # Only run on full hour
+        # Update 1h data every hour
+        if now - last_fetch_1h >= interval_1h:
             df_1h = get_klines_df(symbol, interval_1h, limit=150)
             df_1h[["High", "Low", "Close"]] = df_1h[["High", "Low", "Close"]].astype(float)
             df_1h = calculate_adx(df_1h)
 
             adx_value = df_1h['ADX'].iloc[-1]
             ema_signal = get_ema_signal(df_1h)
+            last_fetch_1h = now
+
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ADX: {adx_value:.2f} | MACD Signal: {macd_signal}")
 
             if adx_value > 25 and ema_signal:
                 if current_strategy == "MACD":
                     close_all_positions()
                 enter_trade(ema_signal, "EMA")
-                current_strategy = "EMA"
 
-        # Small pause before next iteration
-        time.sleep(1)
+        time.sleep(5)
 
 # ---------------------------------------------
 if __name__ == "__main__":
