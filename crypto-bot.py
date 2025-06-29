@@ -1,7 +1,6 @@
 import time
 import pandas as pd
 from pybit.unified_trading import HTTP
-from datetime import datetime
 from datetime import datetime, timedelta
 
 # Bybit credentials
