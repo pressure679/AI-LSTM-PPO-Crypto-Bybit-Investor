@@ -267,7 +267,7 @@ def run_bot():
             mark_price = float(session.get_ticker(category="linear", symbol=symbol)["result"]["markPrice"])
             hist_range = max(histogram_values) - min(histogram_values)
 
-            if adx_value <= 25 and macd_signal:
+            if adx_value < 25 and macd_signal:
                 if hist_range < mark_price * 0.02:
                     print("[INFO] Histogram range too small (<2% of price).")
                     # macd_signal, _ = get_macd_signal(df_1m)
@@ -292,7 +292,7 @@ def run_bot():
 
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ADX: {adx_value:.2f} | MACD Signal: {macd_signal}")
 
-            if adx_value > 25 and ema_signal:
+            if adx_value >= 25 and ema_signal:
                 if current_strategy == "MACD":
                     close_all_positions()
                 enter_trade(ema_signal, "EMA")
