@@ -4,8 +4,8 @@ from pybit.unified_trading import HTTP
 from datetime import datetime, timedelta
 
 # Bybit credentials
-api_key = "wLqYZxlM27F01smJFS"
-api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
+api_key = ""
+api_secret = ""
 
 session = HTTP(
     api_key=api_key,
