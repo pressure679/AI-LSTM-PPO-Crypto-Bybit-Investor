@@ -118,21 +118,13 @@ def get_ema_signal(df):
     return None
 
 def get_macd_signal(df):
-    macd_line, signal_line, _ = talib.MACD(df['Close'], fastperiod=12, slowperiod=26, signalperiod=9)
-
-    # Ensure enough data
-    if len(macd_line) < 2 or len(signal_line) < 2:
-        return None
-
-    hist_now = macd_line.iloc[-1] - signal_line.iloc[-1]
-    hist_prev = macd_line.iloc[-2] - signal_line.iloc[-2]
-
-    if hist_now > hist_prev:
-        return "buy"
-    elif hist_now < hist_prev:
-        return "sell"
-    else:
-        return None
+    macd_line, signal_line, histogram = talib.MACD(df['Close'], fastperiod=12, slowperiod=26, signalperiod=9)
+    
+    if histogram.iloc[-1] > histogram.iloc[-2]:
+        return "Buy", histogram[-20:].tolist()  # Last 20 for range check
+    elif histogram.iloc[-1] < histogram.iloc[-2]:
+        return "Sell", histogram[-20:].tolist()
+    return None, histogram[-20:].tolist()
 
 def get_qty_step(symbol):
     info = session.get_instruments_info(category="linear", symbol=symbol)
@@ -257,13 +249,21 @@ def run_bot():
         # --- Fetch 15m MACD signal ---
         df_15m = get_klines_df(symbol, interval_15m, limit=150)
         df_15m['Close'] = df_15m['Close'].astype(float)
-        macd_signal = get_macd_signal(df_15m)
+        # Inside run_bot() or wherever you handle MACD logic
+        macd_signal, histogram_values = get_macd_signal(df_15m)
 
         if macd_signal:
-            # If already in a trade with EMA, close it before switching to MACD
-            if current_strategy == "EMA":
-                close_all_positions()
-            enter_trade(macd_signal, "MACD")
+            hist_range = max(histogram_values) - min(histogram_values)
+            mark_price = float(session.get_ticker(category="linear", symbol=symbol)["result"]["markPrice"])
+
+            if hist_range / mark_price < 0.05:
+                print(f"[INFO] Skipping trade. Histogram range {hist_range:.5f} is below 5% of price ${mark_price:.2f}")
+            else:
+                if current_strategy == "EMA":
+                    close_all_positions()
+                enter_trade(macd_signal, "MACD")
+                current_strategy = "MACD"
+
 
         # --- Every hour, also fetch ADX + EMA ---
         now = datetime.utcnow()
@@ -280,6 +280,7 @@ def run_bot():
                 if current_strategy == "MACD":
                     close_all_positions()
                 enter_trade(ema_signal, "EMA")
+                current_strategy = "EMA"
 
         # Small pause before next iteration
         time.sleep(1)
