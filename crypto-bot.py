@@ -123,10 +123,10 @@ def get_macd_signal(df):
     macd_line, signal_line, histogram = talib.MACD(df['Close'], fastperiod=12, slowperiod=26, signalperiod=9)
     
     if histogram.iloc[-1] > histogram.iloc[-2]:
-        return "Buy", histogram[-20:].tolist()  # Last 20 for range check
+        return "Buy", histogram[-10:].tolist()  # Last 20 for range check
     elif histogram.iloc[-1] < histogram.iloc[-2]:
-        return "Sell", histogram[-20:].tolist()
-    return None, histogram[-20:].tolist()
+        return "Sell", histogram[-10:].tolist()
+    return None, histogram[-10:].tolist()
 
 def get_qty_step(symbol):
     info = session.get_instruments_info(category="linear", symbol=symbol)
