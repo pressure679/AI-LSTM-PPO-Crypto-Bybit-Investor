@@ -197,7 +197,7 @@ def enter_trade(signal, strategy, df):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] Entering {strategy} trade | Signal: {signal} | Qty: {qty:.4f} | Leverage: {leverage} | Risk Amount: ${risk_amount:.2f}")
 
     side = "Buy" if signal == "buy" else "Sell"
-    # session.place_order(category="linear", symbol=symbol, side=side, order_type="Market", qty=qty, leverage=leverage)
+    session.place_order(category="linear", symbol=symbol, side=side, order_type="Market", qty=qty, leverage=leverage)
 
     active_position = "Buy" if signal == "buy" else "Sell"
     current_strategy = strategy
