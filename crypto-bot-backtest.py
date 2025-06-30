@@ -126,9 +126,9 @@ def get_ema_signal(df, fast=12, slow=26):
     df['EMA_fast'] = df['Close'].ewm(span=fast, adjust=False).mean()
     df['EMA_slow'] = df['Close'].ewm(span=slow, adjust=False).mean()
     if df['EMA_fast'].iloc[-2] < df['EMA_slow'].iloc[-2] and df['EMA_fast'].iloc[-1] > df['EMA_slow'].iloc[-1]:
-        return "Buy"
+        return "buy"
     elif df['EMA_fast'].iloc[-2] > df['EMA_slow'].iloc[-2] and df['EMA_fast'].iloc[-1] < df['EMA_slow'].iloc[-1]:
-        return "Sell"
+        return "sell"
     else:
         return None
 
