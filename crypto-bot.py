@@ -11,6 +11,7 @@ api_secret = "YOUR_API_SECRET"
 symbol = "BTCUSDT"
 interval_15m = 15 * 60
 interval_1h = 60 * 60
+max_risk_percentage = 0.35
 
 # Initialize session
 session = HTTP(
@@ -111,7 +112,29 @@ def get_qty_step(symbol):
     return 0.001, 0.001
 
 def get_trade_qty():
-    return 0.01  # placeholder, adjust your qty logic
+    wallet = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
+    usdt_balance = float(wallet[0]["totalEquity"])
+    if usdt_balance < 5:
+        return 0  # or whatever fallback you want if balance too low
+
+    # Calculate desired trade amount (5% or $5 minimum)
+    desired_usd_amount = max(usdt_balance * 0.05, 5)
+
+    # Cap desired amount to max_risk_pct * balance
+    max_allowed_usd = usdt_balance * max_risk_pct
+    trade_usd_amount = min(desired_usd_amount, max_allowed_usd)
+
+    price = float(session.get_ticker(category="linear", symbol=symbol)["result"]["list"][0]["lastPrice"])
+    raw_qty = trade_usd_amount / price
+
+    step, min_qty = get_qty_step(symbol)
+    qty = math.floor(raw_qty / step) * step
+    qty = round(qty, 8)  # round for precision
+
+    if qty < min_qty:
+        qty = min_qty
+
+    return qty
 
 def close_all_positions():
     global active_position, current_strategy, entry_price, entry_time
