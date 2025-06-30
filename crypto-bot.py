@@ -1,157 +1,118 @@
 import time
+import math
+from datetime import datetime
+import requests
 import pandas as pd
-from pybit.unified_trading import HTTP
-from datetime import datetime, timedelta
+from pybit import HTTP  # pip install pybit
 
-# Bybit credentials
-api_key = ""
-api_secret = ""
+# === SETUP ===
+api_key = "YOUR_API_KEY"
+api_secret = "YOUR_API_SECRET"
+symbol = "BTCUSDT"
+interval_15m = 15 * 60
+interval_1h = 60 * 60
 
+# Initialize session
 session = HTTP(
     api_key=api_key,
     api_secret=api_secret,
     recv_window=5000,
-    timeout=30  # Increased timeout
-    # testnet=True
+    timeout=30
+    # testnet=True  # uncomment if needed
 )
-symbol = "XRPUSDT"
-interval_15m = 900   # 15 minutes in seconds
-interval_1h = 3600   # 1 hour in seconds
-leverage = 10
 
-# For tracking last fetched times
+# Global variables
 last_fetch_15m = 0
 last_fetch_1h = 0
-
-# Current trade status
-active_position = None
 current_strategy = None
-
+active_position = None
 entry_price = None
 entry_time = None
+peak_balance = 0
 
-adx_value
 
-def wait_for_next_candle(interval):
-    now = datetime.utcnow()
+# === UTILITY FUNCTIONS ===
 
-    if interval == "15m":
-        next_minute = (now.minute // 15 + 1) * 15
-        if next_minute == 60:
-            next_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-        else:
-            next_time = now.replace(minute=next_minute, second=0, microsecond=0)
-    elif interval == "1h":
-        next_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    else:
-        raise ValueError("Unsupported interval")
-
-    wait_seconds = (next_time - now).total_seconds()
-    print(f"Waiting {int(wait_seconds)}s until next {interval} candle at {next_time.strftime('%H:%M:%S')} UTC")
-    time.sleep(wait_seconds)
-    
-# ---------------------------------------------
 def get_klines_df(symbol, interval_sec, limit=150):
     interval_map = {
         60: "1",
-        180: "3",
-        300: "5",
         900: "15",
-        1800: "30",
-        3600: "60",
-        14400: "240",
-        86400: "D"
+        3600: "60"
     }
-
-    candles = session.get_kline(
-        category="linear",
-        symbol=symbol,
-        interval=interval_map[interval_sec],
-        limit=limit
-    )["result"]["list"]
-
-    df = pd.DataFrame(candles)
-    # df.columns = ["timestamp", "Open", "High", "Low", "Close", "Volume", "turnover", "confirm", "cross_seq", "timestamp_e", "trade_num", "taker_base_vol"]
-    df.columns = ["timestamp", "Open", "High", "Low", "Close", "Volume", "turnover"]
-    df = df[["timestamp", "Open", "High", "Low", "Close", "Volume"]]
-    df = df.astype(float)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit='ms')
+    interval = interval_map[interval_sec]
+    url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}"
+    response = requests.get(url)
+    klines = response.json()['result']['list']
+    df = pd.DataFrame(klines, columns=["Timestamp", "Open", "High", "Low", "Close", "Volume", "Turnover"])
+    df[["Open", "High", "Low", "Close", "Volume"]] = df[["Open", "High", "Low", "Close", "Volume"]].astype(float)
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
     return df
 
-# ---------------------------------------------
+def get_macd_signal(df):
+    short_ema = df['Close'].ewm(span=12, adjust=False).mean()
+    long_ema = df['Close'].ewm(span=26, adjust=False).mean()
+    macd = short_ema - long_ema
+    signal = macd.ewm(span=9, adjust=False).mean()
+    histogram = macd - signal
+
+    if histogram.iloc[-1] > histogram.iloc[-2] > 0:
+        return "buy"
+    elif histogram.iloc[-1] < histogram.iloc[-2] < 0:
+        return "sell"
+    return None
+
+def get_ema_signal(df):
+    ema_short = df['Close'].ewm(span=9, adjust=False).mean()
+    ema_long = df['Close'].ewm(span=21, adjust=False).mean()
+    if ema_short.iloc[-2] < ema_long.iloc[-2] and ema_short.iloc[-1] > ema_long.iloc[-1]:
+        return "buy"
+    elif ema_short.iloc[-2] > ema_long.iloc[-2] and ema_short.iloc[-1] < ema_long.iloc[-1]:
+        return "sell"
+    return None
+
 def calculate_adx(df, period=14):
     high = df['High']
     low = df['Low']
     close = df['Close']
 
     plus_dm = high.diff()
-    minus_dm = low.shift() - low
-
-    plus_dm[plus_dm < 0] = 0
-    minus_dm[minus_dm < 0] = 0
+    minus_dm = low.diff().abs()
 
     tr1 = high - low
     tr2 = (high - close.shift()).abs()
     tr3 = (low - close.shift()).abs()
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
 
-    atr = tr.ewm(alpha=1/period, adjust=False).mean()
-    plus_di = 100 * (plus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
-    minus_di = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+    atr = tr.rolling(window=period).mean()
 
-    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
-    adx = dx.ewm(alpha=1/period, adjust=False).mean()
+    plus_di = 100 * (plus_dm.rolling(window=period).mean() / atr)
+    minus_di = 100 * (minus_dm.rolling(window=period).mean() / atr)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    adx = dx.rolling(window=period).mean()
 
-    df["PlusDI"] = plus_di
-    df["MinusDI"] = minus_di
-    df["ADX"] = adx
+    df['ADX'] = adx
     return df
-
-# ---------------------------------------------
-def get_ema_signal(df):
-    fast = df["Close"].ewm(span=7).mean()
-    slow = df["Close"].ewm(span=14).mean()
-
-    if fast.iloc[-2] < slow.iloc[-2] and fast.iloc[-1] > slow.iloc[-1]:
-        return "buy"
-    elif fast.iloc[-2] > slow.iloc[-2] and fast.iloc[-1] < slow.iloc[-1]:
-        return "sell"
-    return None
-
-def get_macd_signal(df):
-    macd_line, signal_line, histogram = talib.MACD(df['Close'], fastperiod=12, slowperiod=26, signalperiod=9)
-    
-    if histogram.iloc[-1] > histogram.iloc[-2]:
-        return "Buy", histogram[-10:].tolist()  # Last 20 for range check
-    elif histogram.iloc[-1] < histogram.iloc[-2]:
-        return "Sell", histogram[-10:].tolist()
-    return None, histogram[-10:].tolist()
-
-def get_qty_step(symbol):
-    info = session.get_instruments_info(category="linear", symbol=symbol)
-    lot_size_filter = info["result"]["list"][0]["lotSizeFilter"]
-    return float(lot_size_filter["qtyStep"]), float(lot_size_filter["minOrderQty"])
 
 def get_balance():
     balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
-    # for item in balance_data:
-    #     if item["coin"] == "USDT":
-    #         return float(item["availableToTrade"])
-    # return 0.0
     return float(balance_data[0]["totalEquity"])
 
-def get_trade_qty():
-    wallet = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
-    # wallet = session.get_wallet_balance(accountType="CONTRACT")["result"]["list"]
-    usdt_balance = float(wallet[0]["totalEquity"])
-    if usdt_balance < 5:
-        return usdt_balance
-    usd_amount = max(usdt_balance * 0.05, 5)  # 5% or $5 minimum
-    price = float(session.get_ticker(category="linear", symbol=symbol)["result"]["list"][0]["lastPrice"])
-    qty = round(usd_amount / price, 3)
-    return qty
+def get_mark_price(symbol):
+    price_data = session.get_ticker(category="linear", symbol=symbol)["result"]["list"][0]
+    return float(price_data["lastPrice"])
 
-# ---------------------------------------------
+def get_qty_step(symbol):
+    info = session.get_symbols()
+    for item in info['result']:
+        if item['name'] == symbol:
+            step = float(item['lotSizeFilter']['qtyStep'])
+            min_qty = float(item['lotSizeFilter']['minOrderQty'])
+            return step, min_qty
+    return 0.001, 0.001
+
+def get_trade_qty():
+    return 0.01  # placeholder, adjust your qty logic
+
 def close_all_positions():
     global active_position, current_strategy, entry_price, entry_time
 
@@ -159,146 +120,94 @@ def close_all_positions():
         side = "Sell" if active_position == "Buy" else "Buy"
         print(f"Closing {active_position} position")
 
-        # Get exit price
         price_data = session.get_ticker(category="linear", symbol=symbol)["result"]["list"][0]
         exit_price = float(price_data["lastPrice"])
         exit_time = datetime.now()
 
-        # Place close order
         qty = get_trade_qty()
         session.place_order(category="linear", symbol=symbol, side=side, order_type="Market", qty=qty, reduce_only=True)
 
-        # Calculate profit (approximate, not accounting for fees/slippage)
         direction = 1 if active_position == "Buy" else -1
         pnl = (exit_price - entry_price) * qty * direction
         duration = (exit_time - entry_time).total_seconds() / 60  # minutes
 
         print(f"[TRADE CLOSED] {active_position} | Entry: {entry_price:.4f} | Exit: {exit_price:.4f} | PnL: ${pnl:.2f} | Duration: {duration:.1f} min")
 
-        # Reset state
         active_position = None
         current_strategy = None
         entry_price = None
         entry_time = None
 
-def get_balance():
-    balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
-    # for item in balance_data:
-    #     if item["coin"] == "USDT":
-    #         return float(item["availableToTrade"])
-    # return 0.0
-    return float(balance_data[0]["totalEquity"])
+def enter_trade(signal, strategy, df):
+    global current_strategy, peak_balance, active_position, entry_price, entry_time
 
-def enter_trade(signal, strategy):
-    global active_position, current_strategy
+    mark_price = get_mark_price(symbol)
+    min_price = df["Low"].iloc[-10:].min()
+    max_price = df["High"].iloc[-10:].max()
+    range_pct = (max_price - min_price) / mark_price
 
-    if active_position:
-        print("Already in a trade. Ignoring signal.")
+    if range_pct < 0.015:
+        print("[INFO] Market range is too small (<1.5%), skipping trade.")
         return
 
-    if signal is None:
-        print(f"[WARN] Tried to enter trade with None signal using {strategy}. Skipping.")
-        return
-
-    # Get balance
     balance = get_balance()
-    if balance == 0:
-        print("[ERROR] USDT balance is 0")
-        return
+    if balance > peak_balance:
+        peak_balance = balance
 
-    # Calculate trade value (5% of balance or $5 minimum)
-    trade_value = max(balance * 0.05, 5)
-    if trade_value > balance:
-        print(f"[WARN] Not enough balance for minimum trade. Available: ${balance:.2f}, Needed: ${trade_value:.2f}")
-        return
+    target_profit = peak_balance * 0.02
+    expected_gain_pct = 0.3
+    estimated_range_pct = range_pct * 3
 
-    # Get current price
-    price_data = session.get_ticker(category="linear", symbol=symbol)["result"]
-    last_price = float(price_data["markPrice"])
+    leverage = min(75, max(1, math.floor((target_profit / balance) / estimated_range_pct)))
 
-    # Get quantity step and minimum quantity
+    max_risk_pct = 0.35
+    risk_pct = min(max_risk_pct, max(target_profit / (balance * expected_gain_pct), 0.05))
+    risk_amount = balance * risk_pct
+
     step, min_qty = get_qty_step(symbol)
-
-    # Calculate and round quantity
-    qty = trade_value / last_price
+    qty = risk_amount * leverage / mark_price
     qty = math.floor(qty / step) * step
-
     if qty < min_qty:
-        print(f"[WARN] Calculated qty {qty} is below min order qty {min_qty}")
+        print(f"[WARNING] Calculated quantity {qty} is below minimum {min_qty}, skipping trade.")
         return
 
-    print(f"Entering {signal.upper()} trade using {strategy} strategy with qty {qty:.4f} (~${trade_value:.2f})")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] Entering {strategy} trade | Signal: {signal} | Qty: {qty:.4f} | Leverage: {leverage} | Risk Amount: ${risk_amount:.2f}")
 
-    # Place market order
-    session.place_order(
-        category="linear",
-        symbol=symbol,
-        side=signal.capitalize(),
-        order_type="Market",
-        qty=qty
-    )
+    side = "Buy" if signal == "buy" else "Sell"
+    # session.place_order(category="linear", symbol=symbol, side=side, order_type="Market", qty=qty, leverage=leverage)
 
-    # Track position
-    active_position = signal.capitalize()
+    active_position = "Buy" if signal == "buy" else "Sell"
     current_strategy = strategy
-# ---------------------------------------------
-def run_bot():
-    # global last_fetch_15m, last_fetch_1h, last_fetch_1m
-    global last_fetch_15m, last_fetch_1h, adx_value
+    entry_price = mark_price
+    entry_time = datetime.now()
 
-    df_1m = None  # cache 1m df
+def run_bot():
+    global last_fetch_15m, last_fetch_1h, current_strategy
 
     while True:
         now = time.time()
 
-        # Update 1m data every minute
-        # if now - last_fetch_1m >= 60:
-        #     df_1m = get_klines_df(symbol, "1", limit=150)
-        #     df_1m['Close'] = df_1m['Close'].astype(float)
-        #     last_fetch_1m = now
-
-        # Update 15m data every 15 minutes
         if now - last_fetch_15m >= interval_15m:
             df_15m = get_klines_df(symbol, interval_15m, limit=150)
-            df_15m['Close'] = df_15m['Close'].astype(float)
-            macd_signal, histogram_values = get_macd_signal(df_15m)
+            macd_signal = get_macd_signal(df_15m)
             last_fetch_15m = now
 
-            mark_price = float(session.get_ticker(category="linear", symbol=symbol)["result"]["markPrice"])
-            hist_range = max(histogram_values) - min(histogram_values)
+            mark_price = get_mark_price(symbol)
+            if macd_signal and current_strategy != "EMA":
+                df_1h = get_klines_df(symbol, interval_1h, limit=150)
+                df_1h = calculate_adx(df_1h)
+                adx_value = df_1h['ADX'].iloc[-1]
 
-            if adx_value < 25 and macd_signal:
-                if hist_range < mark_price * 0.02:
-                    print("[INFO] Histogram range too small (<2% of price).")
-                    # macd_signal, _ = get_macd_signal(df_1m)
+                if adx_value < 25 and macd_signal:
                     close_all_positions()
-                    time.sleep(5)
-                    continue
+                    enter_trade(macd_signal, "MACD", df_15m)
 
-                if macd_signal:
-                    if current_strategy == "EMA":
-                        close_all_positions()
-                    enter_trade(macd_signal, "MACD")
-
-        # Update 1h data every hour
         if now - last_fetch_1h >= interval_1h:
             df_1h = get_klines_df(symbol, interval_1h, limit=150)
-            df_1h[["High", "Low", "Close"]] = df_1h[["High", "Low", "Close"]].astype(float)
             df_1h = calculate_adx(df_1h)
 
             adx_value = df_1h['ADX'].iloc[-1]
             ema_signal = get_ema_signal(df_1h)
             last_fetch_1h = now
 
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ADX: {adx_value:.2f} | MACD Signal: {macd_signal}")
-
-            if adx_value >= 25 and ema_signal:
-                if current_strategy == "MACD":
-                    close_all_positions()
-                enter_trade(ema_signal, "EMA")
-
-        time.sleep(5)
-
-# ---------------------------------------------
-if __name__ == "__main__":
-    run_bot()
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ADX: {adx_value:.2f} | EMA Signal
