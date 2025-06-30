@@ -3,11 +3,12 @@ import math
 import time
 from datetime import datetime, timedelta
 import os
+from io import StringIO
 
 # --- Configuration ---
 symbol = "XRPUSD"
 csv_path = "/mnt/chromeos/removable/SD Card/Linux-shared-files/crypto and currency pairs/XRPUSD_1m_Binance.csv"
-max_file_mb = 10  # Adjust how many MB to load from CSV file (e.g. last 10 MB)
+max_file_mb = 25  # Adjust how many MB to load from CSV file (e.g. last 10 MB)
 
 # --- Globals ---
 active_position = None
@@ -28,20 +29,46 @@ last_week_print = None
 last_month_print = None
 
 # --- Helpers to read last N MB from CSV file ---
-def read_last_n_mb_of_csv(filepath, n_mb):
-    filesize = os.path.getsize(filepath)
-    to_read = min(filesize, n_mb * 1024 * 1024)
+def read_last_n_mb_csv(filepath, n_mb=10):
+    """
+    Reads the last n_mb megabytes from a CSV file and returns a pandas DataFrame.
+    Ensures it starts reading from the beginning of a line to avoid broken CSV rows.
+
+    Args:
+        filepath (str): Path to the CSV file.
+        n_mb (int): Number of megabytes to read from the end of the file.
+
+    Returns:
+        pd.DataFrame: DataFrame containing the read CSV rows.
+    """
+
+    n_bytes = n_mb * 1024 * 1024  # Convert MB to bytes
     with open(filepath, 'rb') as f:
-        f.seek(filesize - to_read)
-        data = f.read().decode('utf-8', errors='ignore')
-        first_newline = data.find('\n')
-        csv_text = data[first_newline+1:]
-    from io import StringIO
-    df = pd.read_csv(StringIO(csv_text))
-    df['Open time'] = pd.to_datetime(df['Open time'])
-    df.sort_values('Open time', inplace=True)
-    df.reset_index(drop=True, inplace=True)
+        f.seek(0, 2)  # Move to EOF
+        filesize = f.tell()
+        seek_pos = max(filesize - n_bytes, 0)
+        f.seek(seek_pos)
+
+        # Read a chunk of bytes from the file
+        chunk = f.read()
+
+        # Find first newline in chunk (to start reading from next full line)
+        first_newline = chunk.find(b'\n')
+        if first_newline == -1:
+            # No newline found, read entire chunk
+            chunk_start = 0
+        else:
+            # Start just after first newline to avoid partial line
+            chunk_start = first_newline + 1
+
+        # Decode the chunk from bytes to string starting from chunk_start
+        chunk_str = chunk[chunk_start:].decode('utf-8', errors='replace')
+
+    # Read CSV from the string chunk; assume header present in file, so skip first partial lines
+    df = pd.read_csv(StringIO(chunk_str))
+
     return df
+
 
 df_1m = read_last_n_mb_of_csv(csv_path, max_file_mb)
 
