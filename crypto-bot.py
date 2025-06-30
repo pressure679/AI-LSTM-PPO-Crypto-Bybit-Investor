@@ -8,7 +8,7 @@ from pybit import HTTP  # pip install pybit
 # === SETUP ===
 api_key = "YOUR_API_KEY"
 api_secret = "YOUR_API_SECRET"
-symbol = "BTCUSDT"
+symbol = "XRPSDT"
 interval_15m = 15 * 60
 interval_1h = 60 * 60
 max_risk_percentage = 0.35
