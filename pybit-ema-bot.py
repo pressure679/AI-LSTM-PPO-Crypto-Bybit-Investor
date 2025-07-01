@@ -13,7 +13,7 @@ xrp = "XRPUSDT"
 # interval_15m = 15 * 60
 # interval_1h = 60 * 60
 max_risk_percentage = 0.2
-leverage = 50
+leverage = 20
 risk_pct = 0.15
 entry_time = None
 entry_price = 0.0
@@ -66,13 +66,11 @@ def get_mark_price(symbol):
     return float(price_data["lastPrice"])
 
 def get_qty_step(symbol):
-    info = session.get_instruments()
-    for item in info['result']["list"]:
-        if item['name'] == symbol:
-            step = float(item['lotSizeFilter']['qtyStep'])
-            min_qty = float(item['lotSizeFilter']['minOrderQty'])
-            return step, min_qty
-    return 0.0001, 0.0001
+    info = session.get_instruments_info(category="linear", symbol=symbol)
+    data = info["result"]["list"][0]
+    step = float(data["lotSizeFilter"]["qtyStep"])
+    min_qty = float(data["lotSizeFilter"]["minOrderQty"])
+    return step, min_qty
 
 def get_trade_qty():
     wallet = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
@@ -123,16 +121,16 @@ def close_all_positions():
         # entry_price = None
         # entry_time = None
 
-def enter_trade(signal, strategy, df, symbol="XRPUSDT"):
+def enter_trade(signal, df, symbol="XRPUSDT"):
     # global peak_balance, entry_price, entry_time
     global leverage, xrp
 
     mark_price = get_mark_price(symbol)
     val = df_1m['Close'].mean() * 0.02 / df_1m['atr'].mean()
-    print(f"atr's to reach 2% movement: {val:.2f}")
-    offfset = int(round(val, 0))
-    min_price = df["Low"].iloc[-val:].min()
-    max_price = df["High"].iloc[-val:].max()
+    # print(f"atr's to reach 2% movement: {val:.2f}")
+    offset = int(round(val, 0))
+    min_price = df["Low"].iloc[offset:].min()
+    max_price = df["High"].iloc[offset:].max()
     price_range_pct = (max_price - min_price) / mark_price
 
     if price_range_pct < 0.02:
@@ -146,6 +144,8 @@ def enter_trade(signal, strategy, df, symbol="XRPUSDT"):
     balance = get_balance()
 
     risk_amount = max(balance * risk_pct, 5)
+    # print(risk_amount)
+    # print(balance)
 
     step, min_qty = get_qty_step(symbol)
     qty = risk_amount / mark_price
@@ -158,8 +158,8 @@ def enter_trade(signal, strategy, df, symbol="XRPUSDT"):
 
     side = "Buy" if signal == "Buy" else "Sell"
 
-    session.set_leverage(symbol=symbol, leverage=leverage)
-    response = session.place_order(category="linear", symbol=symbol, side=side, order_type="Market", qty=qty, leverage=leverage)
+    # session.set_leverage(category="linear", symbol=symbol, buyLeverage=leverage, sellLeverage=leverage)
+    response = session.place_order(category="linear", symbol=symbol, side=side, order_type="Market", qty=qty, buyLeverage=leverage, sellLeverage=leverage)
     return response.get("result", {}).get("orderId")
 
     # entry_price = mark_price
@@ -251,7 +251,7 @@ def wait_until_next_candle(interval_minutes):
     now = time.time()
     seconds_per_candle = interval_minutes * 60
     sleep_seconds = seconds_per_candle - (now % seconds_per_candle)
-    print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
+    # print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
     time.sleep(sleep_seconds)
 
 def run_bot():
@@ -278,6 +278,7 @@ def run_bot():
         curr_diff = df_1m['MA_diff'].iloc[-1]
         prev_diff = df_1m['MA_diff'].iloc[-2]
         prev2_diff = df_1m['MA_diff'].iloc[-3]
+        # enter_trade("Buy", df_1m)
 
         # Simple logic: increasing if each is greater than previous
         ma_diff_increasing = (prev2_diff < prev_diff) and (prev_diff < curr_diff)
@@ -294,30 +295,32 @@ def run_bot():
         maslope = df_1m["200_ma_diff_smooth"].max() / df_1m["200_ma_diff_smooth"].min()
         # print(f"200 ema smoothened difference of slope's slope: {maslope:.2f}")
         # print(maslope * 200 / df_1m["atr"].mean())
-        print(f"atr: {df_1m['atr'].mean():.6f}")
+        # print(f"atr: {df_1m['atr'].mean():.6f}")
         atr_to_30 = df_1m['Close'].mean()/df_1m['atr'].mean() * 0.03
         atr_to_30_distance = atr_to_30 * df_1m['atr'].mean()
-        print(f"atr to reach 30% roi: with x10: {atr_to_30:.2f}")
-        print(f"distance in atr to reach 30% with x10:: {atr_to_30_distance:.2f}")
-        print(f"distance in to reach 24h high-low: {df_1m['High'].max() - df_1m['Low'].min():.2f}")
-        print(f"distance in 24h high-low in xrp value: {(df_1m['High'].max() - df_1m['Low'].min()) / df_1m['Close'].mean():.2f}")
-        # print(maslope)
-        print(f"adx: {df_1m['adx'].iloc[90:].mean():.2f}")
-        print(f"maslope: {maslope:.2f}")
+        # print(f"atr to reach 30% roi: with x10: {atr_to_30:.2f}")
+        # print(f"distance in atr to reach 30% with x10:: {atr_to_30_distance:.2f}")
+        # print(f"distance in to reach 24h high-low: {df_1m['High'].max() - df_1m['Low'].min():.2f}")
+        # print(f"distance in 24h high-low in xrp value: {(df_1m['High'].max() - df_1m['Low'].min()) / df_1m['Close'].mean():.2f}")
+        # # print(maslope)
+        # print(f"adx: {df_1m['adx'].iloc[90:].mean():.2f}")
+        # print(f"maslope: {maslope:.2f}")
         # print(f"atr: {df_1m['atr'].rolling(window=999).mean():.2}")
         if not position_open:
             # if maslope < -1.5:
-            if df_1m['adx'].iloc[60*2:].mean() > 25:
-                close_all_positions()
+            if df_1m['adx'].iloc[int(round(df_1m['Close'].mean()/df_1m['atr'].mean(), 0)):].mean() > 25:
                 if maslope < -1.5:
-                    trend_order_id = enter_trade("Sell", "200 ema slope", df_1m)
+                    close_all_positions()
+                    trend_order_id = enter_trade("Sell", df_1m)
+                    print("Trend order filled")
                     position_open = True
                     entry_time = time.time()
                     entry_price = mark_price
                     roi = (entry_price - market_price) / entry_price
                 elif maslope > 1.5:
                     close_all_positions()
-                    trend_order_id = enter_trade("Buy", "200 ema slope", df_1m)
+                    trend_order_id = enter_trade("Buy", df_1m)
+                    print("Trend order filled")
                     position_open = True
                     entry_time = time.time()
                     entry_price = mark_price
@@ -327,26 +330,26 @@ def run_bot():
             roi = (mark_price - entry_price) / entry_price
             if elapsed >= 5400 or roi >= 0.25:
                    print("Closing position due to ROI or time limit.")
-                   cancel_specific(trend_order_id, xrp)
+                   cancel_specific_order(trend_order_id, xrp)
                    position_open = False  # optional flag to prevent re-closing 
-        if df_1m["MA_diff"].iloc[-2] <= 0 and df_1m["MA_diff"].iloc[-3] > 0 and slope_short > 0 and slope_long > 0:
+        if df_1m["MA_diff"].iloc[-2] <= 0 and df_1m["MA_diff"].iloc[-1] > 0 and slope_short > 0 and slope_long > 0:
             print("Cross above zero — entering long")
             print("Uptrend detected")
             cancel_specific_order(grid_order_id, xrp)
-            grid_order_id = enter_trade("Buy", "EMA", df_1m)
+            grid_order_id = enter_trade("Buy", df_1m)
         elif df_1m["MA_diff"].iloc[-2] >= 0 and df_1m["MA_diff"].iloc[-1] < 0 and slope_short < 0 and slope_long < 0:
             print("Cross below zero — entering short")
             print("Downtrend detected")
             cancel_specific_order(grid_order_id, xrp)
-            grid_order_id = enter_trade("Sell", "EMA", df_1m)
+            grid_order_id = enter_trade("Sell", df_1m)
         if just_passed_peak and ma_diff_decreasing:
             print("Just passed a peak — entering short")
             cancel_specific_order(grid_order_id, xrp)
-            grid_order_id = enter_trade("Sell", "Peak + MA_diff", df_1m)
+            grid_order_id = enter_trade("Sell", df_1m)
         elif just_passed_trough and ma_diff_increasing:
             print("Just passed a trough — entering long")
             cancel_specific_order(grid_order_id, xrp)
-            grid_order_id = enter_trade("Buy", "Peak + MA_diff", df_1m)
+            grid_order_id = enter_trade("Buy", df_1m)
         print()
         wait_until_next_candle(1)
         # print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ADX: {adx_value:.2f} | EMA Signal")
