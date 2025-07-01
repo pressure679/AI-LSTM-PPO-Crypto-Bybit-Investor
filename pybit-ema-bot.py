@@ -7,8 +7,8 @@ from pybit.unified_trading import HTTP  # pip install pybit
 import numpy as np
 
 # === SETUP ===
-api_key = "wLqYZxlM27F01smJFS"
-api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
+api_key = ""
+api_secret = ""
 xrp = "XRPUSDT"
 # interval_15m = 15 * 60
 # interval_1h = 60 * 60
