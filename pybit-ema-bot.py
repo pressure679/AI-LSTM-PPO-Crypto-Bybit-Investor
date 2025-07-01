@@ -121,7 +121,7 @@ def enter_trade(signal, df, symbol="XRPUSDT"):
     max_price = df["High"].iloc[offset:].max()
     price_range_pct = (max_price - min_price) / mark_price
     bb_width = df['upper band'] + df['lower band']
-    bb_width_pct = bb_width_pct / mark_price
+    bb_width_pct = bb_width / mark_price
 
     if price_range_pct < 0.02 or bb_width < 0.02:
     # if price_range_pct < 0.007:
