@@ -7,8 +7,8 @@ from pybit.unified_trading import HTTP  # pip install pybit
 import numpy as np
 
 # === SETUP ===
-api_key = ""
-api_secret = ""
+api_key = "wLqYZxlM27F01smJFS"
+api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
 xrp = "XRPUSDT"
 # interval_15m = 15 * 60
 # interval_1h = 60 * 60
@@ -129,9 +129,10 @@ def enter_trade(signal, strategy, df, symbol="XRPUSDT"):
 
     mark_price = get_mark_price(symbol)
     val = df_1m['Close'].mean() * 0.02 / df_1m['atr'].mean()
-    print("atr's to reach 2% movement: {val:.2f}")
-    min_price = df["Low"].iloc[-round(val, 0):].min()
-    max_price = df["High"].iloc[-round(val, 0):].max()
+    print(f"atr's to reach 2% movement: {val:.2f}")
+    offfset = int(round(val, 0))
+    min_price = df["Low"].iloc[-val:].min()
+    max_price = df["High"].iloc[-val:].max()
     price_range_pct = (max_price - min_price) / mark_price
 
     if price_range_pct < 0.02:
