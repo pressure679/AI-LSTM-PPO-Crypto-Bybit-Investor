@@ -13,8 +13,8 @@ xrp = "XRPUSDT"
 # interval_15m = 15 * 60
 # interval_1h = 60 * 60
 max_risk_percentage = 0.2
-leverage = 20
-risk_pct = 0.15
+leverage = 75
+risk_pct = 0.3
 entry_time = None
 entry_price = 0.0
 
@@ -79,10 +79,10 @@ def get_trade_qty():
         return usdt_balance  # or whatever fallback you want if balance too low
 
     # Calculate desired trade amount (5% or $5 minimum)
-    desired_usd_amount = max(usdt_balance * 0.2, 5)
+    desired_usd_amount = max(usdt_balance * 0.15, 5)
 
     # Cap desired amount to max_risk_pct * balance
-    max_allowed_usd = usdt_balance * 0.15
+    max_allowed_usd = usdt_balance * 0.35
     trade_usd_amount = min(desired_usd_amount, max_allowed_usd)
 
     price = float(session.get_tickers(category="linear", symbol=symbol)["result"]["list"][0]["lastPrice"])
@@ -132,10 +132,12 @@ def enter_trade(signal, df, symbol="XRPUSDT"):
     min_price = df["Low"].iloc[offset:].min()
     max_price = df["High"].iloc[offset:].max()
     price_range_pct = (max_price - min_price) / mark_price
+    bb_width = df['upper band'] + df['lower band']
+    bb_width_pct = bb_width_pct / mark_price
 
-    if price_range_pct < 0.02:
+    if price_range_pct < 0.02 or bb_width < 0.02:
     # if price_range_pct < 0.007:
-        print("[INFO] Market range is too small (<1.5%), skipping trade.")
+        print("[INFO] Market range is too small (<2%), skipping trade.")
         # print(f"price range in pct: {price_range_pct:.6f}")
         # print(f"Max high prices: {max_price:.6f}")
         # print(f"Min low prices: {min_price:.6f}")
@@ -170,7 +172,7 @@ def cancel_specific_order(order_id: str, symbol: str):
         print("No order ID to cancel")
         return
     try:
-        response = session.cancel_order(order_id=order_id, symbol=symbol)
+        response = session.cancel_order(category="linear", order_id=order_id, symbol=symbol)
         print("Cancel order response:", response)
     except Exception as e:
         print("Error canceling order:", e)
@@ -260,16 +262,33 @@ def run_bot():
     slope = False
     trend_order_id = ""
     grid_order_id = ""
+    trend_roi_pct = 0.0
+    trend_entry_price = 0.0
+    trend_order_id = ""
+    grid_roi_oct = 0.0
+    grid_entry_price = 0.0
+    grid_order_id = ""
     while True:
         # print("In MA_diff decision logic")
         now = time.time()
         mark_price = get_mark_price(xrp)
         df_1m = get_klines_df(xrp, 60)
         df_1m = add_indicators(df_1m)
-        # df_1m["EMA_diff"] = df_1m["ema_7"] - df_1m["ema14"]
-        df_1m["MA_diff"] = df_1m["ema_7"].diff()
+        # df_1m["EMA_diff"] = df_1m["ema_7"] - df_1m["ema14"] # distance between two ema's
+        df_1m["MA_diff"] = df_1m["ema_7"].diff() # difference, slope, of ema 7
         df_1m['is_peak'] = (df_1m['Close'].shift(1) < df_1m['Close']) & (df_1m['Close'].shift(-1) < df_1m['Close'])
         df_1m['is_trough'] = (df_1m['Close'].shift(1) > df_1m['Close']) & (df_1m['Close'].shift(-1) > df_1m['Close'])
+        # Get latest candle values
+        current_price = df_1m['Close'].iloc[-1]
+        bb_upper = df_1m['bb_upper'].iloc[-1]
+        bb_lower = df_1m['bb_lower'].iloc[-1]
+        
+        # Define proximity threshold (e.g., within 10%)
+        proximity_threshold = 0.1
+        
+        # Check proximity
+        near_upper_band = (bb_upper - current_price) / current_price <= proximity_threshold
+        near_lower_band = (current_price - bb_lower) / current_price <= proximity_threshold
         # peak_indices = peaks.index
         # peak_distances = peak_indices.to_series().diff().dropna()
         # avg_peak_distance = peak_distances.mean()
@@ -290,14 +309,14 @@ def run_bot():
         slope_short = df_1m["ema_7"].iloc[-1] - df_1m["ema_14"].iloc[-2]
         slope_long = df_1m["ema_14"].iloc[-1] - df_1m["ema_7"].iloc[-2]
 
-        df_1m["200madiff"] = df_1m["ema_200"].diff()
-        df_1m["200_ma_diff_smooth"] = df_1m["200madiff"].rolling(window=200).mean()
-        maslope = df_1m["200_ma_diff_smooth"].max() / df_1m["200_ma_diff_smooth"].min()
+        # df_1m["200madiff"] = df_1m["ema_200"].diff()
+        # df_1m["200_ma_diff_smooth"] = df_1m["200madiff"].rolling(window=200).mean()
+        # maslope = df_1m["200_ma_diff_smooth"].max() / df_1m["200_ma_diff_smooth"].min()
         # print(f"200 ema smoothened difference of slope's slope: {maslope:.2f}")
         # print(maslope * 200 / df_1m["atr"].mean())
         # print(f"atr: {df_1m['atr'].mean():.6f}")
-        atr_to_30 = df_1m['Close'].mean()/df_1m['atr'].mean() * 0.03
-        atr_to_30_distance = atr_to_30 * df_1m['atr'].mean()
+        # atr_to_30 = df_1m['Close'].mean()/df_1m['atr'].mean() * 0.03
+        # atr_to_30_distance = atr_to_30 * df_1m['atr'].mean()
         # print(f"atr to reach 30% roi: with x10: {atr_to_30:.2f}")
         # print(f"distance in atr to reach 30% with x10:: {atr_to_30_distance:.2f}")
         # print(f"distance in to reach 24h high-low: {df_1m['High'].max() - df_1m['Low'].min():.2f}")
@@ -308,50 +327,78 @@ def run_bot():
         # print(f"atr: {df_1m['atr'].rolling(window=999).mean():.2}")
         if not position_open:
             # if maslope < -1.5:
-            if df_1m['adx'].iloc[int(round(df_1m['Close'].mean()/df_1m['atr'].mean(), 0)):].mean() > 25:
-                if maslope < -1.5:
+            # if df_1m['adx'].iloc[int(round(df_1m['Close'].mean()/df_1m['atr'].mean(), 0)):].mean() > 25:
+            if df_1m['adx'].iloc[-60:].mean() > 25:
+                # if maslope < -1.5:
+                if slope_short < 0 and slope_long < 0:
                     close_all_positions()
                     trend_order_id = enter_trade("Sell", df_1m)
                     print("Trend order filled")
                     position_open = True
-                    entry_time = time.time()
-                    entry_price = mark_price
-                    roi = (entry_price - market_price) / entry_price
-                elif maslope > 1.5:
+                    # entry_time = time.time()
+                    trend_entry_price = mark_price
+                    # trend_roi_pct = (trend_entry_price - market_price) / entry_price * leverage
+                    # elif maslope > 1.5:
+                elif slope_short > 0 and slope_long > 0:
                     close_all_positions()
                     trend_order_id = enter_trade("Buy", df_1m)
                     print("Trend order filled")
                     position_open = True
                     entry_time = time.time()
-                    entry_price = mark_price
-                    roi = (market_price - entry_price) / entry_price
+                    trend_entry_price = mark_price
+                    # trend_roi_pct = (market_price - trend_entry_price) / trend_entry_price * leverage
         elif position_open:
-            elapsed = now - entry_time
-            roi = (mark_price - entry_price) / entry_price
-            if elapsed >= 5400 or roi >= 0.25:
-                   print("Closing position due to ROI or time limit.")
-                   cancel_specific_order(trend_order_id, xrp)
-                   position_open = False  # optional flag to prevent re-closing 
-        if df_1m["MA_diff"].iloc[-2] <= 0 and df_1m["MA_diff"].iloc[-1] > 0 and slope_short > 0 and slope_long > 0:
-            print("Cross above zero — entering long")
-            print("Uptrend detected")
-            cancel_specific_order(grid_order_id, xrp)
-            grid_order_id = enter_trade("Buy", df_1m)
-        elif df_1m["MA_diff"].iloc[-2] >= 0 and df_1m["MA_diff"].iloc[-1] < 0 and slope_short < 0 and slope_long < 0:
-            print("Cross below zero — entering short")
-            print("Downtrend detected")
-            cancel_specific_order(grid_order_id, xrp)
-            grid_order_id = enter_trade("Sell", df_1m)
-        if just_passed_peak and ma_diff_decreasing:
-            print("Just passed a peak — entering short")
-            cancel_specific_order(grid_order_id, xrp)
-            grid_order_id = enter_trade("Sell", df_1m)
-        elif just_passed_trough and ma_diff_increasing:
-            print("Just passed a trough — entering long")
-            cancel_specific_order(grid_order_id, xrp)
-            grid_order_id = enter_trade("Buy", df_1m)
-        print()
+            # elapsed = now - entry_time
+            grid_roi_pct = (mark_price - grid_entry_price) / grid_entry_price
+            trend_roi_pct = (mark_price - trend_entry_price) / trend_entry_price
+
+            # if elapsed >= 5400 or roi >= 0.25:
+            # if elapsed >= 5400:
+                   # print("Closing position due to ROI or time limit.")
+                   # cancel_specific_order(trend_order_id, xrp)
+                   # position_open = False  # optional flag to prevent re-closing 
+            # if df_1m["MA_diff"].iloc[-2] <= 0 and df_1m["MA_diff"].iloc[-1] > 0 and slope_short > 0 and slope_long > 0:
+            # if df_1m["MA_diff"].iloc[-1] > df_1m["MA_diff"].iloc[-10] and slope_short > 0 and slope_long > 0:
+            if grid_roi_pct * leverage > 0.3 or grid_roi_pct * leverage < -0.15:
+                cancel_specific_order(grid_order_id, xrp)
+            if trend__roi_pct * leverage > 0.3 or trend__roi_pct * leverage < -0.15:
+                cancel_specific_order(trend_order_id, xrp)
+            last_10 = df_1m["MA_diff"].iloc[-10:]
+            if all(x < y for x, y in zip(last_10, last_10[1:])) and slope_short > 0 and slope_long > 0:
+                # print("MA_diff has been increasing every candle for 10 candles")
+                print("Cross above zero — entering long")
+                print("Uptrend detected")
+                if trend_order_id != "":
+                    cancel_specific_order(grid_order_id, xrp)
+                # close_all_positions()
+                trend_order_id = enter_trade("Buy", df_1m)
+                # elif df_1m["MA_diff"].iloc[-2] >= 0 and df_1m["MA_diff"].iloc[-1] < 0 and slope_short < 0 and slope_long < 0:
+                # elif df_1m["MA_diff"].iloc[-1] < df_1m["MA_diff"].iloc[-10] < 0 and slope_short < 0 and slope_long < 0:
+            last_10 = df_1m["MA_diff"].iloc[-10:]
+            if all(x > y for x, y in zip(last_10, last_10[1:])) and slope_short < 0 and slope_long < 0:
+                # print("MA_diff has been decreasing every candle for 10 candles")
+                print("Cross below zero — entering short")
+                print("Downtrend detected")
+                if trend_order_id != "":
+                    cancel_specific_order(grid_order_id, xrp)
+                # close_all_positions()
+                trend_order_id = enter_trade("Sell", df_1m)
+            # elif just_passed_peak and ma_diff_decreasing:
+            elif just_passed_peak and ma_diff_decreasing and near_upper_band:
+                print("Just passed a peak — entering short")
+                if grid_order_id != "":
+                    cancel_specific_order(grid_order_id, xrp)
+                # close_all_positions()
+                grid_order_id = enter_trade("Sell", df_1m)
+            # elif just_passed_trough and ma_diff_increasing:
+            elif just_passed_trough and ma_diff_increasing and near_lower_band:
+                print("Just passed a trough — entering long")
+                if grid_order_id != "":
+                    cancel_specific_order(grid_order_id, xrp)
+                # close_all_positions()
+                grid_order_id = enter_trade("Buy", df_1m)
         wait_until_next_candle(1)
         # print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ADX: {adx_value:.2f} | EMA Signal")
         # time.sleep(5)
 run_bot()
+
