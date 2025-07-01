@@ -3,16 +3,16 @@ import math
 from datetime import datetime
 import requests
 import pandas as pd
-from pybit import HTTP  # pip install pybit
+from pybit.unified_trading import HTTP  # pip install pybit
 import numpy as np
 
 # === SETUP ===
 api_key = "wLqYZxlM27F01smJFS"
 api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
-symbol = "XRPUSDT"
+symbol = "FARTCOINUSDT"
 # interval_15m = 15 * 60
 # interval_1h = 60 * 60
-max_risk_percentage = 0.1
+max_risk_percentage = 0.2
 leverage = 10
 
 # Initialize session
@@ -50,6 +50,7 @@ def get_klines_df(symbol, interval_sec, limit=150):
     klines = data['result']['list']
     df = pd.DataFrame(klines, columns=["Timestamp", "Open", "High", "Low", "Close", "Volume", "Turnover"])
     df[["Open", "High", "Low", "Close", "Volume"]] = df[["Open", "High", "Low", "Close", "Volume"]].astype(float)
+    df['Timestamp'] = pd.to_numeric(df['Timestamp'])
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
     return df
 
@@ -58,7 +59,7 @@ def get_balance():
     return float(balance_data[0]["totalEquity"])
 
 def get_mark_price(symbol):
-    price_data = session.get_ticker(category="linear", symbol=symbol)["result"]["list"][0]
+    price_data = session.get_tickers(category="linear", symbol=symbol)["result"]["list"][0]
     return float(price_data["lastPrice"])
 
 def get_qty_step(symbol):
@@ -77,13 +78,13 @@ def get_trade_qty():
         return usdt_balance  # or whatever fallback you want if balance too low
 
     # Calculate desired trade amount (5% or $5 minimum)
-    desired_usd_amount = max(usdt_balance * 0.1, 5)
+    desired_usd_amount = max(usdt_balance * 0.2, 5)
 
     # Cap desired amount to max_risk_pct * balance
     max_allowed_usd = usdt_balance * 0.2
     trade_usd_amount = min(desired_usd_amount, max_allowed_usd)
 
-    price = float(session.get_ticker(category="linear", symbol=symbol)["result"]["list"][0]["lastPrice"])
+    price = float(session.get_tickers(category="linear", symbol=symbol)["result"]["list"][0]["lastPrice"])
     raw_qty = trade_usd_amount / price
 
     step, min_qty = get_qty_step(symbol)
@@ -96,14 +97,19 @@ def get_trade_qty():
     return qty
 
 def close_all_positions():
-    positions = session.get_position(symbol=symbol)
-    if "result" in positions and positions["result"]:
-        price_data = session.get_ticker(category="linear", symbol=symbol)["result"]["list"][0]
-        exit_price = float(price_data["lastPrice"])
-        exit_time = datetime.now()
-
-        qty = float(positions["size"])
-        side = "Sell" if positions["side"] == "Buy" else "Buy"
+    positions = session.get_positions(category="linear", symbol=symbol)
+    position_lists = positions['result']['list']
+    # for position in positions:
+    for position in position_lists:
+        # if "result" in positions and positions["result"]:
+        # price_data = session.get_tickers(category="linear", symbol=symbol)["result"]["list"][0]
+        # exit_price = float(price_data["lastPrice"])
+        # exit_time = datetime.now()
+        # print(position)
+        qty = float(position["size"])
+        if qty == 0:
+            continue
+        side = "Sell" if position["side"] == "Buy" else "Buy"
         session.place_order(category="linear", symbol=symbol, side=side, order_type="Market", qty=qty, reduce_only=True)
         # pnl = (entry_price - exit_price) * qty *  * leverage
         # pnl = (entry_price - exit_price) * qty
@@ -119,19 +125,22 @@ def enter_trade(signal, strategy, df):
     global leverage, symbol
 
     mark_price = get_mark_price(symbol)
-    min_price = df["Low"].iloc[-10:].mean()
-    max_price = df["High"].iloc[-10:].mean()
+    min_price = df["Low"].iloc[-10:].min()
+    max_price = df["High"].iloc[-10:].max()
     price_range_pct = (max_price - min_price) / mark_price
 
     if price_range_pct < 0.015:
     # if price_range_pct < 0.007:
         print("[INFO] Market range is too small (<1.5%), skipping trade.")
+        print(f"price range in pct: {price_range_pct:.6f}")
+        print(f"Max high prices: {max_price:.6f}")
+        print(f"Min low prices: {min_price:.6f}")
         return
 
     balance = get_balance()
-    #target_profit = max(peak_balance * 0.1, 5)
-    leverage = 10
-    max_risk_pct = 0.2
+    # target_profit = peak_balance * 0.05
+    # leverage = 50
+    # max_risk_pct = 0.2
     # risk_pct = min(max_risk_pct, max(target_profit / (balance * 0.1 * estimated_range_pct * mark_price), 0.1))
     risk_amount = max(balance * 0.05, 5)
 
@@ -207,14 +216,15 @@ def calculate_atr(high, low, close, period=14):
     return atr
 
 def calculate_adx(high, low, close, period=14):
+    global df_1m
     df = pd.DataFrame({'High': high, 'Low': low, 'Close': close})
-    df['TR'] = df[['High', 'Low', 'Close']].max(axis=1) - df[['High', 'Low', 'Close']].min(axis=1)
-    df['+DM'] = np.where((df['High'].diff() > df['Low'].diff()) & (df['High'].diff() > 0), df['High'].diff(), 0)
-    df['-DM'] = np.where((df['Low'].diff() > df['High'].diff()) & (df['Low'].diff() > 0), df['Low'].diff(), 0)
+    df_1m['TR'] = df_1m[['High', 'Low', 'Close']].max(axis=1) - df_1m[['High', 'Low', 'Close']].min(axis=1)
+    df_1m['+DM'] = np.where((df_1m['High'].diff() > df_1m['Low'].diff()) & (df_1m['High'].diff() > 0), df_1m['High'].diff(), 0)
+    df_1m['-DM'] = np.where((df_1m['Low'].diff() > df_1m['High'].diff()) & (df_1m['Low'].diff() > 0), df_1m['Low'].diff(), 0)
 
-    tr14 = df['TR'].rolling(window=period).sum()
-    plus_dm14 = df['+DM'].rolling(window=period).sum()
-    minus_dm14 = df['-DM'].rolling(window=period).sum()
+    tr14 = df_1m['TR'].rolling(window=period).sum()
+    plus_dm14 = df_1m['+DM'].rolling(window=period).sum()
+    minus_dm14 = df_1m['-DM'].rolling(window=period).sum()
 
     plus_di = 100 * (plus_dm14 / tr14)
     minus_di = 100 * (minus_dm14 / tr14)
@@ -231,7 +241,9 @@ def wait_until_next_candle(interval_minutes):
     time.sleep(sleep_seconds)
 
 def run_bot():
+    global df_1m
     while True:
+        # print("In MA_diff decision logic")
         now = time.time()
         mark_price = get_mark_price(symbol)
         df_1m = get_klines_df(symbol, 60)
@@ -241,26 +253,33 @@ def run_bot():
         curr_diff = df_1m['MA_diff'].iloc[-1]
         prev1_diff = df_1m['MA_diff'].iloc[-2]
         prev2_diff = df_1m['MA_diff'].iloc[-3]
+        # print(df_1m["MA_diff"])
         # Cross above zero — enter long
         # if prev1_diff <= 0 and prev2_diff > 0:
         if df_1m["MA_diff"].iloc[-2] <= 0 and df_1m["MA_diff"].iloc[-2] > 0:
         # if df_1m["MA_diff"].iloc[-1] > df_1m["MA_diff"].iloc[-2]:
+            print("Cross above zero — entering long")
             enter_trade("Buy", "EMA", df_1m)
         # Cross below zero — enter short
         # elif prev_diff >= 0 and curr_diff < 0:
         # elif df_1m["MA_diff"] < 0:
         if df_1m["MA_diff"].iloc[-2] >= df_1m["MA_diff"].iloc[-1] < 0:
+            print("Cross below zero — entering short")
             enter_trade("Sell", "EMA", df_1m)
         # Exit long on local peak of MA_diff
         # if previouspnl > totalpnl:
         # if prev1_diff < prev_diff > curr_diff:
         if df_1m["MA_diff"].iloc[-3] < df_1m["MA_diff"].iloc[-2] > df_1m["MA_diff"].iloc[-1]:
+            print("Exiting long on local peak of MA_diff")
             close_all_positions()
             # enter_trade("Sell", "EMA", df_1m)
+        # if prev_diff > curr_diff < next_diff:
         # Exit short on local trough of MA_diff
         if df_1m["MA_diff"].iloc[-3] > df_1m["MA_diff"].iloc[-2] < df_1m["MA_diff"].iloc[-1]:
+            print("Exiting short on local trough of MA_diff")
             close_all_positions()
             # enter_trade("Buy", "EMA", df_1m)
-        wait_until_next_candle(1))
+        # wait_until_next_candle(1)
         # print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ADX: {adx_value:.2f} | EMA Signal")
+        time.sleep(5)
 run_bot()
