@@ -1,61 +1,28 @@
 import time
 import math
 from datetime import datetime
-# import requests
+import requests
 import pandas as pd
-# from pybit.unified_trading import HTTP  # pip install pybit
+from pybit.unified_trading import HTTP  # pip install pybit
 import numpy as np
 from io import StringIO
 
 # === SETUP ===
+api_key = "wLqYZxlM27F01smJFS"
+api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
 xrp = "XRPUSDT"
-# balance = 50
-# leverage = 75
-# risk_pct = 0.3
-csv_path = "/mnt/chromeos/removable/SD Card/Linux-shared-files/crypto and currency pairs/XRPUSD_1m_Binance.csv"
-interval_minutes = 1440  # 1 day, can be 10080 (week), 43200 (month)
+# balance = 100
+# risk_pct = 0.1
+leverage = 75
+risk_pct = 0.1
 
-# if score >= 2:
-#     df["signal"][i] = "buy"
-# Ok. I don't want to overly complicate things, so I just want to use ma_diff as an indicator of direction, then we can use ma7, ma14, and ma28. I want to simplify the logic for placing orders, and I want to retain the add_indicators function with added ema_28 and ema_7_diff, ema_14_diff, and ema_28_diff. I want the main loop where we place orders first to detect if whether or not we are in a trend by checking if adx is above or below 25. Then after that it should place grid or trend orders.
-# the trend order should be placed depending on the direction.
-# we should be in trend mode for as long as we are in a adx is above 25, and not if below (buy if direction is upwards, sell if direction is downwards).
-# Let direction be based on  ema_7_diff.
-# The grid orders should be placed as so: if we are within 10% distance of upper or lower band a buy or sell order should be placed, and the previous order closed.
-# We can wrap that functionality in a generate_signals function that returns signal, buy or sell, if you like.
-# in the loop where we place orders let tp be at 30% of roi in pct, and let sl be at 15% of roi in pct (these may not take effect, especially in grid orders where we use, probably tight, bollinger bands for opening and closing orders).
-def load_last_n_mb_csv(filepath, max_mb=25):
-    # Read header first (just first line
-    with open(filepath, 'r', encoding='utf-8') as f:
-        header = f.readline()
-
-    n_bytes = max_mb * 1024 * 1024
-    with open(filepath, 'rb') as f:
-        f.seek(0, 2)
-        filesize = f.tell()
-        seek_pos = max(filesize - n_bytes, 0)
-        f.seek(seek_pos)
-        chunk = f.read()
-
-        # Find first newline after seek_pos to skip partial line
-        first_newline = chunk.find(b'\n')
-        if first_newline == -1:
-            chunk_start = 0
-        else:
-            chunk_start = first_newline + 1
-
-        chunk_str = chunk[chunk_start:].decode('utf-8', errors='replace')
-
-    # Combine header and chunk string (so we have header + last data)
-    combined_str = header + chunk_str
-
-    df = pd.read_csv(StringIO(combined_str), header=0)
-    df.columns = ["Open time","Open","High","Low","Close","Volume","Close time","Quote asset volume","Number of trades","Taker buy base asset volume","Taker buy quote asset volume","Ignore"]
-
-    # print("Columns in df:", df.columns.tolist())
-    # print("First row of df:\n", df.head(1))
- 
-    return df
+session = HTTP(
+    api_key=api_key,
+    api_secret=api_secret,
+    recv_window=5000,
+    timeout=30
+    # testnet=True  # uncomment if needed
+)
 
 def calculate_ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
@@ -140,6 +107,142 @@ def add_indicators(df):
     df['TR'] = tr
     return df
 
+def get_klines_df(xrp, interval, limit=1000):
+    response = session.get_kline(
+        category="linear",
+        symbol=xrp,
+        interval=str(interval),
+        limit=limit
+    )
+    data = response['result']['list']
+    df = pd.DataFrame(data, columns=[
+        "Timestamp", "Open", "High", "Low", "Close", "Volume", "Turnover"
+    ])
+    df = df.astype(float)
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"], unit="ms")
+    df.set_index("Timestamp", inplace=True)
+    return df
+
+def get_balance():
+    balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
+    return float(balance_data[0]["totalEquity"])
+
+def get_mark_price(xrp):
+    price_data = session.get_tickers(category="linear", symbol=xrp)["result"]["list"][0]
+    return float(price_data["lastPrice"])
+
+def get_qty_step(xrp):
+    info = session.get_instruments_info(category="linear", symbol=xrp)
+    data = info["result"]["list"][0]
+    step = float(data["lotSizeFilter"]["qtyStep"])
+    min_qty = float(data["lotSizeFilter"]["minOrderQty"])
+    return step, min_qty
+
+def get_trade_qty():
+    wallet = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
+    usdt_balance = float(wallet[0]["totalEquity"])
+    if usdt_balance <= 5:
+        return usdt_balance  # or whatever fallback you want if balance too low
+
+    # Calculate desired trade amount (5% or $5 minimum)
+    desired_usd_amount = max(usdt_balance * 0.1, 5)
+
+    # Cap desired amount to max_risk_pct * balance
+    max_allowed_usd = usdt_balance * 0.1
+    trade_usd_amount = min(desired_usd_amount, max_allowed_usd)
+
+    price = float(session.get_tickers(category="linear", symbol=symbol)["result"]["list"][0]["lastPrice"])
+    raw_qty = trade_usd_amount / price
+
+    step, min_qty = get_qty_step(symbol)
+    qty = math.floor(raw_qty / step) * step
+    qty = round(qty, 4)  # round for precision
+
+    if qty < min_qty:
+        qty = min_qty
+
+    return qty
+
+def close_all_positions():
+    positions = session.get_positions(category="linear", symbol=xrp)
+    position_lists = positions['result']['list']
+    # for position in positions:
+    for position in position_lists:
+        qty = float(position["size"])
+        if qty == 0:
+            continue
+        side = "Sell" if position["side"] == "Buy" else "Buy"
+        session.place_order(category="linear", symbol=symbol, side=side, order_type="Market", qty=qty, reduce_only=True)
+        print(f"[TRADE CLOSED]")
+
+def cancel_specific_order(order_id: str, xrp: str):
+    if not order_id:
+        print("No order ID to cancel")
+        return
+    try:
+        response = session.cancel_order(category="linear", order_id=order_id, symbol=symbol)
+        print("Cancel order response:", response)
+    except Exception as e:
+        print("Error canceling order:", e)
+
+def enter_trade(signal, df, symbol="XRPUSDT"):
+    # global peak_balance, entry_price, entry_time
+    global leverage, xrp
+
+    mark_price = get_mark_price(symbol)
+    # val = df['Close'].mean() * 0.02 / df['atr'].mean()
+    # # print(f"atr's to reach 2% movement: {val:.2f}")
+    # offset = int(round(val, 0))
+    # min_price = df["Low"].iloc[offset:].min()
+    # max_price = df["High"].iloc[offset:].max()
+    # price_range_pct = (max_price - min_price) / mark_price
+    # bb_width = df['bb_upper'] - df['bb_lower']
+    # bb_width_pct = bb_width / mark_price
+
+    # if price_range_pct < 0.002 or bb_width < 0.002:
+    # if price_range_pct < 0.007:
+    if df['atr'].iloc[-1] / df['Close'].iloc[-1] < 0.001:
+        print("[INFO] Market range is too small (<2%), skipping trade.")
+        # print(f"price range in pct: {price_range_pct:.6f}")
+        # print(f"Max high prices: {max_price:.6f}")
+        # print(f"Min low prices: {min_price:.6f}")
+        # return
+
+    balance = get_balance()
+
+    risk_amount = max(balance * risk_pct, 10)
+
+    mark_price = get_mark_price(symbol)
+
+    step, min_qty = get_qty_step(symbol)
+    qty = risk_amount / mark_price
+    qty = math.floor(qty / step) * step
+    if qty < min_qty:
+        print(f"[WARNING] Calculated quantity {qty} is below minimum {min_qty}, skipping trade.")
+        return
+
+    side = "Buy" if signal == "Buy" else "Sell"
+
+    # atr_multiplier is 3 for tp, 1.5 for sl
+    # tp_price = mark_price + df['atr'].iloc[-1] * 3 if signal == "buy" else mark_price - dt['atr'].iloc[-1] * 3
+    # sl_price = mark_price - df['atr].iloc[-1] * 1.5 if signal == "buy" else mark_price + df['atr'].iloc[-1] * 1.5
+    tp_price = mark_price * (1 + 0.3 / 75) if signal == "buy" else mark_price * ((1 - 0.3) / leverage) # with leverage
+    sl_price = mark_price * (1 - 0.15 / 75) if signal == "buy" else mark_price * ((1 + 0.3) / leverage) # with leverage
+
+    tp_price_str = str(round(tp_price, 4))
+    sl_price_str = str(round(sl_price, 4))
+
+    # session.set_leverage(category="linear", symbol=symbol, buyLeverage=leverage, sellLeverage=leverage)
+    response = session.place_order(category="linear", symbol=symbol, side=side, order_type="Market", qty=qty, buyLeverage=leverage, sellLeverage=leverage, stop_loss=sl_price_str, take_profit=tp_price_str)
+    return response.get("result", {}).get("orderId")
+
+def wait_until_next_candle(interval_minutes):
+    now = time.time()
+    seconds_per_candle = interval_minutes * 60
+    sleep_seconds = seconds_per_candle - (now % seconds_per_candle)
+    # print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
+    time.sleep(sleep_seconds)
+
 def generate_signals(df):
     signals = []
     modes = []
@@ -150,13 +253,13 @@ def generate_signals(df):
         mode = None
 
         if row["adx"] > 25:
-            mode = "trend"
+            mode = "Trend"
             if row["ema_14_diff"] > 0:
-                signal = "buy"
+                signal = "Buy"
             elif row["ema_14_diff"] < 0:
-                signal = "sell"
+                signal = "Sell"
         else:
-            mode = "grid"
+            mode = "Grid"
             price = row["Close"]
             band_length = row["bb_upper"] - row["bb_lower"]
             if band_length == 0:
@@ -167,10 +270,18 @@ def generate_signals(df):
                 dist_upper = abs(price - row["bb_upper"]) / band_length
                 dist_lower = abs(price - row["bb_lower"]) / band_length
 
-            if dist_lower < 0.10 and row["ema_7_diff"] > 0:
-                signal = "buy"
-            elif dist_upper < 0.10 and row["ema_7_diff"] < 0:
-                signal = "sell"
+            # if dist_lower < 0.10 and row["ema_7_diff"] > 0:
+            #     signal = "Buy"
+            # elif dist_upper < 0.10 and row["ema_7_diff"] < 0:
+            #     signal = "Sell"
+            if dist_lower < 0.5 and row["ema_7_diff"] > 0:
+                signal = "Buy"
+            elif dist_upper < 0.5 and row["ema_7_diff"] < 0:
+                signal = "Sell"
+            elif dist_lower > 0.5 and row["ema_7_diff"] > 0:
+                signal = "Sell"
+            elif dist_upper > 0.5 and row["ema_7_diff"] < 0:
+                signal = "Buy"
 
         signals.append(signal)
         modes.append(mode)
@@ -179,145 +290,43 @@ def generate_signals(df):
     df['mode'] = modes
     return df
 
-def place_order(signal, entry_price, balance, leverage=75, tp_pct=0.30, sl_pct=0.15, qty_pct=0.10):
-    # Allocate a portion of the balance
-    allocated_margin = balance * qty_pct  # margin used
-    position_value = allocated_margin * leverage  # total position value
-    qty = position_value / entry_price  # size in contracts/coins
-
-    tp_price = entry_price * (1 + tp_pct / leverage) if signal == "buy" else entry_price * (1 - tp_pct / leverage) # with leverage
-    # sl_price = entry_price * (1 - sl_pct) if signal == "buy" else entry_price * (1 + sl_pct) # without leverage
-    # tp_price = entry_price * (1 + tp_pct) if signal == "buy" else entry_price * (1 - tp_pct) # Without leverage
-    # Assume sl_pct = 0.15 (15% of your margin)
-    sl_price = entry_price * (1 - sl_pct / leverage) if signal == "buy" else entry_price * (1 + sl_pct / leverage) # with leverage
-    # sl_price = entry_price - atr if signal == "buy" else entry_price + atr # atr-based
-    # sl_price = entry_price * (1 - sl_pct) if signal == "buy" else entry_price * (1 + sl_pct) # without leverage
-
-    return {
-        "side": signal,
-        "entry": entry_price,
-        "tp": tp_price,
-        "sl": sl_price,
-        "qty": qty,
-        "leverage": leverage,
-        "margin": allocated_margin,
-        "status": "open"
-    }
-
-def update_trade(trade, current_price):
-    if trade["status"] != "open":
-        return trade, None
-
-    pnl = 0
-    hit = False
-
-    if trade["side"] == "buy":
-        if current_price >= trade["tp"]:
-            pnl = (trade["tp"] - trade["entry"]) * trade["qty"]
-            hit = True
-        elif current_price <= trade["sl"]:
-            pnl = (trade["sl"] - trade["entry"]) * trade["qty"]
-            hit = True
-
-    elif trade["side"] == "sell":
-        if current_price <= trade["tp"]:
-            pnl = (trade["entry"] - trade["tp"]) * trade["qty"]
-            hit = True
-        elif current_price >= trade["sl"]:
-            pnl = (trade["entry"] - trade["sl"]) * trade["qty"]
-            hit = True
-
-    if hit:
-        trade["status"] = "closed"
-        trade["exit"] = current_price
-        trade["pnl"] = pnl
-        return trade, pnl
-
-    return trade, None
-
 def run_bot():
-    df = load_last_n_mb_csv(csv_path)
-    df['Open time'] = pd.to_datetime(df['Open time'])
-    df.set_index('Open time', inplace=True)
-    df = df.dropna()
-    df = add_indicators(df)
-    df = generate_signals(df)
-    active_trade = None
-    balance = 100
-    risk_pct = 0.1
+    active_trade = False
+    balance = get_balance()
+    risk_pct = 0.10
     leverage = 75
-    trade_results = []
-    total_trades = 0
+    order_id = ""
+    current_trade_side = ""
 
     # for index, row in df.iterrows():
-    for i in range(len(df)):
-        if balance * risk_pct < 5:
-            break
-        if (i + 1) % interval_minutes == 0:
-            if total_trades > 0:
-                wins = [p for p in trade_results if p > 0]
-                losses = [p for p in trade_results if p <= 0]
-                win_rate = len(wins) / total_trades * 100
-                avg_profit = sum(wins) / len(wins) if wins else 0
-                avg_loss = sum(losses) / len(losses) if losses else 0
-                
-                print(f"Stats at day {((i + 1) / 1440):.0f}:")
-                print(f"  Total trades: {total_trades}")
-                print(f"  Win rate: {win_rate:.2f}%")
-                print(f"  Avg profit: {avg_profit:.4f}")
-                print(f"  Avg loss: {avg_loss:.4f}")
-                print(f"  Balance: {balance:.2f}")
-
-                # Reset stats for next interval if desired
-                trade_results = []
-                total_trades = 0
-
-        # current_price = row["Close"]
-        current_price = df["Close"].iloc[i]
-
-        # Update active trade if any
-        if active_trade:
-            active_trade, pnl = update_trade(active_trade, current_price)
-            if pnl is not None:
-                balance += pnl
-                # trade_results.append(pnl)
-                total_trades += 1
-                print(f"Trade closed. PnL: {pnl:.2f}, New balance: {balance:.2f}")
-                active_trade = None
+    while True:
+        df = get_klines_df(xrp, 60)
+        df = add_indicators(df)
+        df = generate_signals(df)
+        
+        now = time.time()
+        mark_price = get_mark_price(xrp)
 
         # Get current signal and mode
-        # signal = row['signal']
-        # mode = row['mode']
-        signal = df["signal"].iloc[i]
-        mode = df["mode"].iloc[i]
+        signal = df["signal"].iloc[-1]
+        mode = df["mode"].iloc[-1]
 
-        # If grid mode and existing active trade, and signal differs, close previous trade
-        if mode == "grid" and active_trade and signal != active_trade["side"]:
-            # Close previous trade forcibly at current price
-            active_trade["status"] = "closed"
-            active_trade["exit"] = current_price
-            active_trade["pnl"] = (current_price - active_trade["entry"]) * active_trade["qty"] if active_trade["side"] == "buy" else (active_trade["entry"] - current_price) * active_trade["qty"]
-            balance += active_trade["pnl"]
-            trade_results.append(active_trade["pnl"])
-            total_trades += 1
-            print(f"Grid order closed due to opposite signal. PnL: {active_trade['pnl']:.2f}, New balance: {balance:.2f}")
-            active_trade = None
-
+        if active_trade and signal != df["signal"].iloc[-1]:
+            cancel_specific_order(order_id, xrp)
+            active_trade = False
+            print(f"Grid order closed due to opposite signal")
+            # print(f"Grid order closed due to opposite signal. PnL: {active_trade['pnl']:.2f}, New balance: {balance:.2f}")
         # Place new trade if no active trade and valid signal
-        if not active_trade and signal in ["buy", "sell"]:
-            active_trade = place_order(
-                signal=signal,
-                entry_price=current_price,
-                balance=balance,
-                leverage=leverage,
-                tp_pct=0.30,   # TP at 30% ROI pct
-                sl_pct=0.15,   # SL at 15% ROI pct
-                qty_pct=risk_pct
-            )
-            print(f"atr: {df['atr'].iloc[i]}")
-            print(f"High/Low range: {df['High'].iloc[i]-df['Low'].iloc[i]}")
-            print(f"High/Low range in pct: {(df['High'].iloc[i] - df['Low'].iloc[i]) / df['Close'].iloc[i]}")
-
-            print(f"Placed new {signal} order at {current_price:.4f} with TP: {active_trade['tp']:.4f} SL: {active_trade['sl']:.4f} Qty: {active_trade['qty']:.4f}")
+        # if not active_trade and signal in ["buy", "sell"]:
+        # if not active_trade and df["signal"] in ["Buy", "Sell"]:
+        if not active_trade:
+            if df["signal"].iloc[-1] == "Buy":
+                order_id = enter_trade("Buy",  df)
+                active_trade = True
+                print(f"Placed new order")
+            else:
+                order_id = enter_trade("Sell", df)
+                active_trade = True
+                print(f"Placed new order")
 
 run_bot()
