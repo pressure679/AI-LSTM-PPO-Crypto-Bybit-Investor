@@ -1,4 +1,4 @@
-import time
+ort time
 import math
 from datetime import datetime
 import requests
@@ -302,7 +302,7 @@ def run_bot():
         if active_trade and signal != df["signal"].iloc[-1]:
             cancel_specific_order(order_id, xrp)
             active_trade = False
-            print(f"Order closed due to opposite signal")
+            print(f"Grid order closed due to opposite signal")
             # print(f"Grid order closed due to opposite signal. PnL: {active_trade['pnl']:.2f}, New balance: {balance:.2f}")
         # Place new trade if no active trade and valid signal
         # if not active_trade and signal in ["buy", "sell"]:
