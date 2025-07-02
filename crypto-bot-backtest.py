@@ -25,7 +25,7 @@ interval_minutes = 1440  # 1 day, can be 10080 (week), 43200 (month)
 # We can wrap that functionality in a generate_signals function that returns signal, buy or sell, if you like.
 # in the loop where we place orders let tp be at 30% of roi in pct, and let sl be at 15% of roi in pct (these may not take effect, especially in grid orders where we use, probably tight, bollinger bands for opening and closing orders).
 def load_last_n_mb_csv(filepath, max_mb=25):
-    # Read header first (just first line)
+    # Read header first (just first line
     with open(filepath, 'r', encoding='utf-8') as f:
         header = f.readline()
 
@@ -244,7 +244,7 @@ def run_bot():
     df = generate_signals(df)
     active_trade = None
     balance = 100
-    risk_pct = 0.10
+    risk_pct = 0.1
     leverage = 75
     trade_results = []
     total_trades = 0
@@ -261,7 +261,7 @@ def run_bot():
                 avg_profit = sum(wins) / len(wins) if wins else 0
                 avg_loss = sum(losses) / len(losses) if losses else 0
                 
-                print(f"Stats at day {(i + 1) / 1440}:")
+                print(f"Stats at day {((i + 1) / 1440):.0f}:")
                 print(f"  Total trades: {total_trades}")
                 print(f"  Win rate: {win_rate:.2f}%")
                 print(f"  Avg profit: {avg_profit:.4f}")
@@ -282,7 +282,7 @@ def run_bot():
                 balance += pnl
                 # trade_results.append(pnl)
                 total_trades += 1
-                # print(f"Trade closed. PnL: {pnl:.2f}, New balance: {balance:.2f}")
+                print(f"Trade closed. PnL: {pnl:.2f}, New balance: {balance:.2f}")
                 active_trade = None
 
         # Get current signal and mode
@@ -300,7 +300,7 @@ def run_bot():
             balance += active_trade["pnl"]
             trade_results.append(active_trade["pnl"])
             total_trades += 1
-            # print(f"Grid order closed due to opposite signal. PnL: {active_trade['pnl']:.2f}, New balance: {balance:.2f}")
+            print(f"Grid order closed due to opposite signal. PnL: {active_trade['pnl']:.2f}, New balance: {balance:.2f}")
             active_trade = None
 
         # Place new trade if no active trade and valid signal
@@ -314,6 +314,10 @@ def run_bot():
                 sl_pct=0.15,   # SL at 15% ROI pct
                 qty_pct=risk_pct
             )
-            # print(f"Placed new {signal} order at {current_price:.4f} with TP: {active_trade['tp']:.4f} SL: {active_trade['sl']:.4f} Qty: {active_trade['qty']:.4f}")
+            print(f"atr: {df['atr'].iloc[i]}")
+            print(f"High/Low range: {df['High'].iloc[i]-df['Low'].iloc[i]}")
+            print(f"High/Low range in pct: {(df['High'].iloc[i] - df['Low'].iloc[i]) / df['Close'].iloc[i]}")
+
+            print(f"Placed new {signal} order at {current_price:.4f} with TP: {active_trade['tp']:.4f} SL: {active_trade['sl']:.4f} Qty: {active_trade['qty']:.4f}")
 
 run_bot()
