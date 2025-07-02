@@ -211,7 +211,7 @@ def enter_trade(signal, df, symbol="XRPUSDT"):
 
     balance = get_balance()
 
-    risk_amount = max(balance * risk_pct, 5)
+    risk_amount = max(balance * risk_pct, 10)
 
     mark_price = get_mark_price(symbol)
 
@@ -299,10 +299,10 @@ def run_bot():
         signal = df["signal"].iloc[-1]
         mode = df["mode"].iloc[-1]
 
-        if active_trade and signal != active_trade["side"]:
+        if active_trade and signal != df["signal"].iloc[-1]:
             cancel_specific_order(order_id, xrp)
             active_trade = False
-            print(f"Grid order closed due to opposite signal")
+            print(f"Order closed due to opposite signal")
             # print(f"Grid order closed due to opposite signal. PnL: {active_trade['pnl']:.2f}, New balance: {balance:.2f}")
         # Place new trade if no active trade and valid signal
         # if not active_trade and signal in ["buy", "sell"]:
