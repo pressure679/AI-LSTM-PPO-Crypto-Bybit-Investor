@@ -193,15 +193,15 @@ def enter_trade(signal, df, symbol="XRPUSDT"):
     # val = df['Close'].mean() * 0.02 / df['atr'].mean()
     # # print(f"atr's to reach 2% movement: {val:.2f}")
     # offset = int(round(val, 0))
-    # min_price = df["Low"].iloc[offset:].min()
-    # max_price = df["High"].iloc[offset:].max()
-    # price_range_pct = (max_price - min_price) / mark_price
+    min_price = df["Low"].iloc[offset:].min()
+    max_price = df["High"].iloc[offset:].max()
+    price_range_pct = (max_price - min_price) / mark_price
     # bb_width = df['bb_upper'] - df['bb_lower']
     # bb_width_pct = bb_width / mark_price
 
-    # if price_range_pct < 0.002 or bb_width < 0.002:
+    if price_range_pct < 0.001 or bb_width < 0.001:
     # if price_range_pct < 0.007:
-    if df['atr'].iloc[-1] / df['Close'].iloc[-1] < 0.001:
+    # if df['atr'].iloc[-1] / df['Close'].iloc[-1] < 0.001:
         print("[INFO] Market range is too small (<2%), skipping trade.")
         # print(f"price range in pct: {price_range_pct:.6f}")
         # print(f"Max high prices: {max_price:.6f}")
