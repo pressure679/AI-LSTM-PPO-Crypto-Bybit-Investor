@@ -1,17 +1,17 @@
+from io import StringIO
 import time
 import math
 from datetime import datetime
 import requests
 import pandas as pd
-from pybit.unified_trading import HTTP  # pip install pybit
 import numpy as np
-from io import StringIO
-import math
+from pybit.unified_trading import HTTP  # pip install pybit
+import threading
 
 # === SETUP ===
 api_key = "wLqYZxlM27F01smJFS"
 api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
-bnb = "BNBUSDT"
+coin = "XRPUSDT"
 # balance = 100
 # risk_pct = 0.1
 leverage = 75
@@ -26,6 +26,15 @@ session = HTTP(
     # testnet=True  # uncomment if needed
 )
 
+def keep_session_alive():
+    try:
+        response = session.get_server_time()  # Example lightweight call
+        print("[KEEP-ALIVE] Session alive:", response)
+    except Exception as e:
+        print("[KEEP-ALIVE ERROR]", e)
+    finally:
+        threading.Timer(1500, keep_session_alive).start()  # Schedule next call
+keep_session_alive()
 def calculate_position_size(balance, risk_pct, atr, price, atr_multiplier=1.5):
     """
     Calculate position size based on risk percentage and ATR.
@@ -39,7 +48,7 @@ def calculate_position_size(balance, risk_pct, atr, price, atr_multiplier=1.5):
     if stop_loss_distance == 0:
         return 0  # avoid division by zero
     qty = risk_amount / (stop_loss_distance * price)
-    step, min_qty = get_qty_step(bnb)
+    step, min_qty = get_qty_step(coin)
     qty = math.floor(qty / step) * step
     qty = round(qty, 4)
     if qty < min_qty:
@@ -83,7 +92,7 @@ def get_sl_tp_levels(entry_price, leverage, direction, tp_roi=50, sl_roi=25):
         tp_price = entry_price * (1 - tp_move)
         sl_price = entry_price * (1 + sl_move)
         
-    return round(sl_price, 2), round(tp_price, 2)
+    return round(sl_price, 2), round(tp_price, 4)
 
 # A dictionary to keep track of TP levels for the current trade
 # Structure example:
@@ -114,7 +123,7 @@ def validate_sl_tp(entry_price, sl_price, tp_price, side, atr=None):
         if tp_price >= entry_price:
             tp_price = entry_price - 1.5 * atr
 
-    return round(sl_price, 2), round(tp_price, 2)
+    return round(sl_price, 4), round(tp_price, 4)
 def setup_trade_tp_levels(order_id, side, entry_price, total_qty, leverage, atr):
     """
     Initialize the TP levels for a new trade.
@@ -188,7 +197,7 @@ def partial_tp_check_and_reduce_position(order_id, side, mark_price):
     leverage = current_trade_info["leverage"]
 
     # Define partial quantities for each TP level (sum to 1.0)
-    partial_qty_fractions = [0.4, 0.2, 0.2, 0.2]
+    partial_qty_fractions = [0.4, 0.4, 0.2]
 
     for i, tp_price in enumerate(tp_levels):
         if tp_done[i]:
@@ -206,7 +215,7 @@ def partial_tp_check_and_reduce_position(order_id, side, mark_price):
 
             # Place a reduce position order - assuming Bybit supports reduce-only market order
             response = session.place_active_order(
-                symbol=bnb,
+                symbol=coin,
                 side="Sell",  # opposite side to close position
                 order_type="Market",
                 qty=qty_to_close,
@@ -230,7 +239,7 @@ def partial_tp_check_and_reduce_position(order_id, side, mark_price):
             print(f"[INFO] TP level {i+1} reached. Closing {qty_to_close} qty on Sell position at {mark_price:.2f}")
 
             response = session.place_active_order(
-                symbol=bnb,
+                symbol=coin,
                 side="Buy",  # opposite side to close position
                 order_type="Market",
                 qty=qty_to_close,
@@ -373,10 +382,10 @@ def add_indicators(df):
     df['TR'] = tr
     return df
 
-def get_klines_df(bnb, interval, limit=1000):
+def get_klines_df(coin, interval, limit=1000):
     response = session.get_kline(
         category="linear",
-        symbol=bnb,
+        symbol=coin,
         interval=str(interval),
         limit=limit
     )
@@ -393,12 +402,12 @@ def get_balance():
     balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
     return float(balance_data[0]["totalEquity"])
 
-def get_mark_price(bnb):
-    price_data = session.get_tickers(category="linear", symbol=bnb)["result"]["list"][0]
+def get_mark_price(coin):
+    price_data = session.get_tickers(category="linear", symbol=coin)["result"]["list"][0]
     return float(price_data["lastPrice"])
 
-def get_qty_step(bnb):
-    info = session.get_instruments_info(category="linear", symbol=bnb)
+def get_qty_step(coin):
+    info = session.get_instruments_info(category="linear", symbol=coin)
     data = info["result"]["list"][0]
     step = float(data["lotSizeFilter"]["qtyStep"])
     min_qty = float(data["lotSizeFilter"]["minOrderQty"])
@@ -417,10 +426,10 @@ def get_trade_qty():
     max_allowed_usd = usdt_balance * 0.1
     trade_usd_amount = min(desired_usd_amount, max_allowed_usd)
 
-    price = float(session.get_tickers(category="linear", symbol=bnb)["result"]["list"][0]["lastPrice"])
+    price = float(session.get_tickers(category="linear", symbol=coin)["result"]["list"][0]["lastPrice"])
     raw_qty = trade_usd_amount / price
 
-    step, min_qty = get_qty_step(bnb)
+    step, min_qty = get_qty_step(coin)
     qty = math.floor(raw_qty / step) * step
     qty = round(qty, 4)  # round for precision
 
@@ -430,7 +439,7 @@ def get_trade_qty():
     return qty
 
 def close_all_positions():
-    positions = session.get_positions(category="linear", symbol=bnb)
+    positions = session.get_positions(category="linear", symbol=coin)
     position_lists = positions['result']['list']
     # for position in positions:
     for position in position_lists:
@@ -441,7 +450,7 @@ def close_all_positions():
         session.place_order(category="linear", symbol=symbol, side=side, order_type="Market", qty=qty, reduce_only=True)
         print(f"[TRADE CLOSED]")
 
-def cancel_specific_order(order_id: str, bnb: str):
+def cancel_specific_order(order_id: str, coin: str):
     if not order_id:
         print("No order ID to cancel")
         return
@@ -451,7 +460,7 @@ def cancel_specific_order(order_id: str, bnb: str):
     except Exception as e:
         print("Error canceling order:", e)
 
-def enter_trade(signal, df, symbol="BNBUSDT", n_tp=3):
+def enter_trade(signal, df, symbol="COINUSDT", n_tp=3):
     global leverage
     global current_trade_info
 
@@ -557,8 +566,8 @@ def generate_signals(df):
         # macd_momentum_increasing = curr_macd_momentum > prev_macd_momentum
         # macd_momentum_decreasing = curr_macd_momentum < prev_macd_momentum
             
-        if row["ema_14"] > row["ema_28"] and row['adx'] > 20:
-        # if row["ema_28_diff"] > 0 and row['adx'] > 20:
+        # if row["ema_14"] > row["ema_28"] and row['adx'] > 20:
+        if row["ema_28_diff"] > 0 and row['adx'] > 20:
         # if row["ema_28_diff"] > 0 and row["adx"] > 20 and row["rsi"] < 70 :
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] > 0:
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] < 70 and row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # performs badly with high leverage
@@ -567,8 +576,8 @@ def generate_signals(df):
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and row['macd_line'] > row['macd_signal']: # has up to 1:2 RR, but performs badly with high leverage
         # if row['ema_28_diff'] > 0 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # has about a 1:2 RR, but performs badly with high leverage
             signal = "Buy"
-        if row["ema_14"] < row["ema_28"] and row['adx'] > 20:
-        # if row["ema_28_diff"] < 0 and row['adx'] > 20:
+        # if row["ema_14"] < row["ema_28"] and row['adx'] > 20:
+        if row["ema_28_diff"] < 0 and row['adx'] > 20:
         # if row["ema_28_diff"] < 0 and row["adx"] > 20 and row["rsi"] > 30:
         # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] < 0:
         # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] > 30 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # performs badly on high leverage
@@ -595,16 +604,16 @@ def run_bot():
     current_trade_side = ""
 
     while True:
-        df = get_klines_df(bnb, 60)
+        df = get_klines_df(coin, 60)
         df = add_indicators(df)
         df = generate_signals(df)
 
-        mark_price = get_mark_price(bnb)
+        mark_price = get_mark_price(coin)
         signal = df["signal"].iloc[-1]
 
         if active_trade:
             # Fetch open positions for symbol
-            positions = session.get_positions(category="linear", symbol=bnb)["result"]["list"]
+            positions = session.get_positions(category="linear", symbol=coin)["result"]["list"]
             
             # Find the relevant open position (non-zero size, matching side)
             # position = None
@@ -627,27 +636,27 @@ def run_bot():
 
             # Close position if signal flips
             if signal != current_trade_side:
-                cancel_specific_order(order_id, bnb)
+                cancel_specific_order(order_id, coin)
                 active_trade = False
                 print(f"Order closed due to opposite signal")
 
         if not active_trade and signal != "":
-            setup = setup_trade(df, signal, symbol=bnb)
+            setup = setup_trade(df, signal, symbol=coin)
             if setup is False:
                 print("[INFO] Trade setup skipped due to low volatility or invalid conditions.")
                 wait_until_next_candle(1)
                 continue
             if signal == "Buy":
-                order_id = enter_trade("Buy", df, symbol=bnb)
-                entry_price = get_mark_price(bnb)
+                order_id = enter_trade("Buy", df, symbol=coin)
+                entry_price = get_mark_price(coin)
                 total_qty = get_trade_qty()
                 setup_trade_tp_levels(order_id, "Buy", entry_price, total_qty, leverage, df['atr'].iloc[-1])
                 current_trade_side = "Buy"
                 active_trade = True
                 print(f"Placed new Buy order")
             elif signal == "Sell":
-                order_id = enter_trade("Sell", df, symbol=bnb)
-                entry_price = get_mark_price(bnb)
+                order_id = enter_trade("Sell", df, symbol=coin)
+                entry_price = get_mark_price(coin)
                 total_qty = get_trade_qty()
                 setup_trade_tp_levels(order_id, "Sell", entry_price, total_qty, leverage, df['atr'].iloc[-1])
                 current_trade_side = "Sell"
