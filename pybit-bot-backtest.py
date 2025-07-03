@@ -205,7 +205,7 @@ def calculate_trade_parameters(entry_price, atr, balance, side, leverage=75, ris
     # Example SL/TP based on ATR and levels
     stop_loss = entry_price - stop_loss_distance if side == "buy" else entry_price + stop_loss_distance
     tp_levels = [
-        entry_price + atr * i if side == "buy" else entry_price - atr * i
+        entry_price + atr * (i + 0.5) if side == "buy" else entry_price - atr * (i + 0.5)
         for i in range(1, 5)
     ]
 
@@ -307,7 +307,7 @@ def run_bot():
     investment = 0.0
     index_placed_order = 0
 
-    # num_trades_active = 0
+    num_trades_active = 0
 
     for i in range(len(df)):
         # print(f"num trades active: {num_trades_active}")
@@ -388,7 +388,7 @@ def run_bot():
                 "trail_offset": atr * 1.5,
                 "pnl": 0
             }
-            # num_trades_active +=1
+            num_trades_active +=1
             # print(f"Placed new {signal} order at {current_price:.4f} with Qty: {active_trade['qty']:.4f}")
             # print(f"macd line: {df['macd_line'].iloc[i]}")
             # print(f"macd momentum: {df['macd_momentum'].iloc[i]}")
