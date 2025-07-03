@@ -82,8 +82,14 @@ def get_sl_tp_levels(entry_price, leverage, direction, tp_roi=50, sl_roi=25):
     :param sl_roi: float, stop loss ROI percentage
     :return: (sl_price, tp_price) tuple
     """
-    tp_move = (tp_roi / 100) / leverage
-    sl_move = (sl_roi / 100) / leverage
+    # tp_move = (tp_roi / 100) / leverage
+    # sl_move = (sl_roi / 100) / leverage
+
+    # tp_move = 0.05 / get_mark_price()
+    # sl_move = 0.025 / get_mark_price()
+
+    tp_move = 0.05
+    sl_move = 0.025
     
     if direction == "Buy":
         tp_price = entry_price * (1 + tp_move)
@@ -92,7 +98,7 @@ def get_sl_tp_levels(entry_price, leverage, direction, tp_roi=50, sl_roi=25):
         tp_price = entry_price * (1 - tp_move)
         sl_price = entry_price * (1 + sl_move)
         
-    return round(sl_price, 2), round(tp_price, 4)
+    return round(sl_price, 4), round(tp_price, 4)
 
 # A dictionary to keep track of TP levels for the current trade
 # Structure example:
@@ -113,15 +119,15 @@ def validate_sl_tp(entry_price, sl_price, tp_price, side, atr=None):
     if side == "Buy":
         # SL must be < entry, TP must be > entry
         if sl_price >= entry_price:
-            sl_price = entry_price - 0.5 * atr
+            sl_price = entry_price * (1 - 0.025)
         if tp_price <= entry_price:
-            tp_price = entry_price + 1.5 * atr
+            tp_price = entry_price * (1 + 0.05)
     else:
         # SL must be > entry, TP must be < entry
         if sl_price <= entry_price:
-            sl_price = entry_price + 0.5 * atr
+            sl_price = entry_price * (1 - 0.025)
         if tp_price >= entry_price:
-            tp_price = entry_price - 1.5 * atr
+            tp_price = entry_price - (1 + 0.5)
 
     return round(sl_price, 4), round(tp_price, 4)
 def setup_trade_tp_levels(order_id, side, entry_price, total_qty, leverage, atr):
@@ -133,16 +139,16 @@ def setup_trade_tp_levels(order_id, side, entry_price, total_qty, leverage, atr)
     # For example, 4 TP levels with incremental profits:
     if side == "Buy":
         tp_levels = [
-            entry_price * (1 + atr * 0.5),
-            entry_price * (1 + atr * 1),
-            entry_price * (1 + atr * 1.5),
+            entry_price * ((1 + 0.05) / 10 * 4),
+            entry_price * ((1 + 0.05) / 10 * 8),
+            entry_price * ((1 + 0.05)),
             # entry_price * (1 + atr * 4),
         ]
     else:  # sell
         tp_levels = [
-            entry_price * (1 - atr * 0.5),
-            entry_price * (1 - atr * 1),
-            entry_price * (1 - atr * 1.5),
+            entry_price * ((1 - 0.05) / 10 * 4),
+            entry_price * ((1 - 0.05) / 10 * 8),
+            entry_price * ((1 - 0.05)),
             # entry_price * (1 - atr * 4),
         ]
 
@@ -250,7 +256,7 @@ def partial_tp_check_and_reduce_position(order_id, side, mark_price):
             if response.get("ret_msg") == "OK":
                 tp_done[i] = True
                 current_trade_info["total_qty"] -= qty_to_close
-def trailing_stop_check(position, atr, trail_multiplier=0.01):
+def trailing_stop_check(position, atr, trail_multiplier=0.025):
     """
     Adjusts trailing stop loss based on price movement and ATR.
 
@@ -272,8 +278,9 @@ def trailing_stop_check(position, atr, trail_multiplier=0.01):
     trail_distance = atr * trail_multiplier
 
     if side == "Buy":
-        new_stop_loss = mark_price * (1 - trail_distance)
-        new_stop_loss = round(new_stop_loss, 2)
+        # new_stop_loss = mark_price * (1 - trail_distance)
+        new_stop_loss = mark_price * (1 - 0.025)
+        new_stop_loss = round(new_stop_loss, 4)
         if current_stop_loss == 0 or new_stop_loss > current_stop_loss:
             try:
                 session.set_trading_stop(
@@ -286,8 +293,9 @@ def trailing_stop_check(position, atr, trail_multiplier=0.01):
                 print(f"[ERROR] Updating trailing stop (Buy): {e}")
 
     elif side == "Sell":
-        new_stop_loss = mark_price * (1 + trail_distance)
-        new_stop_loss = round(new_stop_loss, 2)
+        # new_stop_loss = mark_price * (1 + trail_distance)
+        new_stop_loss = mark_price * (1 + 0.025)
+        new_stop_loss = round(new_stop_loss, 4)
         if current_stop_loss == 0 or new_stop_loss < current_stop_loss:
             try:
                 session.set_trading_stop(
@@ -510,12 +518,24 @@ def enter_trade(signal, df, symbol="COINUSDT", n_tp=3):
         return None
 
     # Generate TP levels
-    tp_levels = [
-        round(entry_price + (tp_price - entry_price) * i / n_tp, 2)
-        if side == "Buy"
-        else round(entry_price - (entry_price - tp_price) * i / n_tp, 2)
-        for i in range(1, n_tp + 1)
-    ]
+    if side == "Buy":
+        tp_levels = [
+            entry_price * ((1 + 0.05) / 10 * 4),
+            entry_price * ((1 + 0.05) / 10 * 8),
+            entry_price * ((1 + 0.05)),
+            # round(entry_price + (tp_price - entry_price) * i / n_tp, 4)
+            # if side == "Buy"
+            # else round(entry_price - (entry_price - tp_price) * i / n_tp, 4)
+            # for i in range(1, n_tp + 1)
+        ]
+    else:
+        tp_levels = [
+            entry_price * ((1 - 0.05) / 10 * 4),
+            entry_price * ((1 - 0.05) / 10 * 8),
+            entry_price * ((1 - 0.05)),
+            # entry_price * (1 - atr * 4),
+        ]
+
 
     if order_id:
         current_trade_info = {
@@ -566,8 +586,8 @@ def generate_signals(df):
         # macd_momentum_increasing = curr_macd_momentum > prev_macd_momentum
         # macd_momentum_decreasing = curr_macd_momentum < prev_macd_momentum
             
-        # if row["ema_14"] > row["ema_28"] and row['adx'] > 20:
-        if row["ema_28_diff"] > 0 and row['adx'] > 20:
+        if row["ema_14"] > row["ema_28"] and row['adx'] > 20:
+        # if row["ema_28_diff"] < 0 and row['adx'] > 20:
         # if row["ema_28_diff"] > 0 and row["adx"] > 20 and row["rsi"] < 70 :
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] > 0:
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] < 70 and row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # performs badly with high leverage
@@ -576,8 +596,8 @@ def generate_signals(df):
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and row['macd_line'] > row['macd_signal']: # has up to 1:2 RR, but performs badly with high leverage
         # if row['ema_28_diff'] > 0 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # has about a 1:2 RR, but performs badly with high leverage
             signal = "Buy"
-        # if row["ema_14"] < row["ema_28"] and row['adx'] > 20:
-        if row["ema_28_diff"] < 0 and row['adx'] > 20:
+        if row["ema_14"] < row["ema_28"] and row['adx'] > 20:
+        # if row["ema_28_diff"] < 0 and row['adx'] > 20:
         # if row["ema_28_diff"] < 0 and row["adx"] > 20 and row["rsi"] > 30:
         # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] < 0:
         # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] > 30 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # performs badly on high leverage
