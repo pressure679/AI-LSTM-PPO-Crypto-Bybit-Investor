@@ -15,7 +15,7 @@ xrp = "XRPUSDT"
 csv_path = "/mnt/chromeos/removable/SD Card/Linux-shared-files/crypto and currency pairs/XRPUSD_1m_Binance.csv"
 interval_minutes = 1440  # 1 day, can be 10080 (week), 43200 (month)
 
-def load_last_n_mb_csv(filepath, max_mb=50):
+def load_last_n_mb_csv(filepath, max_mb=5):
     # Read header first (just first line
     with open(filepath, 'r', encoding='utf-8') as f:
         header = f.readline()
@@ -113,14 +113,21 @@ def add_indicators(df):
     df['ema_7'] = calculate_ema(df['Close'], 7)
     df['ema_14'] = calculate_ema(df['Close'], 14)
     df['ema_28'] = calculate_ema(df['Close'], 28)
+    # df['ema_45'] = calculate_ema(df['Close'], 45)
+    # df['ema_75'] = calculate_ema(df['Close'], 75)
+    # df['ema_100'] = calculate_ema(df['Close'], 100)
+    # df['ema_200'] = calculate_ema(df['Close'], 200)
     df["ema_7_diff"] = df["ema_7"].diff()
     df["ema_14_diff"] = df["ema_14"].diff()
     df["ema_28_diff"] = df["ema_28"].diff()
-    # df['ema_100'] = calculate_ema(df['Close'], 100)
-    # df['ema_200'] = calculate_ema(df['Close'], 200)
     df['rsi'] = calculate_rsi(df['Close'])
     df['macd_line'], df['macd_signal'], df['macd_hist'] = calculate_macd(df['Close'])
     df['macd_hist'] = df['macd_line'] - df['macd_signal']
+    df['macd_momentum'] = df['macd_line'].diff()
+    # df['macd_signal_diff'] = df['macd_signal'].diff()
+    df['macd_cross_up'] = (df['macd_line'].shift(1) < df['macd_signal'].shift(1)) & (df['macd_line'] > df['macd_signal'])
+    df['macd_cross_down'] = (df['macd_line'].shift(1) > df['macd_signal'].shift(1)) & (df['macd_line'] < df['macd_signal'])
+
     df['bb_upper'], df['bb_lower'] = calculate_bollinger_bands(df['Close'])
     df['atr'] = calculate_atr(df['High'], df['Low'], df['Close'])
     df['adx'] = calculate_adx(df)
@@ -135,36 +142,52 @@ def add_indicators(df):
 def generate_signals(df):
     signals = []
     modes = []
-    prev_hist = 0.0
-    curr_hist = 0.0
-    macd_increasing = None
-    # macd_decreasing
+    # prev_hist = 0.0
+    # curr_hist = 0.0
+    # macd_increasing = False
+    # macd_decreasing = False
 
     for i in range(len(df)):
+        if i < 1:
+            signals.append("")
+            modes.append("")
+            continue
         row = df.iloc[i]
+        prev = df.iloc[i-1]
         signal = ""
         mode = ""
 
-        if i >= 1:
-            prev_hist = df.iloc[i - 1]["macd_hist"]
-            curr_hist = row["macd_hist"]
-            macd_increasing = curr_hist > prev_hist
-        else:
-            macd_increasing = False  # not enough data to compare
+        # rsi_rising = row["rsi"] > prev["rsi"]
+        # rsi_falling = row["rsi"] < prev["rsi"]
 
-        if row["adx"] > 20:
-            mode = "trend"
-            # if row["ema_7_diff"] > 0:
-            #     signal = "buy"
-            # elif row["ema_7_diff"] < 0:
-            #     signal = "sell"
-            if row["ema_7_diff"] > 0 and macd_increasing and row["rsi"] < 50 and row["ema_7_diff"] > 0:
-                signal = "buy"
-            elif row["ema_7_diff"] < 0 and macd_increasing is False and row["rsi"] > 50 and row["ema_7_diff"] < 0:
-                signal = "sell"
-        else:
-            mode = "grid"
-            signal = ""
+        prev_hist = df.iloc[i - 1]["macd_hist"]
+        curr_hist = row["macd_hist"]
+        # macd_increasing = curr_hist > prev_hist
+        # macd_decreasing = curr_hist < prev_hist
+        prev_macd_momentum = df.iloc[i - 1]["macd_momentum"]
+        curr_macd_momentum = row["macd_momentum"]
+        macd_momentum_increasing = curr_macd_momentum > prev_macd_momentum
+        macd_momentum_decreasing = curr_macd_momentum < prev_macd_momentum
+            
+        if row["ema_28_diff"] > 0 and row['adx'] > 20:
+        # if row["ema_28_diff"] > 0 and row["adx"] > 20 and row["rsi"] < 70 :
+        # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] > 0:
+        # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] < 70 and row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # performs badly with high leverage
+        # if row["ema_28_diff"] > 0 and row["adx"] > 20 and row['macd_cross_up']: # performs badly with high leverage
+        # if row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # performs ok with high leverage
+        # if row["ema_28_diff"] > 0 and row['adx'] > 20 and row['macd_line'] > row['macd_signal']: # has up to 1:2 RR, but performs badly with high leverage
+        # if row['ema_28_diff'] > 0 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # has about a 1:2 RR, but performs badly with high leverage
+            signal = "buy"
+        if row["ema_28_diff"] < 0 and row['adx'] > 20:
+        # if row["ema_28_diff"] < 0 and row["adx"] > 20 and row["rsi"] > 30:
+        # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] < 0:
+        # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] > 30 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # performs badly on high leverage
+        # if row["ema_28_diff"] < 0 and row["adx"] > 20 and row['macd_cross_down']: # performs badly with high leverage
+        # if row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # performs ok with high leverage
+        # if row["ema_28_diff"] < 0 and row['adx'] > 20 and row['macd_line'] < row['macd_signal']: # has up to 1:2 RR, but performs badly with high leverage
+        # if row['ema_28_diff'] < 0 and row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # has about a 1:2 RR , but performs badly with high leverage
+            signal = "sell"
+            
         signals.append(signal)
         modes.append(mode)
 
@@ -173,34 +196,98 @@ def generate_signals(df):
 
     return df
 
-def place_order(signal, entry_price, balance, leverage=75, qty_pct=0.10):
-    # Allocate a portion of the balance
-    allocated_margin = balance * qty_pct  # margin used
-    position_value = allocated_margin * leverage  # total position value
-    qty = position_value / entry_price  # size in contracts/coins
+def calculate_trade_parameters(entry_price, atr, balance, side, leverage=75, risk_pct=0.05):
+    stop_loss_distance = atr * 1.5
+    allocated_margin = balance * risk_pct
+    position_value = allocated_margin * leverage
+    position_size = position_value / entry_price
+
+    # Example SL/TP based on ATR and levels
+    stop_loss = entry_price - stop_loss_distance if side == "buy" else entry_price + stop_loss_distance
+    tp_levels = [
+        entry_price + atr * i if side == "buy" else entry_price - atr * i
+        for i in range(1, 5)
+    ]
 
     return {
-        "side": signal,
-        "entry": entry_price,
-        "qty": qty,
-        "leverage": leverage,
-        "margin": allocated_margin,
-        "status": "open"
+        "position_size": round(position_size, 4),
+        "stop_loss": round(stop_loss, 2),
+        "tp_levels": [round(tp, 2) for tp in tp_levels]
     }
 
 def update_trade(trade, current_price):
     if trade["status"] != "open":
-        return trade, None
+        return trade, 0  # Return 0 PnL for consistency
 
-    pnl = 0
-    if trade["side"] == "buy":
-        pnl = (current_price - trade["entry"]) * trade["qty"]
+    qty = trade["qty"]
+    entry = trade["entry"]
+    side = trade["side"]
+    sl = trade["sl"]
+    tp_levels = trade["tp_levels"]
+    tp_hits = trade["tp_hits"]
+    trail_active = trade.get("trail_active", False)
+    trail_offset = trade.get("trail_offset", 0)
+    realized_pnl = 0
 
-    elif trade["side"] == "sell":
-        pnl = (trade["entry"] - current_price) * trade["qty"]
+    # Check SL or trailing SL
+    if side == "buy":
+        if trail_active and current_price <= trade["trail_sl"]:
+            pnl = (trade["trail_sl"] - entry) * qty
+            trade["status"] = "closed"
+            trade["pnl"] += pnl
+            return trade, pnl
+        elif current_price <= sl:
+            pnl = (sl - entry) * qty
+            trade["status"] = "closed"
+            trade["pnl"] += pnl
+            return trade, pnl
 
-    trade["pnl"] = pnl
-    return trade, pnl
+    elif side == "sell":
+        if trail_active and current_price >= trade["trail_sl"]:
+            pnl = (entry - trade["trail_sl"]) * qty
+            trade["status"] = "closed"
+            trade["pnl"] += pnl
+            return trade, pnl
+        elif current_price >= sl:
+            pnl = (entry - sl) * qty
+            trade["status"] = "closed"
+            trade["pnl"] += pnl
+            return trade, pnl
+
+    # Check TP levels (partial profits)
+    for i, tp in enumerate(tp_levels):
+        if not tp_hits[i]:
+            if (side == "buy" and current_price >= tp) or (side == "sell" and current_price <= tp):
+                portion = 0.25  # 25% closed per TP level
+                pnl = (tp - entry) * qty * portion if side == "buy" else (entry - tp) * qty * portion
+                realized_pnl += pnl
+                trade["pnl"] += pnl
+                tp_hits[i] = True
+
+                # Activate trailing SL after TP2 hit
+                if i == 1 and not trail_active:
+                    trail_price = current_price - trail_offset if side == "buy" else current_price + trail_offset
+                    trade["trail_sl"] = trail_price
+                    trade["trail_active"] = True
+
+    # Update trailing SL dynamically if active
+    if trail_active:
+        if side == "buy":
+            new_trail_sl = current_price - trail_offset
+            if new_trail_sl > trade["trail_sl"]:
+                trade["trail_sl"] = new_trail_sl
+        else:
+            new_trail_sl = current_price + trail_offset
+            if new_trail_sl < trade["trail_sl"]:
+                trade["trail_sl"] = new_trail_sl
+
+    # If all TP levels hit, close trade
+    if all(tp_hits):
+        trade["status"] = "closed"
+        return trade, trade["pnl"]
+
+    return trade, realized_pnl
+
 
 def run_bot():
     df = load_last_n_mb_csv(csv_path)
@@ -210,25 +297,24 @@ def run_bot():
     df = add_indicators(df)
     df = generate_signals(df)
     balance = 100
-    risk_pct = 0.1
-    leverage = 75
+    risk_pct = 0.15
+    # leverage = 20
 
     trade_results = []
     total_trades = 0
     num_active_trades = 0
     active_trade = None
+    investment = 0.0
+    index_placed_order = 0
 
-    # order tracker variables
-    in_position = False
-    position_size = 0.0
-    order_side = ""
+    # num_trades_active = 0
 
-    # for index, row in df.iterrows():
     for i in range(len(df)):
-        if balance * risk_pct < 5:
+        # print(f"num trades active: {num_trades_active}")
+        # investment = max(balance * risk_pct, 5)
+        if balance < 10:
             break
-        # print(f"active trades: {num_active_trades}")
-        # if (i + 1) % interval_minutes == 0:
+        # 1440 1 day, can be 10080 (week), 43200 (month)
         if (i + 1) % 1440 == 0:
             if total_trades > 0:
                 wins = [p for p in trade_results if p > 0]
@@ -240,8 +326,8 @@ def run_bot():
                 print(f"Stats at day {((i + 1) / 1440):.0f}:")
                 print(f"  Total trades: {total_trades}")
                 print(f"  Win rate: {win_rate:.2f}%")
-                print(f"  Avg profit: {avg_profit:.4f}")
-                print(f"  Avg loss: {avg_loss:.4f}")
+                print(f"  Avg profit: {avg_profit:.2f}")
+                print(f"  Avg loss: {avg_loss:.2f}")
                 print(f"  Balance: {balance:.2f}")
 
                 # Reset stats for next interval if desired
@@ -252,23 +338,23 @@ def run_bot():
 
         # Update active trade if any
         if active_trade:
-        # if in_position:
-            # active_trade, pnl = update_trade(active_trade, current_price)
             active_trade, pnl = update_trade(active_trade, current_price)
-            if active_trade["status"] == "closed":
+            if pnl != 0:
                 balance += pnl
                 trade_results.append(pnl)
-                total_trades += 1
-                print(f"Trade closed. PnL: {pnl:.2f}, New balance: {balance:.2f}")
-                active_trade = None
-                num_active_trades -= 1
+                if active_trade["status"] == "closed":
+                    total_trades += 1
+                    active_trade = None
+                    # num_trades_active -= 1
 
         # Get current signal and mode
         signal = df["signal"].iloc[i]
         mode = df["mode"].iloc[i]
+        atr = df["atr"].iloc[i]  # Make sure ATR is already calculated in your DataFrame
+        # if signal != "":
+        #     print(f"candle {i}, signal: {signal}, price: {current_price}")
         
-        if active_trade and signal != active_trade["side"]:
-        # if in_position == True and signal != active_trade["side"]:
+        if active_trade and signal != active_trade["side"] and signal != "":
             # Close previous trade forcibly at current price
             active_trade["status"] = "closed"
             active_trade["exit"] = current_price
@@ -277,24 +363,37 @@ def run_bot():
             balance += active_trade["pnl"]
             trade_results.append(active_trade["pnl"])
             total_trades += 1
-            print(f"Grid order closed due to opposite signal. PnL: {active_trade['pnl']:.2f}, New balance: {balance:.2f}")
+            # num_trades_active -= 1
+            # print(f"Order closed due to opposite signal. PnL: {active_trade['pnl']:.2f}, New balance: {balance:.2f}")
+            # print(f"atr: {df['atr'].iloc[i]}")
+            # print(f"distance to last placed order: {i-index_placed_order}")
+            # index_placed_order = i
             active_trade = None
-            in_position = False
-            num_active_trades -= 1
 
         # Place new trade if no active trade and valid signal
-        if active_trade == None and signal in ["buy", "sell"]:
-        # if in_position == False and signal in ["buy", "sell"]:
-            active_trade = place_order(
-                signal=signal,
-                entry_price=current_price,
-                balance=balance,
-                leverage=leverage,
-                qty_pct=risk_pct
-            )
-            in_position = True
-            num_active_trades += 1
-            print(f"Placed new {signal} order at {current_price:.4f} with Qty: {active_trade['qty']:.4f}")
+        # Open a new trade if there's a signal, no active trade, and ATR is valid
+        if not active_trade and signal in ["buy", "sell"] and atr > 0:
+            entry_price = current_price
+            trade_params = calculate_trade_parameters(entry_price, atr, balance, signal)
+            
+            active_trade = {
+                "status": "open",
+                "side": signal,
+                "entry": entry_price,
+                "qty": trade_params["position_size"],
+                "sl": trade_params["stop_loss"],
+                "tp_levels": trade_params["tp_levels"],
+                "tp_hits": [False, False, False, False],
+                "trail_active": False,
+                "trail_offset": atr * 1.5,
+                "pnl": 0
+            }
+            # num_trades_active +=1
+            # print(f"Placed new {signal} order at {current_price:.4f} with Qty: {active_trade['qty']:.4f}")
+            # print(f"macd line: {df['macd_line'].iloc[i]}")
+            # print(f"macd momentum: {df['macd_momentum'].iloc[i]}")
+            # index_placed_order = i
+
 
 run_bot()
 # print(f"Total trades placed: {total_trades}")
