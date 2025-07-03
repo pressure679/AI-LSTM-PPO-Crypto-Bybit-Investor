@@ -16,6 +16,7 @@ bnb = "BNBUSDT"
 # risk_pct = 0.1
 leverage = 75
 risk_pct = 0.1
+current_trade_info = {}
 
 session = HTTP(
     api_key=api_key,
@@ -53,7 +54,7 @@ def get_tp_levels(entry_price, atr, leverage, direction):
     """
     atr_value = float(atr) / float(entry_price)  # normalize ATR to % of price
     # tp_multipliers = [0.5, 1.0, 1.5]
-    tp_multipliers = [1.5, 2.5, 3.5, 4.5]
+    tp_multipliers = [0.02, 0.03, 0.04]
     # if direction.lower() == "buy":
     if direction == "Buy":
         return [round(entry_price * (1 + m * atr_value), 4) for m in tp_multipliers]
@@ -61,17 +62,28 @@ def get_tp_levels(entry_price, atr, leverage, direction):
     else:
         return [round(entry_price * (1 - m * atr_value), 4) for m in tp_multipliers]
         # return [round(entry_price * (1 - m * atr * leverage), 4) for m in tp_multipliers]
-def get_sl_level(entry_price, atr, leverage, direction):
+def get_sl_tp_levels(entry_price, leverage, direction, tp_roi=50, sl_roi=25):
     """
-    Stop loss level based on ATR multiplier, tighter than TP.
+    Calculate TP and SL prices based on ROI percentage and leverage.
+    
+    :param entry_price: float, price at which position is entered
+    :param leverage: int or float, leverage used
+    :param direction: str, "Buy" or "Sell"
+    :param tp_roi: float, take profit ROI percentage
+    :param sl_roi: float, stop loss ROI percentage
+    :return: (sl_price, tp_price) tuple
     """
-    atr_value = atr / entry_price
-    sl_multiplier = 1.0  # e.g. 1 ATR stop loss
+    tp_move = (tp_roi / 100) / leverage
+    sl_move = (sl_roi / 100) / leverage
+    
     if direction == "Buy":
-        # 1.5 is atr multiplier
-        return round(entry_price * (1 - 1.5 * atr_value), 2)
-    else:
-        return round(entry_price * (1 + 1.5 * atr_value), 2)
+        tp_price = entry_price * (1 + tp_move)
+        sl_price = entry_price * (1 - sl_move)
+    else:  # Sell
+        tp_price = entry_price * (1 - tp_move)
+        sl_price = entry_price * (1 + sl_move)
+        
+    return round(sl_price, 2), round(tp_price, 2)
 
 # A dictionary to keep track of TP levels for the current trade
 # Structure example:
@@ -83,6 +95,26 @@ def get_sl_level(entry_price, atr, leverage, direction):
 #   "total_qty": float,
 # }
 current_trade_info = {}
+def validate_sl_tp(entry_price, sl_price, tp_price, side, atr=None):
+    """
+    Validates SL and TP, adjusting them if invalid.
+    """
+    atr = atr or entry_price * 0.01  # fallback: 1% of entry
+
+    if side == "Buy":
+        # SL must be < entry, TP must be > entry
+        if sl_price >= entry_price:
+            sl_price = entry_price - 0.5 * atr
+        if tp_price <= entry_price:
+            tp_price = entry_price + 1.5 * atr
+    else:
+        # SL must be > entry, TP must be < entry
+        if sl_price <= entry_price:
+            sl_price = entry_price + 0.5 * atr
+        if tp_price >= entry_price:
+            tp_price = entry_price - 1.5 * atr
+
+    return round(sl_price, 2), round(tp_price, 2)
 def setup_trade_tp_levels(order_id, side, entry_price, total_qty, leverage, atr):
     """
     Initialize the TP levels for a new trade.
@@ -92,17 +124,17 @@ def setup_trade_tp_levels(order_id, side, entry_price, total_qty, leverage, atr)
     # For example, 4 TP levels with incremental profits:
     if side == "Buy":
         tp_levels = [
-            entry_price * (1 + atr),
-            entry_price * (1 + atr * 2),
-            entry_price * (1 + atr * 3),
-            entry_price * (1 + atr * 4),
+            entry_price * (1 + atr * 0.5),
+            entry_price * (1 + atr * 1),
+            entry_price * (1 + atr * 1.5),
+            # entry_price * (1 + atr * 4),
         ]
     else:  # sell
         tp_levels = [
-            entry_price * (1 - atr),
-            entry_price * (1 - atr * 2),
-            entry_price * (1 - atr * 3),
-            entry_price * (1 - atr * 4),
+            entry_price * (1 - atr * 0.5),
+            entry_price * (1 - atr * 1),
+            entry_price * (1 - atr * 1.5),
+            # entry_price * (1 - atr * 4),
         ]
 
     current_trade_info.update({
@@ -209,57 +241,54 @@ def partial_tp_check_and_reduce_position(order_id, side, mark_price):
             if response.get("ret_msg") == "OK":
                 tp_done[i] = True
                 current_trade_info["total_qty"] -= qty_to_close
-def trailing_stop_check(position, atr, trail_multiplier=1.5):
+def trailing_stop_check(position, atr, trail_multiplier=0.01):
     """
-    Adjust trailing stop loss based on price movement and ATR.
-    Should be called periodically to update stop loss.
+    Adjusts trailing stop loss based on price movement and ATR.
 
-    position: dict from session.get_positions
-    atr: current ATR value
-    trail_multiplier: fraction of ATR to trail stop by
-
-    This example only updates stop loss price if price moves favorably.
+    :param position: dict from session.get_positions()["result"]["list"][i]
+    :param atr: current ATR value
+    :param trail_multiplier: how far behind price the SL should trail
     """
 
     symbol = position["symbol"]
     side = position["side"]
-    entry_price = float(position["entryPrice"])
-    current_stop_loss = float(position.get("stopLossPrice", 0))
+    # print("Position data keys:", position.keys())
+    # print(position)
+    # entry_price = float(position["entryPrice"])
+    entry_price = float(position["avgPrice"])
     qty = float(position["size"])
+    current_stop_loss = float(position.get("stopLoss", 0))  # some Bybit keys use stopLoss
     mark_price = get_mark_price(symbol)
 
     trail_distance = atr * trail_multiplier
 
     if side == "Buy":
-        new_stop_loss = max(current_stop_loss, mark_price - trail_distance) if current_stop_loss > 0 else mark_price - trail_distance
-        new_stop_loss = round(new_stop_loss, 4)
-        if new_stop_loss > current_stop_loss:
-            # update stop loss
+        new_stop_loss = mark_price * (1 - trail_distance)
+        new_stop_loss = round(new_stop_loss, 2)
+        if current_stop_loss == 0 or new_stop_loss > current_stop_loss:
             try:
                 session.set_trading_stop(
                     category="linear",
                     symbol=symbol,
-                    side=side,
                     stop_loss=new_stop_loss
                 )
-                print(f"[TRAILING STOP UPDATED] New SL: {new_stop_loss}")
+                print(f"[TRAILING STOP UPDATED] Buy SL: {new_stop_loss}")
             except Exception as e:
-                print(f"[ERROR] Updating trailing stop: {e}")
+                print(f"[ERROR] Updating trailing stop (Buy): {e}")
 
     elif side == "Sell":
-        new_stop_loss = min(current_stop_loss, mark_price + trail_distance) if current_stop_loss > 0 else mark_price + trail_distance
-        new_stop_loss = round(new_stop_loss, 4)
-        if new_stop_loss < current_stop_loss or current_stop_loss == 0:
+        new_stop_loss = mark_price * (1 + trail_distance)
+        new_stop_loss = round(new_stop_loss, 2)
+        if current_stop_loss == 0 or new_stop_loss < current_stop_loss:
             try:
                 session.set_trading_stop(
                     category="linear",
                     symbol=symbol,
-                    side=side,
                     stop_loss=new_stop_loss
                 )
-                print(f"[TRAILING STOP UPDATED] New SL: {new_stop_loss}")
+                print(f"[TRAILING STOP UPDATED] Sell SL: {new_stop_loss}")
             except Exception as e:
-                print(f"[ERROR] Updating trailing stop: {e}")
+                print(f"[ERROR] Updating trailing stop (Sell): {e}")
 
 def calculate_ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
@@ -422,24 +451,21 @@ def cancel_specific_order(order_id: str, bnb: str):
     except Exception as e:
         print("Error canceling order:", e)
 
-def enter_trade(signal, df, symbol="BNBUSDT", n_tp=4):
+def enter_trade(signal, df, symbol="BNBUSDT", n_tp=3):
     global leverage
-    
+    global current_trade_info
+
     if signal not in ["Buy", "Sell"]:
         print("[WARN] Invalid signal for enter_trade.")
         return None
 
     mark_price = get_mark_price(symbol)
-    
-    # Skip trading if ATR range too low
-    # if df['atr'].iloc[-1] / df['Close'].iloc[-1] < df['atr'].min():
-    #     print(f"[INFO] Market range too small, {df['atr'].min()}, skipping trade.")
-    #     return None
+    entry_price = mark_price
 
     balance = get_balance()
     risk_amount = max(balance * risk_pct, 10)
 
-    # Calculate qty based on risk and price
+    # Calculate qty
     step, min_qty = get_qty_step(symbol)
     total_qty = risk_amount / mark_price
     total_qty = math.floor(total_qty / step) * step
@@ -449,22 +475,13 @@ def enter_trade(signal, df, symbol="BNBUSDT", n_tp=4):
 
     side = "Buy" if signal == "Buy" else "Sell"
 
-    # Get SL level
-    sl_price = get_sl_level(df['Close'].iloc[-1], df['atr'].iloc[-1], leverage, df['signal'].iloc[-1])
-    if sl_price is None:
-        # fallback SL, e.g. ATR based or fixed % SL
-        if side == "Buy":
-            # sl_price = mark_price * (1 - 0.0015)
-            sl_price = mark_price * (1 - df['atr'].iloc[-1])
-        else:
-            sl_price = mark_price * (1 + df['atr'].iloc[-1])
-    
-    sl_price_str = f"{sl_price:.2f}"
+    # === SL/TP logic based on ROI ===
+    sl_price, tp_price = get_sl_tp_levels(entry_price, leverage, side, tp_roi=50, sl_roi=25)
 
-    print()
-    tp_levels = get_tp_levels(mark_price, df['atr'].iloc[-1], leverage, side)
-    tp_price_str = f"{tp_levels[2]:.2f}"
+    sl_price_str = f"{sl_price:.2f}"
+    tp_price_str = f"{tp_price:.2f}"
     order_id = ""
+
     try:
         response = session.place_order(
             category="linear",
@@ -478,22 +495,28 @@ def enter_trade(signal, df, symbol="BNBUSDT", n_tp=4):
             stop_loss=sl_price_str
         )
         order_id = response.get("result", {}).get("orderId")
-        print(f"[INFO] Placed order with TP={tp_price_str}, SL={sl_price_str}")
+        print(f"[INFO] Placed {side} order with TP={tp_price_str}, SL={sl_price_str}")
     except Exception as e:
         print(f"[ERROR] Failed to place order: {e}")
+        return None
 
-    # After placing entries, set trading stop (trailing stop) for the full position
-    # try:
-    #     # This adjusts SL and TS on the entire position (you may tune trailing_stop params)
-    #     response = session.set_trading_stop(
-    #         symbol=symbol,
-    #         side=side,
-    #         trailing_stop=0.0015,  # example trailing stop distance, adjust to your liking
-    #         stop_loss=sl_price_str
-    #     )
-    #     print("[INFO] Set trailing stop and SL for position.")
-    # except Exception as e:
-    #     print(f"[ERROR] Failed to set trailing stop: {e}")
+    # Generate TP levels
+    tp_levels = [
+        round(entry_price + (tp_price - entry_price) * i / n_tp, 2)
+        if side == "Buy"
+        else round(entry_price - (entry_price - tp_price) * i / n_tp, 2)
+        for i in range(1, n_tp + 1)
+    ]
+
+    if order_id:
+        current_trade_info = {
+            "order_id": order_id,
+            "tp_levels": tp_levels,
+            "tp_done": [False] * len(tp_levels),
+            "total_qty": total_qty,
+            "leverage": leverage,
+            "side": side
+        }
 
     return order_id
 
@@ -534,7 +557,7 @@ def generate_signals(df):
         # macd_momentum_increasing = curr_macd_momentum > prev_macd_momentum
         # macd_momentum_decreasing = curr_macd_momentum < prev_macd_momentum
             
-        if row["ema_14"] < row["ema_28"] and row['adx'] > 20:
+        if row["ema_14"] > row["ema_28"] and row['adx'] > 20:
         # if row["ema_28_diff"] > 0 and row['adx'] > 20:
         # if row["ema_28_diff"] > 0 and row["adx"] > 20 and row["rsi"] < 70 :
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] > 0:
@@ -544,7 +567,7 @@ def generate_signals(df):
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and row['macd_line'] > row['macd_signal']: # has up to 1:2 RR, but performs badly with high leverage
         # if row['ema_28_diff'] > 0 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # has about a 1:2 RR, but performs badly with high leverage
             signal = "Buy"
-        if row["ema_14"] > row["ema_28"] and row['adx'] > 20:
+        if row["ema_14"] < row["ema_28"] and row['adx'] > 20:
         # if row["ema_28_diff"] < 0 and row['adx'] > 20:
         # if row["ema_28_diff"] < 0 and row["adx"] > 20 and row["rsi"] > 30:
         # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] < 0:
@@ -581,10 +604,10 @@ def run_bot():
 
         if active_trade:
             # Fetch open positions for symbol
-            positions = session.get_positions(category="linear", symbol=bnb)
+            positions = session.get_positions(category="linear", symbol=bnb)["result"]["list"]
             
             # Find the relevant open position (non-zero size, matching side)
-            position = None
+            # position = None
             for pos in positions:
                 if float(pos["size"]) > 0 and pos["side"] == current_trade_side:
                     position = pos
@@ -600,7 +623,7 @@ def run_bot():
                 print("[INFO] Position closed or missing, resetting active_trade flag.")
 
             # Example partial TP check (your existing logic)
-            partial_tp_check_and_reduce_position(order_id, current_trade_side, mark_price)
+            # partial_tp_check_and_reduce_position(order_id, current_trade_side, mark_price)
 
             # Close position if signal flips
             if signal != current_trade_side:
