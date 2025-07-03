@@ -653,7 +653,7 @@ def run_bot():
                 setup_trade_tp_levels(order_id, "Buy", entry_price, total_qty, leverage, df['atr'].iloc[-1])
                 current_trade_side = "Buy"
                 active_trade = True
-                print(f"Placed new Buy order")
+                # print(f"Placed new Buy order")
             elif signal == "Sell":
                 order_id = enter_trade("Sell", df, symbol=coin)
                 entry_price = get_mark_price(coin)
@@ -661,7 +661,7 @@ def run_bot():
                 setup_trade_tp_levels(order_id, "Sell", entry_price, total_qty, leverage, df['atr'].iloc[-1])
                 current_trade_side = "Sell"
                 active_trade = True
-                print(f"Placed new Sell order")
+                # print(f"Placed new Sell order")
 
         wait_until_next_candle(1)
 
