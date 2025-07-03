@@ -56,9 +56,10 @@ def get_tp_levels(entry_price, atr, leverage, direction="Buy"):
     tp_multipliers = [1.5, 2.5, 3.5, 4.5]
     if direction.lower() == "buy":
         return [round(entry_price * (1 + m * atr_value * leverage), 4) for m in tp_multipliers]
+        # return [round(entry_price * (1 + m * atr * leverage), 4) for m in tp_multipliers]
     else:
         return [round(entry_price * (1 - m * atr_value * leverage), 4) for m in tp_multipliers]
-
+        # return [round(entry_price * (1 - m * atr * leverage), 4) for m in tp_multipliers]
 def get_sl_level(entry_price, atr, leverage, direction="Buy"):
     """
     Stop loss level based on ATR multiplier, tighter than TP.
@@ -111,6 +112,14 @@ def setup_trade_tp_levels(order_id, side, entry_price, total_qty, leverage, atr)
         "total_qty": total_qty,
         "leverage": leverage,
     })
+def setup_trade(df, signal, symbol):
+    # ... pre-checks
+    market_range_pct = df['atr'].iloc[-1] / df['Close'].iloc[-1]
+    if market_range_pct < df['atr'].min():
+    # if market_range_pct < 1.5:
+        print(f"[INFO] Market range too small: {market_range_pct:.3f}, skipping trade.")
+        return None
+    return {...}
 def partial_tp_check_and_reduce_position(order_id, side, mark_price):
     """
     Check if price reached any TP level not yet done, and place a partial close order.
@@ -357,10 +366,10 @@ def get_trade_qty():
     max_allowed_usd = usdt_balance * 0.1
     trade_usd_amount = min(desired_usd_amount, max_allowed_usd)
 
-    price = float(session.get_tickers(category="linear", symbol=symbol)["result"]["list"][0]["lastPrice"])
+    price = float(session.get_tickers(category="linear", symbol=bnb)["result"]["list"][0]["lastPrice"])
     raw_qty = trade_usd_amount / price
 
-    step, min_qty = get_qty_step(symbol)
+    step, min_qty = get_qty_step(bnb)
     qty = math.floor(raw_qty / step) * step
     qty = round(qty, 4)  # round for precision
 
@@ -401,8 +410,8 @@ def enter_trade(signal, df, symbol="BNBUSDT", n_tp=4):
     mark_price = get_mark_price(symbol)
     
     # Skip trading if ATR range too low
-    if df['atr'].iloc[-1] / df['Close'].iloc[-1] < 0.001:
-        print("[INFO] Market range too small, skipping trade.")
+    if df['atr'].iloc[-1] / df['Close'].iloc[-1] < df['atr'].min():
+        print(f"[INFO] Market range too small, {df['atr'].min()}, skipping trade.")
         return None
 
     balance = get_balance()
@@ -427,7 +436,7 @@ def enter_trade(signal, df, symbol="BNBUSDT", n_tp=4):
     side = "Buy" if signal.lower() == "buy" else "Sell"
 
     # Get multiple TP levels, e.g. [tp1, tp2, tp3, tp4]
-    tp_levels = get_tp_levels(df, signal)
+    tp_levels = get_tp_levels(df, df['atr'].iloc[-1], signal, leverage)
     # if not tp_levels or len(tp_levels) < n_tp:
     #     print("[WARN] Not enough TP levels returned, using default calculations.")
     #     # fallback example TP levels (simple increments)
@@ -582,19 +591,24 @@ def run_bot():
 
         # If no active trade, open one based on signal
         if not active_trade:
+            signal = df["signal"].iloc[-1]
+            setup = setup_trade(df, signal, symbol=bnb)
+            if setup is None:
+                print("[INFO] Trade setup skipped due to low volatility or invalid conditions.")
+                wait_until_next_candle(1)
+                continue
             if signal.lower() == "buy":
                 order_id = enter_trade("Buy", df, symbol=bnb)
                 # Assume you get entry price and qty from response or from mark price & calculation
                 entry_price = get_mark_price(bnb)
-                total_qty = calculate_qty_for_trade(...)  # your qty calculation function or reuse risk logic
-                setup_trade_tp_levels(order_id, "Buy", entry_price, total_qty, leverage)
+                total_qty = get_trade_qty()
+                setup_trade_tp_levels(order_id, "Buy", entry_price, total_qty, leverage, df['atr'].iloc[-1])
                 current_trade_side = "Buy"
                 active_trade = True
                 print(f"Placed new Buy order")
             elif signal.lower() == "sell":
                 order_id = enter_trade("Sell", df, symbol=bnb)
                 entry_price = get_mark_price(bnb)
-                # total_qty = calculate_qty_for_trade(...)
                 total_qty = get_trade_qty()
                 setup_trade_tp_levels(order_id, "Sell", entry_price, total_qty, leverage)
                 current_trade_side = "Sell"
