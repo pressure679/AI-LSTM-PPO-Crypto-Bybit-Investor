@@ -35,7 +35,7 @@ def keep_session_alive():
     finally:
         threading.Timer(1500, keep_session_alive).start()  # Schedule next call
 keep_session_alive()
-def calculate_position_size(balance, risk_pct, atr, price, atr_multiplier=1.5):
+def calculate_position_size(balance, risk_pct, atr, price):
     """
     Calculate position size based on risk percentage and ATR.
     risk_amount = balance * risk_pct
@@ -44,7 +44,7 @@ def calculate_position_size(balance, risk_pct, atr, price, atr_multiplier=1.5):
     """
     risk_amount = balance * risk_pct
     # stop_loss_distance = atr * atr_multiplier
-    stop_loss_distance = atr * 1.5
+    stop_loss_distance = atr
     if stop_loss_distance == 0:
         return 0  # avoid division by zero
     qty = risk_amount / (stop_loss_distance * price)
@@ -56,47 +56,33 @@ def calculate_position_size(balance, risk_pct, atr, price, atr_multiplier=1.5):
         return 0
     return qty
 
+# seems to be correct
 def get_tp_levels(entry_price, atr, leverage, direction):
     """
     Returns a list of TP price levels for partial profit taking.
     Example: 3 TPs at 0.5, 1.0, and 1.5 ATR multiples.
     """
-    atr_value = float(atr) / float(entry_price)  # normalize ATR to % of price
-    # tp_multipliers = [0.5, 1.0, 1.5]
-    tp_multipliers = [0.02, 0.03, 0.04]
-    # if direction.lower() == "buy":
-    if direction == "Buy":
-        return [round(entry_price * (1 + m * atr_value), 4) for m in tp_multipliers]
-        # return [round(entry_price * (1 + m * atr * leverage), 4) for m in tp_multipliers]
-    else:
-        return [round(entry_price * (1 - m * atr_value), 4) for m in tp_multipliers]
-        # return [round(entry_price * (1 - m * atr * leverage), 4) for m in tp_multipliers]
-def get_sl_tp_levels(entry_price, leverage, direction, tp_roi=50, sl_roi=25):
-    """
-    Calculate TP and SL prices based on ROI percentage and leverage.
-    
-    :param entry_price: float, price at which position is entered
-    :param leverage: int or float, leverage used
-    :param direction: str, "Buy" or "Sell"
-    :param tp_roi: float, take profit ROI percentage
-    :param sl_roi: float, stop loss ROI percentage
-    :return: (sl_price, tp_price) tuple
-    """
-    # tp_move = (tp_roi / 100) / leverage
-    # sl_move = (sl_roi / 100) / leverage
+    tp_levels = [
+        entry_price + atr * i / 3 if side == "buy" else entry_price - atr * i / 3
+        for i in range(1, 4)
+    ]
 
-    # tp_move = 0.05 / get_mark_price()
-    # sl_move = 0.025 / get_mark_price()
 
-    tp_move = 0.05
-    sl_move = 0.025
+# def get_sl_tp_levels(entry_price, leverage, direction, tp_roi=50, sl_roi=25):
+def get_sl_tp_levels(entry_price, atr, direction):
+    # tp_move = 0.001
+    # sl_move = 0.025
     
     if direction == "Buy":
-        tp_price = entry_price * (1 + tp_move)
-        sl_price = entry_price * (1 - sl_move)
+        # tp_price = entry_price * (1 + tp_move)
+        # sl_price = entry_price * (1 - sl_move)
+        tp_price = entry_price + atr
+        sl_price = entry_price - atr * 0.5
     else:  # Sell
-        tp_price = entry_price * (1 - tp_move)
-        sl_price = entry_price * (1 + sl_move)
+        # tp_price = entry_price * (1 - tp_move)
+        # sl_price = entry_price * (1 + sl_move)
+        tp_price = entry_price - atr
+        sl_price = entry_price + atr * 0.5
         
     return round(sl_price, 4), round(tp_price, 4)
 
@@ -110,51 +96,53 @@ def get_sl_tp_levels(entry_price, leverage, direction, tp_roi=50, sl_roi=25):
 #   "total_qty": float,
 # }
 current_trade_info = {}
-def validate_sl_tp(entry_price, sl_price, tp_price, side, atr=None):
+def validate_sl_tp(entry_price, sl_price, tp_price, side, atr):
     """
     Validates SL and TP, adjusting them if invalid.
     """
-    atr = atr or entry_price * 0.01  # fallback: 1% of entry
+    # atr = atr or entry_price * 0.01  # fallback: 1% of entry
 
     if side == "Buy":
         # SL must be < entry, TP must be > entry
         if sl_price >= entry_price:
-            sl_price = entry_price * (1 - 0.025)
+            # sl_price = entry_price * (1 - 0.025)
+            sl_price = entry_price - atr * 0.5
         if tp_price <= entry_price:
-            tp_price = entry_price * (1 + 0.05)
+            # tp_price = entry_price * (1 + 0.05)
+            tp_price = entry_price + atr
     else:
         # SL must be > entry, TP must be < entry
         if sl_price <= entry_price:
-            sl_price = entry_price * (1 - 0.025)
+            sl_price = entry_price + atr * 0.5
         if tp_price >= entry_price:
-            tp_price = entry_price - (1 + 0.5)
+            tp_price = entry_price - atr
 
     return round(sl_price, 4), round(tp_price, 4)
 def setup_trade_tp_levels(order_id, side, entry_price, total_qty, leverage, atr):
-    """
-    Initialize the TP levels for a new trade.
-    Example: 4 TP levels spaced by ATR or fixed %.
-    You can customize as needed.
-    """
-    # For example, 4 TP levels with incremental profits:
     if side == "Buy":
         tp_levels = [
-            entry_price * ((1 + 0.05) / 10 * 4),
-            entry_price * ((1 + 0.05) / 10 * 8),
-            entry_price * ((1 + 0.05)),
-            # entry_price * (1 + atr * 4),
+            # (entry_price + 1 * atr) * 0.25,
+            # (entry_price + 1 * atr) * 0.5,
+            # (entry_price + 1 * atr) * 0.75,
+            # entry_price + 1 * atr,
+            # # entry_price * (1 + atr * 4),
+            entry_price + atr / 3,
+            entry_price + atr / 3 * 2,
+            entry_price + atr,
+            # entry_price + 3 * atr,
         ]
     else:  # sell
         tp_levels = [
-            entry_price * ((1 - 0.05) / 10 * 4),
-            entry_price * ((1 - 0.05) / 10 * 8),
-            entry_price * ((1 - 0.05)),
+            entry_price - atr / 3,
+            entry_price - atr / 3 * 2,
+            entry_price - atr,
+            # entry_price + 4 * atr,
             # entry_price * (1 - atr * 4),
         ]
 
     current_trade_info.update({
         "tp_levels": tp_levels,
-        "tp_done": [False, False, False, False],
+        "tp_done": [False, False, False],
         "order_id": order_id,
         "side": side,
         "total_qty": total_qty,
@@ -171,17 +159,17 @@ def setup_trade(df, signal, symbol):
 
     # Dynamic threshold based on ADX
     if adx < 20:
-        print(f"[INFO] ADX too low ({adx:.2f}), skipping trade.")
+        print(f"[INFO] ADX too low ({adx:.2f}), ATR: {atr:.4f}, skipping trade.")
         return None
     elif adx < 30 and market_range_pct < 1.5:
-        print(f"[INFO] ADX moderate ({adx:.2f}) but market range low ({market_range_pct:.2f}%), skipping.")
+        print(f"[INFO] ADX moderate ({adx:.2f}), ATR {atr:.4f}, but market range low ({market_range_pct:.2f}%), skipping.")
         return None
     elif adx >= 30 and market_range_pct < 1.0:
-        print(f"[INFO] ADX strong ({adx:.2f}) but range too small ({market_range_pct:.2f}%), skipping.")
+        print(f"[INFO] ADX strong ({adx:.2f}), ATR {atr:.4f}, but range too small ({market_range_pct:.2f}%), skipping.")
         return None
 
     # Passed filters
-    print(f"[INFO] ADX {adx:.2f}, range {market_range_pct:.2f}%, trade OK.")
+    print(f"[INFO] ADX {adx:.2f}, ATR {atr:.4f}, range {market_range_pct:.2f}%, trade OK.")
     return True
     # return {
     #     "entry_price": entry_price,
@@ -203,13 +191,17 @@ def partial_tp_check_and_reduce_position(order_id, side, mark_price):
     leverage = current_trade_info["leverage"]
 
     # Define partial quantities for each TP level (sum to 1.0)
+    # partial_qty_fractions = [0.4, 0.4, 0.2]
+    # partial_qty_fractions = [0.4, 0.2, 0.2, 0.2]
+    # partial_qty_fractions = [0.25 0.25, 0.25, 0.25]
+    # partial_qty_fractions = [0.25 0.25, 0.25, 25]
     partial_qty_fractions = [0.4, 0.4, 0.2]
 
     for i, tp_price in enumerate(tp_levels):
         if tp_done[i]:
             continue  # already closed partial for this TP
 
-        if side.lower() == "buy" and mark_price >= tp_price:
+        if side == "Buy" and mark_price >= tp_price:
             # Price reached TP level on a long position
             qty_to_close = total_qty * partial_qty_fractions[i]
             qty_to_close = round(qty_to_close, 4)  # round to allowed precision
@@ -256,15 +248,7 @@ def partial_tp_check_and_reduce_position(order_id, side, mark_price):
             if response.get("ret_msg") == "OK":
                 tp_done[i] = True
                 current_trade_info["total_qty"] -= qty_to_close
-def trailing_stop_check(position, atr, trail_multiplier=0.025):
-    """
-    Adjusts trailing stop loss based on price movement and ATR.
-
-    :param position: dict from session.get_positions()["result"]["list"][i]
-    :param atr: current ATR value
-    :param trail_multiplier: how far behind price the SL should trail
-    """
-
+def trailing_stop_check(position, atr):
     symbol = position["symbol"]
     side = position["side"]
     # print("Position data keys:", position.keys())
@@ -275,11 +259,11 @@ def trailing_stop_check(position, atr, trail_multiplier=0.025):
     current_stop_loss = float(position.get("stopLoss", 0))  # some Bybit keys use stopLoss
     mark_price = get_mark_price(symbol)
 
-    trail_distance = atr * trail_multiplier
+    atr_trail_distance = atr
 
     if side == "Buy":
         # new_stop_loss = mark_price * (1 - trail_distance)
-        new_stop_loss = mark_price * (1 - 0.025)
+        new_stop_loss = mark_price - atr * 1.5
         new_stop_loss = round(new_stop_loss, 4)
         if current_stop_loss == 0 or new_stop_loss > current_stop_loss:
             try:
@@ -294,7 +278,7 @@ def trailing_stop_check(position, atr, trail_multiplier=0.025):
 
     elif side == "Sell":
         # new_stop_loss = mark_price * (1 + trail_distance)
-        new_stop_loss = mark_price * (1 + 0.025)
+        new_stop_loss = mark_price + atr * 1.5
         new_stop_loss = round(new_stop_loss, 4)
         if current_stop_loss == 0 or new_stop_loss < current_stop_loss:
             try:
@@ -390,7 +374,7 @@ def add_indicators(df):
     df['TR'] = tr
     return df
 
-def get_klines_df(coin, interval, limit=1000):
+def get_klines_df(coin, interval, limit=60):
     response = session.get_kline(
         category="linear",
         symbol=coin,
@@ -468,7 +452,7 @@ def cancel_specific_order(order_id: str, coin: str):
     except Exception as e:
         print("Error canceling order:", e)
 
-def enter_trade(signal, df, symbol="COINUSDT", n_tp=3):
+def enter_trade(signal, df, symbol="XRPUSDT", n_tp=3):
     global leverage
     global current_trade_info
 
@@ -480,7 +464,7 @@ def enter_trade(signal, df, symbol="COINUSDT", n_tp=3):
     entry_price = mark_price
 
     balance = get_balance()
-    risk_amount = max(balance * risk_pct, 10)
+    risk_amount = max(balance * risk_pct, 5)
 
     # Calculate qty
     step, min_qty = get_qty_step(symbol)
@@ -493,11 +477,20 @@ def enter_trade(signal, df, symbol="COINUSDT", n_tp=3):
     side = "Buy" if signal == "Buy" else "Sell"
 
     # === SL/TP logic based on ROI ===
-    sl_price, tp_price = get_sl_tp_levels(entry_price, leverage, side, tp_roi=50, sl_roi=25)
+    sl_price, tp_price = get_sl_tp_levels(entry_price, df['atr'].iloc[-1], side)
 
-    sl_price_str = f"{sl_price:.2f}"
-    tp_price_str = f"{tp_price:.2f}"
+    sl_price_str = f"{sl_price:.4f}"
+    tp_price_str = f"{tp_price:.4f}"
     order_id = ""
+
+    # print(f"atr: {df['atr'].iloc[-1]}")
+    # print(f"symbol: {symbol}")
+    # print(f"side: {side}")
+    # print(f"qty: {total_qty}")
+    # print(f"leverage: {leverage}")
+    # print(f"tp: {tp_price_str}")
+    # print(f"sl: {sl_price_str}")
+    # print(f"price: {mark_price}")
 
     try:
         response = session.place_order(
@@ -517,35 +510,32 @@ def enter_trade(signal, df, symbol="COINUSDT", n_tp=3):
         print(f"[ERROR] Failed to place order: {e}")
         return None
 
-    # Generate TP levels
+    # Genenerate TP levels
     if side == "Buy":
-        tp_levels = [
-            entry_price * ((1 + 0.05) / 10 * 4),
-            entry_price * ((1 + 0.05) / 10 * 8),
-            entry_price * ((1 + 0.05)),
-            # round(entry_price + (tp_price - entry_price) * i / n_tp, 4)
-            # if side == "Buy"
-            # else round(entry_price - (entry_price - tp_price) * i / n_tp, 4)
-            # for i in range(1, n_tp + 1)
-        ]
+       # SL must be < entry, TP must be > entry
+       if sl_price >= entry_price:
+           # sl_price = entry_price * (1 - 0.025)
+           sl_price = entry_price - atr
+       if tp_price <= entry_price:
+           # tp_price = entry_price * (1 + 0.05)
+           tp_price = entry_price + atr
     else:
-        tp_levels = [
-            entry_price * ((1 - 0.05) / 10 * 4),
-            entry_price * ((1 - 0.05) / 10 * 8),
-            entry_price * ((1 - 0.05)),
-            # entry_price * (1 - atr * 4),
-        ]
-
+       # SL must be > entry, TP must be < entry
+       if sl_price <= entry_price:
+           sl_price = entry_price + atr
+       if tp_price >= entry_price:
+           tp_price = entry_price - atr
 
     if order_id:
-        current_trade_info = {
-            "order_id": order_id,
-            "tp_levels": tp_levels,
-            "tp_done": [False] * len(tp_levels),
-            "total_qty": total_qty,
-            "leverage": leverage,
-            "side": side
-        }
+       current_trade_info = {
+           "order_id": order_id,
+           # "tp_levels": tp_levels,
+           "tp_levels": current_trade_info["tp_levels"],
+           "tp_done": [False] * len(current_trade_info["tp_levels"]),
+           "total_qty": total_qty,
+           "leverage": leverage,
+           "side": side
+       }
 
     return order_id
 
@@ -569,7 +559,7 @@ def generate_signals(df):
             signals.append("")
             # modes.append("")
             continue
-        row = df.iloc[i]
+        # row = df.iloc[i]
         prev = df.iloc[i-1]
         signal = ""
         # mode = ""
@@ -577,16 +567,13 @@ def generate_signals(df):
         # rsi_rising = row["rsi"] > prev["rsi"]
         # rsi_falling = row["rsi"] < prev["rsi"]
 
-        # prev_hist = df.iloc[i - 1]["macd_hist"]
-        # curr_hist = row["macd_hist"]
-        # # macd_increasing = curr_hist > prev_hist
-        # # macd_decreasing = curr_hist < prev_hist
-        # prev_macd_momentum = df.iloc[i - 1]["macd_momentum"]
-        # curr_macd_momentum = row["macd_momentum"]
-        # macd_momentum_increasing = curr_macd_momentum > prev_macd_momentum
-        # macd_momentum_decreasing = curr_macd_momentum < prev_macd_momentum
+        prev_macd_line = df["macd_line"].iloc[i-3]
+        curr_macd_line = df["macd_line"].iloc[i]
+        macd_line_increasing = curr_macd_line > prev_macd_line
+        macd_line_decreasing = curr_macd_line < prev_macd_line
             
-        if row["ema_14"] > row["ema_28"] and row['adx'] > 20:
+        # if row["ema_14"] > row["ema_28"] and row['adx'] > 20:
+        if macd_line_decreasing and df['adx'].iloc[i] > 20:
         # if row["ema_28_diff"] < 0 and row['adx'] > 20:
         # if row["ema_28_diff"] > 0 and row["adx"] > 20 and row["rsi"] < 70 :
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] > 0:
@@ -596,7 +583,8 @@ def generate_signals(df):
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and row['macd_line'] > row['macd_signal']: # has up to 1:2 RR, but performs badly with high leverage
         # if row['ema_28_diff'] > 0 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # has about a 1:2 RR, but performs badly with high leverage
             signal = "Buy"
-        if row["ema_14"] < row["ema_28"] and row['adx'] > 20:
+        # if row["ema_14"] < row["ema_28"] and row['adx'] > 20:
+        if macd_line_increasing and df['adx'].iloc[1] > 20:
         # if row["ema_28_diff"] < 0 and row['adx'] > 20:
         # if row["ema_28_diff"] < 0 and row["adx"] > 20 and row["rsi"] > 30:
         # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] < 0:
@@ -627,6 +615,7 @@ def run_bot():
         df = get_klines_df(coin, 60)
         df = add_indicators(df)
         df = generate_signals(df)
+        # print(f"atr: {df['atr'].iloc[-1]}")
 
         mark_price = get_mark_price(coin)
         signal = df["signal"].iloc[-1]
@@ -667,18 +656,18 @@ def run_bot():
                 wait_until_next_candle(1)
                 continue
             if signal == "Buy":
-                order_id = enter_trade("Buy", df, symbol=coin)
-                entry_price = get_mark_price(coin)
                 total_qty = get_trade_qty()
-                setup_trade_tp_levels(order_id, "Buy", entry_price, total_qty, leverage, df['atr'].iloc[-1])
+                entry_price = get_mark_price(coin)
+                setup_trade_tp_levels(order_id, "Buy", mark_price, total_qty, leverage, df['atr'].iloc[-1])
+                order_id = enter_trade("Buy", df, symbol=coin)
                 current_trade_side = "Buy"
                 active_trade = True
                 # print(f"Placed new Buy order")
             elif signal == "Sell":
-                order_id = enter_trade("Sell", df, symbol=coin)
-                entry_price = get_mark_price(coin)
                 total_qty = get_trade_qty()
-                setup_trade_tp_levels(order_id, "Sell", entry_price, total_qty, leverage, df['atr'].iloc[-1])
+                entry_price = get_mark_price(coin)
+                setup_trade_tp_levels(order_id, "Sell", mark_price, total_qty, leverage, df['atr'].iloc[-1])
+                order_id = enter_trade("Sell", df, symbol=coin)
                 current_trade_side = "Sell"
                 active_trade = True
                 # print(f"Placed new Sell order")
