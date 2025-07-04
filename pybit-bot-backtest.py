@@ -394,7 +394,7 @@ def run_bot():
                 "tp_levels": trade_params["tp_levels"],
                 "tp_hits": [False, False, False, False],
                 "trail_active": False,
-                "trail_offset": atr * 1.5,
+                "trail_offset": atr * 0.5,
                 "pnl": 0
             }
             # num_trades_active +=1
