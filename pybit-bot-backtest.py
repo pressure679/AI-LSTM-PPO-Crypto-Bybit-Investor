@@ -160,16 +160,23 @@ def generate_signals(df):
         # rsi_rising = row["rsi"] > prev["rsi"]
         # rsi_falling = row["rsi"] < prev["rsi"]
 
-        prev_hist = df.iloc[i - 1]["macd_hist"]
-        curr_hist = row["macd_hist"]
+        # prev_hist = df.iloc[i - 1]["macd_hist"]
+        # curr_hist = row["macd_hist"]
         # macd_increasing = curr_hist > prev_hist
         # macd_decreasing = curr_hist < prev_hist
-        prev_macd_momentum = df.iloc[i - 1]["macd_momentum"]
-        curr_macd_momentum = row["macd_momentum"]
-        macd_momentum_increasing = curr_macd_momentum > prev_macd_momentum
-        macd_momentum_decreasing = curr_macd_momentum < prev_macd_momentum
+        prev_macd_line = df["macd_line"].iloc[i - 3]
+        curr_macd_line = row["macd_line"]
+        macd_line_increasing = curr_macd_line > prev_macd_line
+        macd_line_decreasing = curr_macd_line < prev_macd_line
+        # print(f"price: {df['Close'].iloc[i]}")
+        # print(f"macd line: {df['macd_line'].iloc[i]}")
+        # print(f"price diff: {df['Close'].iloc[i] - df['Close'].iloc[i-5]}")
+        # print(f"macd line diff: {df['macd_line'].iloc[i] - df['macd_line'].iloc[i-5]}")
+        # print(f"macd line increasing: {macd_line_increasing}")
+        # print(f"macd line decreasing: {macd_line_decreasing}")
             
-        if row["ema_28_diff"] > 0 and row['adx'] > 20:
+        # if row["ema_28_diff"] > 0 and row['adx'] > 20:
+        if macd_line_increasing and row['adx'] > 20:
         # if row["ema_28_diff"] > 0 and row["adx"] > 20 and row["rsi"] < 70 :
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] > 0:
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] < 70 and row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # performs badly with high leverage
@@ -178,7 +185,8 @@ def generate_signals(df):
         # if row["ema_28_diff"] > 0 and row['adx'] > 20 and row['macd_line'] > row['macd_signal']: # has up to 1:2 RR, but performs badly with high leverage
         # if row['ema_28_diff'] > 0 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # has about a 1:2 RR, but performs badly with high leverage
             signal = "buy"
-        if row["ema_28_diff"] < 0 and row['adx'] > 20:
+        # if row["ema_28_diff"] < 0 and row['adx'] > 20:
+        if macd_line_decreasing and row['adx'] > 20:
         # if row["ema_28_diff"] < 0 and row["adx"] > 20 and row["rsi"] > 30:
         # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] < 0:
         # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] > 30 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # performs badly on high leverage
@@ -196,8 +204,8 @@ def generate_signals(df):
 
     return df
 
-def calculate_trade_parameters(entry_price, atr, balance, side, leverage=75, risk_pct=0.05):
-    stop_loss_distance = atr * 1.5
+def calculate_trade_parameters(entry_price, atr, balance, side, leverage=75, risk_pct=0.1):
+    stop_loss_distance = atr * 0.5
     allocated_margin = balance * risk_pct
     position_value = allocated_margin * leverage
     position_size = position_value / entry_price
@@ -205,8 +213,9 @@ def calculate_trade_parameters(entry_price, atr, balance, side, leverage=75, ris
     # Example SL/TP based on ATR and levels
     stop_loss = entry_price - stop_loss_distance if side == "buy" else entry_price + stop_loss_distance
     tp_levels = [
-        entry_price + atr * (i + 0.5) if side == "buy" else entry_price - atr * (i + 0.5)
-        for i in range(1, 5)
+        # entry_price + atr * (i + 0.5) if side == "buy" else entry_price - atr * (i + 0.5)
+        entry_price + atr * i / 3 if side == "buy" else entry_price - atr * i / 3
+        for i in range(1, 4)
     ]
 
     return {
@@ -388,7 +397,7 @@ def run_bot():
                 "trail_offset": atr * 1.5,
                 "pnl": 0
             }
-            num_trades_active +=1
+            # num_trades_active +=1
             # print(f"Placed new {signal} order at {current_price:.4f} with Qty: {active_trade['qty']:.4f}")
             # print(f"macd line: {df['macd_line'].iloc[i]}")
             # print(f"macd momentum: {df['macd_momentum'].iloc[i]}")
