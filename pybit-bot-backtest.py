@@ -51,7 +51,7 @@ def load_last_n_mb_csv(filepath, max_mb=5):
 def calculate_ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
 
-def calculate_rsi(series, period=14):
+def calculate_rsi(series, period):
     delta = series.diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
@@ -120,14 +120,12 @@ def add_indicators(df):
     df["ema_7_diff"] = df["ema_7"].diff()
     df["ema_14_diff"] = df["ema_14"].diff()
     df["ema_28_diff"] = df["ema_28"].diff()
-    df['rsi'] = calculate_rsi(df['Close'])
+    df['rsi_24'] = calculate_rsi(df['Close'], 24)
     df['macd_line'], df['macd_signal'], df['macd_hist'] = calculate_macd(df['Close'])
     df['macd_hist'] = df['macd_line'] - df['macd_signal']
     df['macd_momentum'] = df['macd_line'].diff()
-    # df['macd_signal_diff'] = df['macd_signal'].diff()
     df['macd_cross_up'] = (df['macd_line'].shift(1) < df['macd_signal'].shift(1)) & (df['macd_line'] > df['macd_signal'])
     df['macd_cross_down'] = (df['macd_line'].shift(1) > df['macd_signal'].shift(1)) & (df['macd_line'] < df['macd_signal'])
-
     df['bb_upper'], df['bb_lower'] = calculate_bollinger_bands(df['Close'])
     df['atr'] = calculate_atr(df['High'], df['Low'], df['Close'])
     df['adx'] = calculate_adx(df)
@@ -141,66 +139,16 @@ def add_indicators(df):
 
 def generate_signals(df):
     signals = []
-    modes = []
-    # prev_hist = 0.0
-    # curr_hist = 0.0
-    # macd_increasing = False
-    # macd_decreasing = False
-
     for i in range(len(df)):
-        if i < 1:
-            signals.append("")
-            modes.append("")
-            continue
-        row = df.iloc[i]
-        prev = df.iloc[i-1]
         signal = ""
-        mode = ""
-
-        # rsi_rising = row["rsi"] > prev["rsi"]
-        # rsi_falling = row["rsi"] < prev["rsi"]
-
-        # prev_hist = df.iloc[i - 1]["macd_hist"]
-        # curr_hist = row["macd_hist"]
-        # macd_increasing = curr_hist > prev_hist
-        # macd_decreasing = curr_hist < prev_hist
-        prev_macd_line = df["macd_line"].iloc[i - 3]
-        curr_macd_line = row["macd_line"]
-        macd_line_increasing = curr_macd_line > prev_macd_line
-        macd_line_decreasing = curr_macd_line < prev_macd_line
-        # print(f"price: {df['Close'].iloc[i]}")
-        # print(f"macd line: {df['macd_line'].iloc[i]}")
-        # print(f"price diff: {df['Close'].iloc[i] - df['Close'].iloc[i-5]}")
-        # print(f"macd line diff: {df['macd_line'].iloc[i] - df['macd_line'].iloc[i-5]}")
-        # print(f"macd line increasing: {macd_line_increasing}")
-        # print(f"macd line decreasing: {macd_line_decreasing}")
-            
-        # if row["ema_28_diff"] > 0 and row['adx'] > 20:
-        if macd_line_increasing and row['adx'] > 20:
-        # if row["ema_28_diff"] > 0 and row["adx"] > 20 and row["rsi"] < 70 :
-        # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] > 0:
-        # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] < 70 and row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # performs badly with high leverage
-        # if row["ema_28_diff"] > 0 and row["adx"] > 20 and row['macd_cross_up']: # performs badly with high leverage
-        # if row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # performs ok with high leverage
-        # if row["ema_28_diff"] > 0 and row['adx'] > 20 and row['macd_line'] > row['macd_signal']: # has up to 1:2 RR, but performs badly with high leverage
-        # if row['ema_28_diff'] > 0 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # has about a 1:2 RR, but performs badly with high leverage
+        if df['adx'].iloc[i] > 20 and df['macd_cross_up'].iloc[i] and df['rsi_24'].iloc[i] < 35:
             signal = "buy"
-        # if row["ema_28_diff"] < 0 and row['adx'] > 20:
-        if macd_line_decreasing and row['adx'] > 20:
-        # if row["ema_28_diff"] < 0 and row["adx"] > 20 and row["rsi"] > 30:
-        # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] < 0:
-        # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] > 30 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # performs badly on high leverage
-        # if row["ema_28_diff"] < 0 and row["adx"] > 20 and row['macd_cross_down']: # performs badly with high leverage
-        # if row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # performs ok with high leverage
-        # if row["ema_28_diff"] < 0 and row['adx'] > 20 and row['macd_line'] < row['macd_signal']: # has up to 1:2 RR, but performs badly with high leverage
-        # if row['ema_28_diff'] < 0 and row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # has about a 1:2 RR , but performs badly with high leverage
+        if df['adx'].iloc[i] > 20 and df['macd_cross_down'].iloc[i] and df['rsi_24'].iloc[i] > 65:
             signal = "sell"
             
         signals.append(signal)
-        modes.append(mode)
 
     df['signal'] = signals
-    df['mode'] = modes
 
     return df
 
@@ -214,7 +162,7 @@ def calculate_trade_parameters(entry_price, atr, balance, side, leverage=75, ris
     stop_loss = entry_price - stop_loss_distance if side == "buy" else entry_price + stop_loss_distance
     tp_levels = [
         # entry_price + atr * (i + 0.5) if side == "buy" else entry_price - atr * (i + 0.5)
-        entry_price + atr * i / 3 if side == "buy" else entry_price - atr * i / 3
+        entry_price + atr / 14 * i / 3 if side == "buy" else entry_price - atr / 14 * i / 3
         for i in range(1, 4)
     ]
 
@@ -306,8 +254,8 @@ def run_bot():
     df = add_indicators(df)
     df = generate_signals(df)
     balance = 100
-    risk_pct = 0.15
-    # leverage = 20
+    risk_pct = 0.1
+    leverage = 75
 
     trade_results = []
     total_trades = 0
@@ -323,6 +271,7 @@ def run_bot():
         # investment = max(balance * risk_pct, 5)
         if balance < 10:
             break
+        qty = balance * 0.1
         # 1440 1 day, can be 10080 (week), 43200 (month)
         if (i + 1) % 1440 == 0:
             if total_trades > 0:
@@ -352,13 +301,15 @@ def run_bot():
                 balance += pnl
                 trade_results.append(pnl)
                 if active_trade["status"] == "closed":
+                    active_trade["exit"] = current_price
                     total_trades += 1
+                    # print(f"Trade {total_trades} | Side: {active_trade['side'].capitalize()} | Entry: {active_trade['entry']:.2f} | Exit: {active_trade['exit']:.2f} | Size: {active_trade['qty']:.4f} | PnL: {active_trade['pnl']:.2f} | Balance: {balance:.2f}")
+
                     active_trade = None
-                    # num_trades_active -= 1
+                    num_trades_active -= 1
 
         # Get current signal and mode
         signal = df["signal"].iloc[i]
-        mode = df["mode"].iloc[i]
         atr = df["atr"].iloc[i]  # Make sure ATR is already calculated in your DataFrame
         # if signal != "":
         #     print(f"candle {i}, signal: {signal}, price: {current_price}")
@@ -367,21 +318,20 @@ def run_bot():
             # Close previous trade forcibly at current price
             active_trade["status"] = "closed"
             active_trade["exit"] = current_price
+            # print(f"Trade {total_trades} | Side: {active_trade['side'].capitalize()} | Entry: {active_trade['entry']:.2f} | Exit: {active_trade['exit']:.2f} | Size: {active_trade['qty']:.4f} | PnL: {active_trade['pnl']:.2f} | Balance: {balance:.2f}")
+
+            active_trade["exit"] = current_price
             active_trade["pnl"] = (current_price - active_trade["entry"]) * active_trade["qty"] if active_trade["side"] == "buy" else (active_trade["entry"] - current_price) * active_trade["qty"]
+            active_trade["pnl"] = (current_price - active_trade["entry"]) * qty * 75 if active_trade["side"] == "buy" else (active_trade["entry"] - current_price) * qty * 75
             active_trade["side"] = signal
             balance += active_trade["pnl"]
             trade_results.append(active_trade["pnl"])
-            total_trades += 1
-            # num_trades_active -= 1
-            # print(f"Order closed due to opposite signal. PnL: {active_trade['pnl']:.2f}, New balance: {balance:.2f}")
-            # print(f"atr: {df['atr'].iloc[i]}")
-            # print(f"distance to last placed order: {i-index_placed_order}")
-            # index_placed_order = i
+            # total_trades += 1
             active_trade = None
 
         # Place new trade if no active trade and valid signal
         # Open a new trade if there's a signal, no active trade, and ATR is valid
-        if not active_trade and signal in ["buy", "sell"] and atr > 0:
+        if not active_trade and signal in ["buy", "sell"]:
             entry_price = current_price
             trade_params = calculate_trade_parameters(entry_price, atr, balance, signal)
             
@@ -397,12 +347,7 @@ def run_bot():
                 "trail_offset": atr * 0.5,
                 "pnl": 0
             }
-            # num_trades_active +=1
-            # print(f"Placed new {signal} order at {current_price:.4f} with Qty: {active_trade['qty']:.4f}")
-            # print(f"macd line: {df['macd_line'].iloc[i]}")
-            # print(f"macd momentum: {df['macd_momentum'].iloc[i]}")
-            # index_placed_order = i
-
+            num_active_trades += 1
 
 run_bot()
 # print(f"Total trades placed: {total_trades}")
