@@ -141,9 +141,9 @@ def generate_signals(df):
     signals = []
     for i in range(len(df)):
         signal = ""
-        if df['adx'].iloc[i] > 20 and df['macd_cross_up'].iloc[i] and df['rsi_24'].iloc[i] < 35:
+        if df['adx'].iloc[i] > 20 and df['macd_cross_up'].iloc[i] and df['rsi_24'].iloc[i] < 30:
             signal = "buy"
-        if df['adx'].iloc[i] > 20 and df['macd_cross_down'].iloc[i] and df['rsi_24'].iloc[i] > 65:
+        if df['adx'].iloc[i] > 20 and df['macd_cross_down'].iloc[i] and df['rsi_24'].iloc[i] > 70:
             signal = "sell"
             
         signals.append(signal)
@@ -162,7 +162,7 @@ def calculate_trade_parameters(entry_price, atr, balance, side, leverage=75, ris
     stop_loss = entry_price - stop_loss_distance if side == "buy" else entry_price + stop_loss_distance
     tp_levels = [
         # entry_price + atr * (i + 0.5) if side == "buy" else entry_price - atr * (i + 0.5)
-        entry_price + atr * (i + 0.5) if side == "buy" else entry_price - atr * (i + 0.5)
+        entry_price + atr * (i + 0.5) if side == "buy" else entry_price - atr * (1 + 0.5)
         for i in range(1, 4)
     ]
 
@@ -322,7 +322,7 @@ def run_bot():
 
             active_trade["exit"] = current_price
             active_trade["pnl"] = (current_price - active_trade["entry"]) * active_trade["qty"] if active_trade["side"] == "buy" else (active_trade["entry"] - current_price) * active_trade["qty"]
-            active_trade["pnl"] = (current_price - active_trade["entry"]) * qty * 75 if active_trade["side"] == "buy" else (active_trade["entry"] - current_price) * qty * 75
+            active_trade["pnl"] = (current_price - active_trade["entry"]) * qty * leverage if active_trade["side"] == "buy" else (active_trade["entry"] - current_price) * qty * leverage
             active_trade["side"] = signal
             balance += active_trade["pnl"]
             trade_results.append(active_trade["pnl"])
