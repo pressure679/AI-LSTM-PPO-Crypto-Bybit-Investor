@@ -22,21 +22,24 @@ session = HTTP(
     api_key=api_key,
     api_secret=api_secret,
     recv_window=5000,
-    timeout=30
+    timeout=60
 )
 def keep_session_alive():
-    try:
-        response = session.get_server_time()  # Example lightweight call
-        print("[KEEP-ALIVE] Session alive:", response)
-    except Exception as e:
-        print("[KEEP-ALIVE ERROR]", e)
-    finally:
-        threading.Timer(1500, keep_session_alive).start()  # Schedule next call
+    for attempt in range(30):
+        try:
+            # Example: Get latest position
+            result = session.get_positions(category="linear", symbol=coin)
+            break  # If success, break out of loop
+        except requests.exceptions.ReadTimeout:
+            print(f"[WARN] Timeout on attempt {attempt+1}, retrying...")
+            time.sleep(2)  # wait before retry
+        finally:
+            threading.Timer(1500, keep_session_alive).start()  # Schedule next call
 keep_session_alive()
 def calculate_ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
 
-def calculate_rsi(series, period=14):
+def calculate_rsi(series, period):
     delta = series.diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
@@ -103,8 +106,10 @@ def add_indicators(df):
     df["ema_28_diff"] = df["ema_28"].diff()
     # df['ema_100'] = calculate_ema(df['Close'], 100)
     # df['ema_200'] = calculate_ema(df['Close'], 200)
-    df['rsi'] = calculate_rsi(df['Close'])
+    df['rsi_24'] = calculate_rsi(df['Close'], 24)
     df['macd_line'], df['macd_signal'], df['macd_hist'] = calculate_macd(df['Close'])
+    df['macd_cross_up'] = (df['macd_line'].shift(1) < df['macd_signal'].shift(1)) & (df['macd_line'] > df['macd_signal'])
+    df['macd_cross_down'] = (df['macd_line'].shift(1) > df['macd_signal'].shift(1)) & (df['macd_line'] < df['macd_signal'])
     df['bb_upper'], df['bb_lower'] = calculate_bollinger_bands(df['Close'])
     df['atr'] = calculate_atr(df['High'], df['Low'], df['Close'])
     df['adx'] = calculate_adx(df)
@@ -116,6 +121,10 @@ def add_indicators(df):
     df['TR'] = tr
     return df
 
+def generate_signals(df):
+    
+    return df
+ 
 def get_klines_df(coin, interval, limit=60):
     response = session.get_kline(
         category="linear",
@@ -205,58 +214,95 @@ def setup_trade(df, signal, symbol):
     # Passed filters
     print(f"[INFO] ADX {adx:.2f}, ATR {atr:.4f}, range {market_range_pct:.2f}%, trade OK.")
     return True
-def enter_trade(signal, df):
-    global leverage
-    global current_trade_info
+def place_sl_and_tp(symbol, side, entry_price, atr, qty, levels=[1.5, 2.5, 3.5]):
+    """
+    Places initial SL and multiple TP orders based on ATR multiples.
+    
+    Args:
+        symbol (str): trading symbol, e.g. "XRPUSDT"
+        side (str): "Buy" or "Sell"
+        entry_price (float): price at entry
+        atr (float): current ATR value
+        qty (float): total trade quantity
+        levels (list): list of ATR multiples for TP levels
+        
+    Returns:
+        dict with order IDs of SL and TP orders
+    """
+    orders = {}
 
-    if signal not in ["Buy", "Sell"]:
-        print("[WARN] Invalid signal for enter_trade.")
-        return None
+    # SL price calculation
+    if side == "Buy":
+        sl_price = entry_price - 1.5 * atr
+    else:  # Sell
+        sl_price = entry_price + 1.5 * atr
 
-    mark_price = get_mark_price(coin)
-    entry_price = mark_price
+    # Place stop loss order
+    sl_response = session.set_trading_stop(
+        category="linear",
+        symbol=symbol,
+        side=side,
+        stop_loss=round(sl_price, 4),
+        trailing_stop=None,  # we'll handle trailing later
+        tp_trigger_by="LastPrice"
+    )
+    orders['sl'] = sl_response
 
-    balance = get_balance()
-    risk_amount = max(balance * risk_pct, 5)
+    # Calculate and place TP limit orders
+    qty_per_tp = qty / len(levels)
+    tp_orders = []
+    for i, mult in enumerate(levels):
+        if side == "Buy":
+            tp_price = entry_price + mult * atr
+            tp_side = "Sell"
+        else:  # Sell
+            tp_price = entry_price - mult * atr
+            tp_side = "Buy"
 
-    # Calculate qty
-    step, min_qty = get_qty_step(coin)
-    total_qty = risk_amount / mark_price
-    total_qty = math.floor(total_qty / step) * step
-    if total_qty < min_qty:
-        print(f"[WARN] Quantity {total_qty} below minimum {min_qty}, skipping trade.")
-        return None
+        # Place limit TP order with reduce_only flag
+        resp = session.place_active_order(
+            symbol=symbol,
+            side=tp_side,
+            order_type="Limit",
+            price=round(tp_price, 4),
+            qty=round(qty_per_tp, 4),
+            time_in_force="PostOnly",  # avoid immediate execution
+            reduce_only=True,
+            close_on_trigger=False,
+            leverage=leverage
+        )
+        tp_orders.append(resp)
+    orders['tp'] = tp_orders
 
-    side = "Buy" if signal == "Buy" else "Sell"
-
-    order_id = ""
+    return orders
+def update_trailing_stop(symbol, side, atr, current_price):
+    """
+    Updates trailing stop loss to follow price with a buffer of 1.5 * ATR
+    
+    Args:
+        symbol (str): trading symbol
+        side (str): "Buy" or "Sell"
+        atr (float): current ATR value
+        current_price (float): current mark price
+    """
+    if side == "Buy":
+        # Trailing SL = current price - 1.5 * ATR
+        new_sl = current_price - 1.5 * atr
+    else:
+        # Trailing SL = current price + 1.5 * ATR
+        new_sl = current_price + 1.5 * atr
 
     try:
-        response = session.place_order(
+        session.set_trading_stop(
             category="linear",
-            symbol=coin,
+            symbol=symbol,
             side=side,
-            order_type="Market",
-            qty=total_qty,
-            buyLeverage=leverage,
-            sellLeverage=leverage,
+            trailing_stop=round(1.5 * atr, 4),  # set trailing stop distance
+            stop_loss=None  # We let trailing stop handle SL now
         )
-        order_id = response.get("result", {}).get("orderId")
-        # print(f"[INFO] Placed {side} order with TP={tp_price_str}, SL={sl_price_str}")
-        print(f"[INFO] Placed {side} order")
+        print(f"[INFO] Trailing SL updated at {round(new_sl,4)}")
     except Exception as e:
-        print(f"[ERROR] Failed to place order: {e}")
-        return None
-
-    if order_id:
-       current_trade_info = {
-           "order_id": order_id,
-           "total_qty": total_qty,
-           "leverage": leverage,
-           "side": side
-       }
-
-    return order_id
+        print(f"[ERROR] Failed to update trailing SL: {e}")
 
 def wait_until_next_candle(interval_minutes):
     now = time.time()
@@ -265,77 +311,23 @@ def wait_until_next_candle(interval_minutes):
     # print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
     time.sleep(sleep_seconds)
 
-def generate_signals(df):
-    signals = []
-    # modes = []
-    # prev_hist = 0.0
-    # curr_hist = 0.0
-    # macd_increasing = False
-    # macd_decreasing = False
-
-    for i in range(len(df)):
-        if i < 3:
-            signals.append("")
-            # modes.append("")
-            continue
-        # row = df.iloc[i]
-        prev = df.iloc[i-1]
-        signal = ""
-        # mode = ""
-
-        # rsi_rising = row["rsi"] > prev["rsi"]
-        # rsi_falling = row["rsi"] < prev["rsi"]
-
-        prev_macd_line = df["macd_line"].iloc[i-5]
-        curr_macd_line = df["macd_line"].iloc[i]
-        # macd_line_diff = df["macd_line"].iloc[i] - df["macd_line"].iloc[i-3]
-        # macd_line_increasing = macd_line_diff > 0
-        # macd_line_decreasing = macd_line_diff < 0
-        macd_line_increasing = curr_macd_line > prev_macd_line
-        macd_line_decreasing = curr_macd_line < prev_macd_line
-            
-        if df["ema_7_diff"].iloc[i] > 0 and df['adx'].iloc[i] > 20:
-        # if row["ema_14"] > row["ema_28"] and row['adx'] > 20:
-        # if macd_line_increasing and df['adx'].iloc[i] > 20:
-        # if row["ema_28_diff"] < 0 and row['adx'] > 20:
-        # if row["ema_28_diff"] > 0 and row["adx"] > 20 and row["rsi"] < 70 :
-        # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] > 0:
-        # if row["ema_28_diff"] > 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] < 70 and row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # performs badly with high leverage
-        # if row["ema_28_diff"] > 0 and row["adx"] > 20 and row['macd_cross_up']: # performs badly with high leverage
-        # if row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # performs ok with high leverage
-        # if row["ema_28_diff"] > 0 and row['adx'] > 20 and row['macd_line'] > row['macd_signal']: # has up to 1:2 RR, but performs badly with high leverage
-        # if row['ema_28_diff'] > 0 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # has about a 1:2 RR, but performs badly with high leverage
-            signal = "Buy"
-        if df["ema_7_diff"].iloc[i] < 0 and df['adx'].iloc[i] > 20:
-        # if macd_line_decreasing and df['adx'].iloc[i] > 20:
-        # if row["ema_28_diff"] < 0 and row['adx'] > 20:
-        # if row["ema_28_diff"] < 0 and row["adx"] > 20 and row["rsi"] > 30:
-        # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['macd_line'] < 0:
-        # if row["ema_28_diff"] < 0 and row['adx'] > 20 and macd_momentum_increasing and row['rsi'] > 30 and row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # performs badly on high leverage
-        # if row["ema_28_diff"] < 0 and row["adx"] > 20 and row['macd_cross_down']: # performs badly with high leverage
-        # if row['macd_line'] < row['macd_signal'] and curr_hist < prev_hist: # performs ok with high leverage
-        # if row["ema_28_diff"] < 0 and row['adx'] > 20 and row['macd_line'] < row['macd_signal']: # has up to 1:2 RR, but performs badly with high leverage
-        # if row['ema_28_diff'] < 0 and row['macd_line'] > row['macd_signal'] and curr_hist > prev_hist: # has about a 1:2 RR , but performs badly with high leverage
-            signal = "Sell"
-            
-        signals.append(signal)
-        # modes.append(mode)
-
-    df['signal'] = signals
-    # df['mode'] = modes
-
-    return df
-
 def run_bot():
     active_trade = False
     balance = get_balance()
     risk_pct = 0.10
-    leverage = 75
+    leverage = 20
     order_id = ""
     current_trade_side = ""
+    # session.set_leverage(
+    #     category="linear",  # or "inverse" depending on the contract
+    #     symbol="XRPUSDT",
+    #     buyLeverage="10",   # or your preferred long leverage
+    #     sellLeverage="10",  # or your preferred short leverage
+    #     marginMode="ISOLATED"  # <- switch to isolated here
+    # )
 
     while True:
-        df = get_klines_df(coin, 120)
+        df = get_klines_df(coin, 30)
         df = add_indicators(df)
         df = generate_signals(df)
         # print(f"atr: {df['atr'].iloc[-1]}")
@@ -344,19 +336,11 @@ def run_bot():
         signal = df["signal"].iloc[-1]
         # print("in main loop")
 
-        # print(f"price: {mark_price}")
-        # print(f"current trade side: {current_trade_side}")
-        # print(f"signal: {signal}")
-        # print(f"macd line: {df['macd_line'].iloc[-1]}")
-        # print(f"previous macd line: {df['macd_line'].iloc[-3]}")
-        # print(f"macd line increasing: {df['macd_line'].iloc[-1] > df['macd_line'].iloc[-3]}")
-        # print(f"price range: {df['High'].iloc[-15:].max() - df['Low'].iloc[-15:].min()}")
-        # print(f"price range in %: {(df['High'].iloc[-5:].max() - df['Low'].iloc[-15:].min()) / mark_price}")
-        # print(f"atr: {df['atr'].iloc[-1]}")
-        # print(f"1/14 atr: {df['atr'].iloc[-1] / 14}")
-        # print(f"1/14 atr compared to mark price: {df['atr'].iloc[-1] / 14 / mark_price}")
-        # print(f"1/14 atr compared to mark price times leverage: {df['atr'].iloc[-1] / 14 / mark_price * 75}")
-        # print("")
+        print(f"signal: {signal}")
+        print(f"macd cross up: {df['macd_cross_up'].iloc[-1]}")
+        print(f"macd cross down: {df['macd_cross_down'].iloc[-1]}")
+        print(f"atr: {df['atr'].iloc[-1]}")
+        print(f"")
 
         if signal == "":
             print("no clear direction yet from macd line diff indicator")
@@ -379,6 +363,9 @@ def run_bot():
                 # No open position found: reset state
                 active_trade = False
                 print("[INFO] Position closed or missing, resetting active_trade flag.")
+                current_price = get_mark_price(coin)
+                atr = df['atr'].iloc[-1]
+                update_trailing_stop(coin, current_trade_side, atr, current_price)
 
             # Close position if signal flips
             if signal != current_trade_side:
@@ -396,15 +383,21 @@ def run_bot():
             if signal == "Buy":
                 total_qty = get_trade_qty()
                 entry_price = get_mark_price(coin)
-                order_id = enter_trade("Buy", df)
+                order_id = enter_trade("Buy", df)  # Your existing entry function
                 current_trade_side = "Buy"
                 active_trade = True
+                # Place SL and multiple TPs
+                place_sl_and_tp(coin, "Buy", entry_price, df['atr'].iloc[-1], total_qty)
+                
             elif signal == "Sell":
                 total_qty = get_trade_qty()
                 entry_price = get_mark_price(coin)
                 order_id = enter_trade("Sell", df)
                 current_trade_side = "Sell"
                 active_trade = True
+                # Place SL and multiple TPs
+                place_sl_and_tp(coin, "Sell", entry_price, df['atr'].iloc[-1], total_qty)
+
 
         wait_until_next_candle(1)
 
