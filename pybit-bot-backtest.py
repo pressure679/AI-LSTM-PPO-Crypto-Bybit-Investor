@@ -153,7 +153,7 @@ def generate_signals(df):
     return df
 
 def calculate_trade_parameters(entry_price, atr, balance, side, leverage=75, risk_pct=0.1):
-    stop_loss_distance = atr * 0.5
+    stop_loss_distance = atr * 1.5
     allocated_margin = balance * risk_pct
     position_value = allocated_margin * leverage
     position_size = position_value / entry_price
@@ -162,7 +162,7 @@ def calculate_trade_parameters(entry_price, atr, balance, side, leverage=75, ris
     stop_loss = entry_price - stop_loss_distance if side == "buy" else entry_price + stop_loss_distance
     tp_levels = [
         # entry_price + atr * (i + 0.5) if side == "buy" else entry_price - atr * (i + 0.5)
-        entry_price + atr / 14 * i / 3 if side == "buy" else entry_price - atr / 14 * i / 3
+        entry_price + atr * (i + 0.5) if side == "buy" else entry_price - atr * (i + 0.5)
         for i in range(1, 4)
     ]
 
@@ -344,7 +344,7 @@ def run_bot():
                 "tp_levels": trade_params["tp_levels"],
                 "tp_hits": [False, False, False, False],
                 "trail_active": False,
-                "trail_offset": atr * 0.5,
+                "trail_offset": atr * 1.5,
                 "pnl": 0
             }
             num_active_trades += 1
