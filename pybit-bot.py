@@ -51,9 +51,9 @@ def calculate_rsi(series, period):
 def calculate_macd(series, fast=12, slow=26, signal=9):
     ema_fast = calculate_ema(series, fast)
     ema_slow = calculate_ema(series, slow)
-    macd_line = ema_fast - ema_slow
-    signal_line = calculate_ema(macd_line, signal)
-    macd_hist = macd_line - signal_line
+    macd_line = (ema_fast - ema_slow) * -1
+    signal_line = calculate_ema(macd_line, signal) * -1
+    macd_hist = (macd_line - signal_line) * -1
     return macd_line, signal_line, macd_hist
 
 def calculate_bollinger_bands(series, period=20, num_std=2):
@@ -104,13 +104,13 @@ def add_indicators(df):
     df["ema_7_diff"] = df["ema_7"].diff()
     df["ema_14_diff"] = df["ema_14"].diff()
     df["ema_28_diff"] = df["ema_28"].diff()
-    # df['ema_100'] = calculate_ema(df['Close'], 100)
-    # df['ema_200'] = calculate_ema(df['Close'], 200)
     df['rsi_24'] = calculate_rsi(df['Close'], 24)
     df['macd_line'], df['macd_signal'], df['macd_hist'] = calculate_macd(df['Close'])
+    df['macd_line_diff'] = df['macd_line'].diff()
     df['dea'] = df['macd_line'].ewm(span=9, adjust=False).mean()
-    # df['macd_cross_up'] = (df['macd_line'].shift(1) < df['macd_signal'].shift(1)) & (df['macd_line'] > df['macd_signal'])
-    # df['macd_cross_down'] = (df['macd_line'].shift(1) > df['macd_signal'].shift(1)) & (df['macd_line'] < df['macd_signal'])
+    df['dea_diff'] = df['dea'].diff()
+    df['macd_cross_up'] = (df['macd_line'].shift(1) < df['macd_signal'].shift(1)) & (df['macd_line'] > df['macd_signal'])
+    df['macd_cross_down'] = (df['macd_line'].shift(1) > df['macd_signal'].shift(1)) & (df['macd_line'] < df['macd_signal'])
     df['bb_upper'], df['bb_lower'] = calculate_bollinger_bands(df['Close'])
     df['atr'] = calculate_atr(df['High'], df['Low'], df['Close'])
     df['adx'] = calculate_adx(df)
@@ -126,12 +126,36 @@ def generate_signals(df):
     signals = []
     for i in range(len(df)):
         signal = ""
-        if df['adx'].iloc[i] > 20:
-            if df['macd_line'].iloc[i] > df['dea'].iloc[i]:
-                signal = "Buy"
-            elif df['macd_line'].iloc[i] < df['dea'].iloc[i]:
-                signal = "Sell"
+        if i == 0:
+            signals.append(signal)
+            continue
+
+        dea_current = df['dea'].iloc[i]
+        dea_prev = df['dea'].iloc[i-1]
+        ema_28_current = df['ema_28'].iloc[i]
+        ema_28_prev = df['ema_28'].iloc[i-1]
+
+        # if dea_current > dea_prev:
+        #     signal = "Buy"
+        # elif dea_current < dea_prev:
+        #     signal = "Sell"
+        # else:
+        #     signal = ""
+        # if df['macd_cross_up'].iloc[i]:
+        #     signal = "Buy"
+        # elif df['macd_cross_down'].iloc[i]:
+        #     signal = "Sell"
+        # else:
+        #     signal = ""
+        if ema_28_current > ema_28_prev:
+            signal = "Buy"
+        elif ema_28_current < ema_28_prev:
+            signal = "Sell"
+        else:
+            signal = ""
+
         signals.append(signal)
+
     df['signal'] = signals
     return df
  
@@ -146,9 +170,13 @@ def get_klines_df(coin, interval, limit=60):
     df = pd.DataFrame(data, columns=[
         "Timestamp", "Open", "High", "Low", "Close", "Volume", "Turnover"
     ])
-    df = df.astype(float)
-    df["Timestamp"] = pd.to_datetime(df["Timestamp"], unit="ms")
+    # convert columns to float except Timestamp first
+    for col in ["Open", "High", "Low", "Close", "Volume", "Turnover"]:
+        df[col] = df[col].astype(float)
+    df["Timestamp"] = pd.to_numeric(df["Timestamp"])
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"], unit="ms", utc=True)
     df.set_index("Timestamp", inplace=True)
+    df.index = df.index.tz_convert("Europe/Copenhagen")
     return df
 
 def get_balance():
@@ -204,12 +232,13 @@ def setup_trade(df, signal, symbol):
     if adx < 20:
         print(f"[INFO] ADX too low ({adx:.2f}), ATR: {atr:.4f}, skipping trade.")
         return False
-    elif adx < 30 and market_range_pct < 1.5:
-        print(f"[INFO] ADX moderate ({adx:.2f}), ATR {atr:.4f}, but market range low ({market_range_pct:.2f}%), skipping.")
-        return False
-    elif adx >= 30 and market_range_pct < 1.0:
-        print(f"[INFO] ADX strong ({adx:.2f}), ATR {atr:.4f}, but market range too small ({market_range_pct:.2f}%), skipping.")
-        return False
+    # elif adx < 30 and market_range_pct < 1.5:
+    # elif adx < 30 and market_range_pct < 1.5:
+    #     print(f"[INFO] ADX moderate ({adx:.2f}), ATR {atr:.4f}, but market range low ({market_range_pct:.2f}%), skipping.")
+    #     return False
+    # elif adx >= 30 and market_range_pct < 1.5:
+    #     print(f"[INFO] ADX strong ({adx:.2f}), ATR {atr:.4f}, but market range too small ({market_range_pct:.2f}%), skipping.")
+    #     return False
 
     # Passed filters
     print(f"[INFO] ADX {adx:.2f}, ATR {atr:.4f}, range {market_range_pct:.2f}%, trade OK.")
@@ -238,41 +267,26 @@ def enter_trade(signal, df, risk_pct=0.1):
 
     side = "Buy" if signal == "Buy" else "Sell"
 
-    # === SL/TP logic ===
-    # price_range = df['High'].iloc[-15:].max() - df['High'].iloc[-15:].min()
-    # sl_price, tp_prices = get_sl_tp_levels(entry_price, price_range, side)
-
-    # sl_price_str = f"{sl_price:.4f}"
-    # tp_price_str = f"{tp_prices[3]:.4f}"
     order_id = ""
 
-    # print(f"symbol: {coin}")
-    # print(f"side: {side}")
-    # print(f"qty: {total_qty}")
-    # print(f"leverage: {leverage}")
-    # print(f"tp: {tp_price_str}")
-    # print(f"tp levels: {tp_prices}")
-    # print(f"sl: {sl_price_str}")
-    # print(f"price: {mark_price}")
-    # print("")
-
-    try:
-        response = session.place_order(
-            category="linear",
-            symbol=coin,
-            side=side,
-            order_type="Market",
-            qty=total_qty,
-            # buyLeverage=leverage,
-            # sellLeverage=leverage,
-            # take_profit=tp_price_str,
-            # stop_loss=sl_price_str
-        )
-        order_id = response.get("result", {}).get("orderId")
-    #     print(f"[INFO] Placed {side} order with TP={tp_price_str}, SL={sl_price_str}")
-    except Exception as e:
-        print(f"[ERROR] Failed to place order: {e}")
-        return None
+    # try:
+    #     response = session.place_order(
+    #         category="linear",
+    #         symbol=coin,
+    #         side=side,
+    #         order_type="Market",
+    #         qty=total_qty,
+    #         # buyLeverage=leverage,
+    #         # sellLeverage=leverage,
+    #         # take_profit=tp_price_str,
+    #         # stop_loss=sl_price_str
+    #     )
+    #     order_id = response.get("result", {}).get("orderId")
+    #     # print(f"[INFO] Placed {side} order with TP={tp_price_str}, SL={sl_price_str}")
+    #     print(f"[INFO] Placed {side} order")
+    # except Exception as e:
+    #     print(f"[ERROR] Failed to place order: {e}")
+    #     return None
 
     # Genenerate TP levels
     # if side == "Buy":
@@ -409,71 +423,119 @@ def wait_until_next_candle(interval_minutes):
     # print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
     time.sleep(sleep_seconds)
 
+# Global state
+active_trade = False
+current_trade_side = ""
+order_id = ""
+entry_price = None
+position_qty = 0  # Track current position size
+test_balance = 100  # Initial test balance in USD
+interval = 1
+
 def run_bot():
-    active_trade = False
-    current_trade_side = ""
-    order_id = ""
-    
+    global active_trade, current_trade_side, order_id, entry_price, position_qty, test_balance
+
+    leverage = 75  # ← set your leverage here
+    testing_mode = True
+
     while True:
-        df = get_klines_df(coin, 30)
+        df = get_klines_df(coin, interval)
+        df = df.sort_index(ascending=True)
         df = add_indicators(df)
         df = generate_signals(df)
 
         signal = df["signal"].iloc[-1]
-        print(f"signal: {signal}\n")
+        # print(f"signal: {signal}")
+        # print(df[['Close', 'dea', 'dea_diff']].tail(10))
 
-        # === 1. Fetch current open positions at the very start ===
-        positions = session.get_positions(category="linear", symbol=coin)["result"]["list"]
-        active_position = None
+        # 1. Fetch current positions only in live mode
+        if not testing_mode:
+            positions = session.get_positions(category="linear", symbol=coin)["result"]["list"]
+            active_position = None
 
-        for pos in positions:
-            if float(pos["size"]) > 0:
-                active_position = pos
-                current_trade_side = pos["side"]
-                active_trade = True
-                print(f"[INFO] Active position detected: {active_position}")
-                break
-        else:
-            active_trade = False
-            current_trade_side = ""
+            for pos in positions:
+                size = float(pos["size"])
+                if size != 0:
+                    active_position = pos
+                    current_trade_side = pos["side"]
+                    active_trade = True
+                    entry_price = float(pos["entryPrice"])
+                    position_qty = abs(size)
+                    print(f"[INFO] Active position detected: {active_position}")
+                    break
+            else:
+                active_trade = False
+                current_trade_side = ""
+                entry_price = None
+                position_qty = 0
 
-        # === 2. If no signal, skip ===
+        # 2. No signal? Wait.
         if signal == "":
             print("No clear signal from indicators. Waiting...\n")
-            wait_until_next_candle(1)
+            wait_until_next_candle(interval)
             continue
 
-        # === 3. If already in a trade and it's in the same direction, skip ===
+        # 3. Already in same direction? Skip.
         if active_trade and current_trade_side == signal:
             print(f"[INFO] Already in a {signal} position. Skipping entry.\n")
-            wait_until_next_candle(1)
+            wait_until_next_candle(interval)
             continue
 
-        # === 4. If signal has changed (opposite), close position and reset ===
+        # 4. If signal reversed → close position, show PnL in $ and update balance
         if active_trade and current_trade_side != signal:
+            exit_price = get_mark_price(coin)
+            price_diff = (exit_price - entry_price)
+
+            if current_trade_side == "Sell":
+                price_diff = -price_diff  # reverse for shorts
+
+            # Calculate PnL in USD: qty * price difference
+            pnl_usd = position_qty * price_diff
+
+            # Update test balance
+            test_balance += pnl_usd
+
+            # Calculate PnL % relative to margin used (optional)
+            margin_used = (entry_price * position_qty) / leverage
+            pnl_percent = (pnl_usd / margin_used) * 100 if margin_used else 0
+
             print(f"[INFO] Signal reversed. Closing {current_trade_side} position.")
+            print(f"[PNL] Trade closed. Entry: {entry_price:.4f}, Exit: {exit_price:.4f}, "
+                  f"PnL: ${pnl_usd:.2f} ({pnl_percent:.2f}%) with {leverage}x leverage.")
+            print(f"[BALANCE] Updated test balance: ${test_balance:.2f}\n")
+
             cancel_specific_order(order_id, coin)
-            # (Optional: Add manual close logic here)
             active_trade = False
             current_trade_side = ""
-            wait_until_next_candle(1)
+            entry_price = None
+            position_qty = 0
+            wait_until_next_candle(interval)
             continue
 
-        # === 5. Setup new trade ===
+        # 5. Setup and enter new trade
         setup = setup_trade(df, signal, symbol=coin)
         if setup is False:
             print("[INFO] Trade setup skipped due to low volatility or invalid conditions.")
-            wait_until_next_candle(1)
+            wait_until_next_candle(interval)
             continue
 
         total_qty = get_trade_qty()
         entry_price = get_mark_price(coin)
         order_id = enter_trade(signal, df)
-        active_trade = True
-        current_trade_side = signal
-        print(f"[INFO] Entered {signal} trade at {entry_price} with qty: {total_qty}")
 
-        wait_until_next_candle(1)
+        # Save position size
+        position_qty = total_qty
+
+        # Simulated trade entry
+        if order_id or testing_mode:
+            active_trade = True
+            current_trade_side = signal
+            print(f"[INFO] (Simulated) Entered {signal} trade at {entry_price} with qty: {total_qty}\n")
+        else:
+            print("[WARNING] Trade entry failed or simulated - not setting active trade.")
+
+        wait_until_next_candle(interval)
+
 
 # set trailing stop
 # session.set_trading_stop(
