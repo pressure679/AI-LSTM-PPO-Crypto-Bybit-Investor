@@ -140,16 +140,26 @@ def generate_signal(df):
             
         if latest['ADX'] > 20:
             # Buy Signal
-            if (latest['Momentum_increasing'] and latest['RSI'] > 50 and 
-                (latest['+DI'] > latest['-DI'] or latest['Bulls'] > latest['Bears']) and
-                latest['EMA_7'] > latest['EMA_14'] > latest['EMA_21'] > latest['EMA_50'] and
-                latest['Macd_trending_up']):
+            # if (latest['Momentum_increasing'] and latest['RSI'] > 50 and 
+            #     (latest['+DI'] > latest['-DI'] or latest['Bulls'] > latest['Bears']) and
+            #     latest['EMA_7'] > latest['EMA_14'] > latest['EMA_21'] > latest['EMA_50'] and
+            #     latest['Macd_trending_up']):
+            # if (latest['Momentum'] > 0 and latest['RSI'] > 50 and 
+            #     (latest['+DI'] > latest['-DI'] or latest['Bulls'] > latest['Bears']) and
+            #     latest['EMA_7'] > latest['EMA_14'] > latest['EMA_21'] > latest['EMA_50'] and
+            #     latest['Macd_trending_up']):
+            if latest['EMA_21'] > latest['EMA_50'] and latest['Macd_trending_up']:
                 signal = "Buy"
-                
-            elif (latest['Momentum_decreasing'] and latest['RSI'] < 50 and 
-                  (latest['-DI'] > latest['+DI'] or latest['Bulls'] < latest['Bears']) and
-                  latest['EMA_7'] < latest['EMA_14'] < latest['EMA_21'] < latest['EMA_50'] and
-                  latest['Macd_trending_down']):
+                # if (latest['Momentum_decreasing'] and latest['RSI'] > 50 and 
+            #     (latest['+DI'] < latest['-DI'] or latest['Bulls'] < latest['Bears']) and
+            #     latest['EMA_7'] > latest['EMA_14'] > latest['EMA_21'] > latest['EMA_50'] and
+            #     latest['Macd_trending_up']):
+
+            # elif (latest['Momentum'] < 0 and latest['RSI'] < 50 and 
+            #       (latest['-DI'] > latest['+DI'] or latest['Bulls'] < latest['Bears']) and
+            #       latest['EMA_7'] < latest['EMA_14'] < latest['EMA_21'] < latest['EMA_50'] and
+            #       latest['Macd_trending_down']):
+            if latest['EMA_21'] < latest['EMA_50'] and latest['Macd_trending_down']:
                 signal = "Sell"
             else:
                 signal = ""
