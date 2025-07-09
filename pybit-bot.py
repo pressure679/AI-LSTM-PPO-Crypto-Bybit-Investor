@@ -27,10 +27,7 @@ def keep_session_alive(symbol):
             time.sleep(2)  # wait before retry
         finally:
             threading.Timer(1500, keep_session_alive, args(symbol,)).start()  # Schedule next call
-def format_float(f):
-    return f"{f:.6f}"
-
-def get_klines(symbol, interval="1", limit=100):
+def get_klines_df(symbol, interval="1", limit=100):
     response = session.get_kline(category="linear", symbol=symbol, interval=interval, limit=limit)
     data = response['result']['list']
     df = pd.DataFrame(data, columns=["Timestamp", "Open", "High", "Low", "Close", "Volume", "Turnover"])
@@ -482,7 +479,7 @@ def run_bot():
     while True:
         for symbol in SYMBOLS:
             try:
-                df = get_klines(symbol)
+                df = get_klines_df(symbol)
                 df = calculate_indicators(df)
                 df['signal'] = generate_signal(df)
                 risk_amount = max(get_balance() * 0.1, 6) 
