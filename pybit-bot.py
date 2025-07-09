@@ -5,6 +5,7 @@ from pybit.unified_trading import HTTP
 import threading
 import requests
 import math
+from math import floor
 
 # API setup
 api_key = "wLqYZxlM27F01smJFS"
@@ -160,7 +161,8 @@ def generate_signals(df):
             #     latest['EMA_7'] > latest['EMA_14'] > latest['EMA_21'] > latest['EMA_50'] and
             #     latest['macd_trending_up']):
             # if latest['EMA_21'] > latest['EMA_50'] and latest['macd_trending_up']:
-            if latest['EMA_21'] > latest['EMA_50'] and latest['macd_histogram_increasing']:
+            # if latest['EMA_21'] > latest['EMA_50'] and latest['macd_histogram_increasing']:
+            if latest['EMA_21'] > latest['EMA_50'] and latest['macd_cross_up']:
                 signal = "Buy"
                 # if (latest['Momentum_decreasing'] and latest['RSI'] > 50 and 
             #     (latest['+DI'] < latest['-DI'] or latest['Bulls'] < latest['Bears']) and
@@ -171,7 +173,8 @@ def generate_signals(df):
             #       (latest['-DI'] > latest['+DI'] or latest['Bulls'] < latest['Bears']) and
             #       latest['EMA_7'] < latest['EMA_14'] < latest['EMA_21'] < latest['EMA_50'] and
             #       latest['macd_trending_down']):
-            elif latest['EMA_21'] < latest['EMA_50'] and latest['macd_histogram_decreasing']:
+            # elif latest['EMA_21'] < latest['EMA_50'] and latest['macd_histogram_decreasing']:
+            elif latest['EMA_21'] < latest['EMA_50'] and latest['macd_cross_down']:
                 signal = "Sell"
             else:
                 signal = ""
@@ -192,7 +195,10 @@ def get_qty_step(symbol):
     step = float(data["lotSizeFilter"]["qtyStep"])
     min_qty = float(data["lotSizeFilter"]["minOrderQty"])
     return step, min_qty
-
+def round_qty(symbol, qty, mark_price):
+    # Simple static example; ideally fetch from exchange info
+    step, min_qty = get_qty_step(symbol)
+    return floor(qty / mark_price) * step
 def calculate_dynamic_qty(symbol, risk_amount, atr):
     price = get_mark_price(symbol)
     stop_distance = atr * 1.2
@@ -203,90 +209,85 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty, levels=[1.2, 1.5, 2.0, 
     Places initial SL and multiple TP orders based on ATR multiples.
     
     Args:
-        symbol (str): trading symbol, e.g. "XRPUSDT"
+        symbol (str): e.g. "DOGEUSDT"
         side (str): "Buy" or "Sell"
-        entry_price (float): price at entry
-        atr (float): current ATR value
-        qty (float): total trade quantity
-        levels (list): list of ATR multiples for TP levels
+        entry_price (float): entry price
+        atr (float): current ATR
+        qty (float): trade size
+        levels (list): ATR multiples for TP levels
         
     Returns:
-        dict with order IDs of SL and TP orders
+        dict with SL and TP responses
     """
     orders = {}
 
-    # SL price calculation
+    # -------------------------------
+    # Calculate Stop Loss Price
+    # -------------------------------
     if side == "Buy":
         sl_price = entry_price - 1.2 * atr
     else:  # Sell
         sl_price = entry_price + 1.2 * atr
 
-    # Place stop loss order
-    sl_response = session.set_trading_stop(
-        category="linear",
-        symbol=symbol,
-        side=side,
-        stop_loss=str(round(sl_price, 6))
-        # trailing_stop=None,  # we'll handle trailing later
-        # tp_trigger_by="LastPrice"
-    )
-    orders['sl'] = sl_response
+    print(f"[{symbol}] Attempting to set SL at: {sl_price:.6f}")
 
-    # Calculate and place TP limit orders
-    qty_per_tp = [
-        # qty_per_tp[0] = qty * 0.4,
-        # qty_per_tp[1] = qty * 0.2,
-        # qty_per_tp[2] = qty * 0.2,
-        # qty_per_tp[3] = qty * 0.2
-        qty * 0.4,
-        qty * 0.2,
-        qty * 0.2,
-        qty * 0.2
-    ]
-    tp_orders = []
-    for i, mult in enumerate(levels):
-        if side == "Buy":
-            tp_price = entry_price + mult * atr
-            tp_side = "Sell"
+    # -------------------------------
+    # Place SL Order
+    # -------------------------------
+    try:
+        sl_response = session.set_trading_stop(
+            category="linear",
+            symbol=symbol,
+            side=side,
+            stop_loss=str(round(sl_price, 6))
+        )
+        if sl_response and sl_response.get('retCode') == 0:
+            print(f"[{symbol}] SL placed successfully.")
         else:
-            tp_price = entry_price - mult * atr
-            tp_side = "Buy"
-            
-            tp_qty = round(qty_per_tp[i], 6)  # <-- FIX HERE
-            
+            print(f"[{symbol}] SL failed: {sl_response}")
+        orders['sl'] = sl_response
+    except Exception as e:
+        print(f"[{symbol}] SL exception: {e}")
+        orders['sl'] = None
+
+    # -------------------------------
+    # Place TP Limit Orders
+    # -------------------------------
+    qty_per_tp = [qty * 0.4, qty * 0.2, qty * 0.2, qty * 0.2]
+    tp_orders = []
+
+    for i, mult in enumerate(levels):
+        try:
+            if side == "Buy":
+                tp_price = entry_price + mult * atr
+                tp_side = "Sell"
+            else:
+                tp_price = entry_price - mult * atr
+                tp_side = "Buy"
+            print(f"[{symbol}] TP Level {i+1}: placing {tp_side} at {tp_price:.6f}, qty={qty_per_tp[i]:.6f}")
+
             tp_response = session.place_order(
                 category="linear",
                 symbol=symbol,
                 side=tp_side,
                 order_type="Limit",
-                qty=tp_qty,
+                qty=round(round_qty(symbol, qty_per_tp[i], entry_price), 6),
                 price=round(tp_price, 6),
                 time_in_force="GTC",
                 reduce_only=True
             )
-            tp_orders.append(tp_response)
 
-    # for i, mult in enumerate(levels):
-    #     if side == "Buy":
-    #         tp_price = entry_price + mult * atr
-    #     else:  # Sell
-    #         tp_price = entry_price - mult * atr
-            
-    #     tp_response = session.place_order(
-    #         category="linear",
-    #         symbol=symbol,
-    #         side="Sell" if side == "Buy" else "Buy",
-    #         order_type="Limit",
-    #         # TODO
-    #         qty=round(qty_per_tp[i], 6),
-    #         price=round(tp_price, 6),
-    #         time_in_force="GTC",
-    #         reduce_only=True
-    #     )
-    #     tp_orders.append(tp_response)
+            if tp_response and tp_response.get('retCode') == 0:
+                print(f"[{symbol}] TP Level {i+1} placed successfully.")
+            else:
+                print(f"[{symbol}] TP Level {i+1} failed: {tp_response}")
+            tp_orders.append(tp_response)
+        except Exception as e:
+            print(f"[{symbol}] Exception in TP Level {i+1}: {e}")
+            tp_orders.append(None)
+
     orders['tp'] = tp_orders
     return orders
-
 def enter_trade(signal, df, symbol, risk_pct):
     global leverage
     global current_trade_info
@@ -340,7 +341,10 @@ def enter_trade(signal, df, symbol, risk_pct):
         return None
 
     # Optionally place additional SL/TP if your function returns more orders/info
-    orders = place_sl_and_tp(symbol, side, entry_price, atr, total_qty)
+    try:
+        orders = place_sl_and_tp(symbol, side, entry_price, atr, total_qty)
+    except Exception as e:
+        print(f"Error placing SL/TP for {symbol}: {e}")
 
     # if orders:
     trade_info = {
@@ -350,7 +354,8 @@ def enter_trade(signal, df, symbol, risk_pct):
         "qty": total_qty,
         "remaining_qty": total_qty,
         "sl": sl_price,
-        "tps": [tp_price],  # or orders['tps'] if you use multi-level TPs
+        # "tps": [tp_price],  # or orders['tps'] if you use multi-level TPs
+        "tps": orders['tp'],  # or orders['tps'] if you use multi-level TPs
         "atr": atr,
         "active_tp_index": 0,
         "order_id": order_id or orders.get('order_id')
@@ -438,6 +443,8 @@ def check_exit_conditions(current_price, atr):
             if active_index < len(portion):  # avoid index error
                 qty_to_close = portion[active_index] * current_trade_info['qty']
                 take_partial_profit(current_trade_info['symbol'], current_trade_info['side'], qty_to_close)
+                active_index +=1
+        exit_condition = "partial tp"
         return exit_condition
 
     if trade_info['active_tp_index'] >= len(tps):
@@ -502,11 +509,12 @@ def wait_until_next_candle(interval_minutes):
 def run_bot():
     global current_trade_info
     previous_signals = {symbol: "" for symbol in SYMBOLS}  # track last signal per symbol
-    trade_info = []
     risk_pct = 0.35
     while True:
         for symbol in SYMBOLS:
             try:
+                # trade_info = []
+                trade_info = None
                 df = get_klines_df(symbol)
                 df = calculate_indicators(df)
                 df['signal'] = generate_signals(df)
@@ -540,15 +548,16 @@ def run_bot():
                 print(f"Balance: {balance:.2f}")
                 position = get_position(symbol)
                 open_orders = session.get_open_orders(category="linear", symbol=symbol)['result']['list']
+                # print(f"position: {position}")
+                # print(f"open orders: {open_orders}")
                 if open_orders:
-                    print(f"Open Position: Side={position['side']} Entry={position['entry_price']:.6f} Qty={position['qty']} PnL={position['unrealizedPnl']:.2f}")
-                    update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1])
-                    exit_condition = check_exit_condition(symbol, df['ATR'].iloc[-1])
+                    # print(f"Open Position: Side={position['side']} Entry={position['entry_price']:.6f} Qty={position['qty']} PnL={position['unrealizedPnl']:.2f}")
+                    # update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1])
+                    # exit_condition = check_exit_conditions(symbol, df['ATR'].iloc[-1])
                     # --- AUTO-REVERSE LOGIC ---
-                    if latest['signal'] != "" and latest['signal'] != position['side']:
+                    if latest['signal'] != "" and latest['signal'] != previous_signals[symbol]:
                         print(f"[AUTO-REVERSE] Opposite signal detected: Closing {position['side']} and entering {latest['signal']}")
                         # Exit current position
-                        # exit_position(symbol)
                         cancel_old_orders(symbol)
                         time.sleep(2)  # Give time for exit to process
                         # Enter opposite trade
@@ -564,7 +573,7 @@ def run_bot():
                     else:
                         print("[INFO] Holding current position — no reversal needed.")
                         # update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1])
-                        # exit_condition = check_exit_condition(symbol, df['ATR'].iloc[-1])
+                        exit_condition = check_exit_conditions(symbol, df['ATR'].iloc[-1])
                 else:
                     if latest['signal'] != "":
                         print(f"[INFO] No open position — entering new {latest['signal']} trade.")
