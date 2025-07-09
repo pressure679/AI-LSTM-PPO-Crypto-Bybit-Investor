@@ -11,8 +11,8 @@ api_key = "wLqYZxlM27F01smJFS"
 api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
 session = HTTP(testnet=False, api_key=api_key, api_secret=api_secret)
 # SYMBOLS = ["BNBUSDT", "XRPUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
-# SYMBOLS = ["SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
-SYMBOLS = ["XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
+SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
+# SYMBOLS = ["XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
 risk = 0.1  # Example risk per trade
 leverage=75
 current_trade_info = []
@@ -136,25 +136,20 @@ def generate_signal(df):
 
     for i in range(len(df)):
         signal = ""
-        # if i > 2:
         latest = df.iloc[i]
-        # prev = df.iloc[i - 1]
-
-        # macd_cross_up = prev['Macd_line'] < prev['Macd_signal'] and latest['Macd_line'] > latest['Macd_signal']
-        # macd_cross_down = prev['Macd_line'] > prev['Macd_signal'] and latest['Macd_line'] < latest['Macd_signal']
-
-        # df['Macd_cross_up'].iloc[i] = macd_cross_up
-        # df['Macd_cross_down'].iloc[i] = macd_cross_down
-        # df['Macd_cross_up'].append(macd_cross_up)
-        # df['Macd_cross_down'].append(macd_cross_down)
             
         if latest['ADX'] > 20:
             # Buy Signal
-            # if latest['Momentum_increasing'] and latest['+DI'] > latest['-DI'] and latest['RSI'] > 50 and latest['Bulls'] > latest['Bears'] and latest['EMA_7'] > latest['EMA_14'] > latest['EMA_21'] > latest['EMA_50'] and latest['Macd_trending_up']:
-            if latest['Momentum_increasing'] and latest['+DI'] > latest['-DI'] and latest['RSI'] > 50 and latest['Bulls'] > latest['Bears'] and latest['EMA_7'] > latest['EMA_14'] > latest['EMA_21'] > latest['EMA_50'] and latest['Macd_trending_up']:
+            if (latest['Momentum_increasing'] and latest['RSI'] > 50 and 
+                (latest['+DI'] > latest['-DI'] or latest['Bulls'] > latest['Bears']) and
+                latest['EMA_7'] > latest['EMA_14'] > latest['EMA_21'] > latest['EMA_50'] and
+                latest['Macd_trending_up']):
                 signal = "Buy"
-           # Sell Signal
-            elif latest['Momentum_decreasing'] and latest['-DI'] > latest['+DI'] and latest['RSI'] < 50 and latest['Bulls'] < latest['Bears'] and latest['EMA_7'] < latest['EMA_14'] < latest['EMA_21'] < latest['EMA_50'] and latest['Macd_trending_down']:
+                
+            elif (latest['Momentum_decreasing'] and latest['RSI'] < 50 and 
+                  (latest['-DI'] > latest['+DI'] or latest['Bulls'] < latest['Bears']) and
+                  latest['EMA_7'] < latest['EMA_14'] < latest['EMA_21'] < latest['EMA_50'] and
+                  latest['Macd_trending_down']):
                 signal = "Sell"
             else:
                 signal = ""
@@ -266,7 +261,11 @@ def enter_trade(signal, df, symbol, risk_pct=0.1):
     # total_qty = calculate_dynamic_qty(symbol, risk_amount, atr)
     
     # Round total_qty down to nearest step
-    total_qty = math.floor(risk_amount / step) * step
+    total_qty = math.floor(risk_amount / entry_price) * step
+
+    print(f"risk amount: {risk_amount}")
+    print(f"step: {step}")
+    print(f"total_qty: {total_qty}")
     
     if total_qty < min_qty:
         print(f"[WARN] Quantity {total_qty} below minimum {min_qty}, skipping trade.")
@@ -330,6 +329,8 @@ def enter_trade(signal, df, symbol, risk_pct=0.1):
             "order_id": order_id
         }
 
+# def get_open_orders(symbol):
+    
 def cancel_old_orders(symbol):
     try:
         # Fetch active orders for the symbol (category may be needed depending on API)
@@ -508,20 +509,12 @@ def run_bot():
                 print(f"ATR: {atr:.6f}")
                 print(f"Trade Qty (calculated): {total_qty}")
                 print(f"Balance: {balance:.2f}")
-                # Cancel old orders if signal changed
-                # if (
-                #     latest['signal'] != previous_signals[symbol]
-                #     and latest['signal'] != ""
-                #     and previous_signals[symbol] != ""
-                # ):
-                #     print(f"Signal changed for {symbol}: {previous_signals[symbol]} -> {latest['signal']}")
-                #     cancel_old_orders(symbol)
-                #     enter_trade(latest['signal'], df, symbol)
-                #     previous_signals[symbol] = latest['signal']
-                #     time.sleep(2)
                 position = get_position(symbol)
-                if position:
+                open_orders = session.get_open_orders(category="linear", symbol=symbol)['result']['list']
+                if open_orders:
                     print(f"Open Position: Side={position['side']} Entry={position['entry_price']:.6f} Qty={position['qty']} PnL={position['unrealizedPnl']:.2f}")
+                    update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1])
+                    exit_condition = check_exit_condition(symbol, df['ATR'].iloc[-1])
                     # --- AUTO-REVERSE LOGIC ---
                     if latest['signal'] != "" and latest['signal'] != position['side']:
                         print(f"[AUTO-REVERSE] Opposite signal detected: Closing {position['side']} and entering {latest['signal']}")
@@ -536,8 +529,8 @@ def run_bot():
                         previous_signals[symbol] = latest['signal']
                     else:
                         print("[INFO] Holding current position — no reversal needed.")
-                        update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1])
-                        exit_condition = check_exit_condition(symbol, df['ATR'].iloc[-1])
+                        # update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1])
+                        # exit_condition = check_exit_condition(symbol, df['ATR'].iloc[-1])
                 else:
                     if latest['signal'] != "":
                         print(f"[INFO] No open position — entering new {latest['signal']} trade.")
@@ -546,8 +539,6 @@ def run_bot():
                         avg_pnl = calculate_avg_pnl(df, symbol)
                         print(f"avg_pnl: {avg_pnl}")
                         previous_signals[symbol] = latest['signal']
-                    # else:
-                    #     print(f"Signal for {symbol} is ''")
                 time.sleep(2)
             except Exception as e:
                 print(f"Error processing {symbol}: {e}")
