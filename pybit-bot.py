@@ -15,7 +15,7 @@ session = HTTP(testnet=False, api_key=api_key, api_secret=api_secret)
 # SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
 SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT"]
 # SYMBOLS = ["XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
-risk = 0.1  # Example risk per trade
+risk_pct = 0.35  # Example risk per trade
 leverage=75
 current_trade_info = []
 def keep_session_alive(symbol):
