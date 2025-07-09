@@ -11,7 +11,8 @@ api_key = "wLqYZxlM27F01smJFS"
 api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
 session = HTTP(testnet=False, api_key=api_key, api_secret=api_secret)
 # SYMBOLS = ["BNBUSDT", "XRPUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
-SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
+# SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
+SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT"]
 # SYMBOLS = ["XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
 risk = 0.1  # Example risk per trade
 leverage=75
@@ -68,6 +69,12 @@ def MACD(series, fast=12, slow=26, signal=9):
     histogram = macd_line - signal_line
     return macd_line, signal_line, histogram
 
+def Bollinger_Bands(series, period=20, num_std=2):
+    sma = series.rolling(window=period).mean()
+    std = series.rolling(window=period).std()
+    upper_band = sma + num_std * std
+    lower_band = sma - num_std * std
+    return upper_band, lower_band
 def ADX(df, period=14):
     plus_dm = df['High'].diff()
     minus_dm = df['Low'].diff().abs()
@@ -104,13 +111,17 @@ def calculate_indicators(df):
     tr = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
     df['ATR'] = tr.rolling(window=14).mean()
 
-    df['Macd_line'], df['Macd_signal'], df['Macd_histogram'] = MACD(df['Close'])
+    df['macd_line'], df['macd_signal'], df['macd_histogram'] = MACD(df['Close'])
     # === MACD Crossovers ===
-    df['Macd_cross_up'] = (df['Macd_line'] > df['Macd_signal']) & (df['Macd_line'].shift(1) <= df['Macd_signal'].shift(1))
-    df['Macd_cross_down'] = (df['Macd_line'] < df['Macd_signal']) & (df['Macd_line'].shift(1) >= df['Macd_signal'].shift(1))
+    df['macd_cross_up'] = (df['macd_line'] > df['macd_signal']) & (df['macd_line'].shift(1) <= df['macd_signal'].shift(1))
+    df['macd_cross_down'] = (df['macd_line'] < df['macd_signal']) & (df['macd_line'].shift(1) >= df['macd_signal'].shift(1))
     # === MACD Trend Status ===
-    df['Macd_trending_up'] = df['Macd_line'] > df['Macd_signal']
-    df['Macd_trending_down'] = df['Macd_line'] < df['Macd_signal']
+    df['macd_trending_up'] = df['macd_line'] > df['macd_signal']
+    df['macd_trending_down'] = df['macd_line'] < df['macd_signal']
+    df['macd_histogram_increasing'] = df['macd_histogram'].diff() > 0
+    df['macd_histogram_decreasing'] = df['macd_histogram'].diff() < 0
+
+    df['bb_upper'], df['bb_lower'] = Bollinger_Bands(df['Close'])
 
     # df['Momentum'] = df['Close'] - df['Close'].shift(10)
     # Custom momentum (% of recent high-low range)
@@ -131,7 +142,7 @@ def calculate_indicators(df):
     df['Bears'] = df['Close'].shift(1) - df['Low']
     df.dropna(inplace=True)
     return df
-def generate_signal(df):
+def generate_signals(df):
     signals = []
 
     for i in range(len(df)):
@@ -143,23 +154,24 @@ def generate_signal(df):
             # if (latest['Momentum_increasing'] and latest['RSI'] > 50 and 
             #     (latest['+DI'] > latest['-DI'] or latest['Bulls'] > latest['Bears']) and
             #     latest['EMA_7'] > latest['EMA_14'] > latest['EMA_21'] > latest['EMA_50'] and
-            #     latest['Macd_trending_up']):
+            #     latest['macd_trending_up']):
             # if (latest['Momentum'] > 0 and latest['RSI'] > 50 and 
             #     (latest['+DI'] > latest['-DI'] or latest['Bulls'] > latest['Bears']) and
             #     latest['EMA_7'] > latest['EMA_14'] > latest['EMA_21'] > latest['EMA_50'] and
-            #     latest['Macd_trending_up']):
-            if latest['EMA_21'] > latest['EMA_50'] and latest['Macd_trending_up']:
+            #     latest['macd_trending_up']):
+            # if latest['EMA_21'] > latest['EMA_50'] and latest['macd_trending_up']:
+            if latest['EMA_21'] > latest['EMA_50'] and latest['macd_histogram_increasing']:
                 signal = "Buy"
                 # if (latest['Momentum_decreasing'] and latest['RSI'] > 50 and 
             #     (latest['+DI'] < latest['-DI'] or latest['Bulls'] < latest['Bears']) and
             #     latest['EMA_7'] > latest['EMA_14'] > latest['EMA_21'] > latest['EMA_50'] and
-            #     latest['Macd_trending_up']):
+            #     latest['macd_trending_up']):
 
             # elif (latest['Momentum'] < 0 and latest['RSI'] < 50 and 
             #       (latest['-DI'] > latest['+DI'] or latest['Bulls'] < latest['Bears']) and
             #       latest['EMA_7'] < latest['EMA_14'] < latest['EMA_21'] < latest['EMA_50'] and
-            #       latest['Macd_trending_down']):
-            if latest['EMA_21'] < latest['EMA_50'] and latest['Macd_trending_down']:
+            #       latest['macd_trending_down']):
+            elif latest['EMA_21'] < latest['EMA_50'] and latest['macd_histogram_decreasing']:
                 signal = "Sell"
             else:
                 signal = ""
@@ -183,10 +195,10 @@ def get_qty_step(symbol):
 
 def calculate_dynamic_qty(symbol, risk_amount, atr):
     price = get_mark_price(symbol)
-    stop_distance = atr * 1.5
+    stop_distance = atr * 1.2
     qty = risk_amount / stop_distance
     return round(qty, 6)
-def place_sl_and_tp(symbol, side, entry_price, atr, qty, levels=[1.5, 2.5, 3.5, 4.5]):
+def place_sl_and_tp(symbol, side, entry_price, atr, qty, levels=[1.2, 1.5, 2.0, 2.5]):
     """
     Places initial SL and multiple TP orders based on ATR multiples.
     
@@ -205,9 +217,9 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty, levels=[1.5, 2.5, 3.5, 
 
     # SL price calculation
     if side == "Buy":
-        sl_price = entry_price - 1.5 * atr
+        sl_price = entry_price - 1.2 * atr
     else:  # Sell
-        sl_price = entry_price + 1.5 * atr
+        sl_price = entry_price + 1.2 * atr
 
     # Place stop loss order
     sl_response = session.set_trading_stop(
@@ -235,25 +247,47 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty, levels=[1.5, 2.5, 3.5, 
     for i, mult in enumerate(levels):
         if side == "Buy":
             tp_price = entry_price + mult * atr
-        else:  # Sell
+            tp_side = "Sell"
+        else:
             tp_price = entry_price - mult * atr
+            tp_side = "Buy"
             
-        tp_response = session.place_order(
-            category="linear",
-            symbol=symbol,
-            side="Sell" if side == "Buy" else "Buy",
-            order_type="Limit",
-            # TODO
-            qty=round(qty_per_tp[i], 6),
-            price=round(tp_price, 6),
-            time_in_force="GTC",
-            reduce_only=True
-        )
-        tp_orders.append(tp_response)
+            tp_qty = round(qty_per_tp[i], 6)  # <-- FIX HERE
+            
+            tp_response = session.place_order(
+                category="linear",
+                symbol=symbol,
+                side=tp_side,
+                order_type="Limit",
+                qty=tp_qty,
+                price=round(tp_price, 6),
+                time_in_force="GTC",
+                reduce_only=True
+            )
+            tp_orders.append(tp_response)
+
+    # for i, mult in enumerate(levels):
+    #     if side == "Buy":
+    #         tp_price = entry_price + mult * atr
+    #     else:  # Sell
+    #         tp_price = entry_price - mult * atr
+            
+    #     tp_response = session.place_order(
+    #         category="linear",
+    #         symbol=symbol,
+    #         side="Sell" if side == "Buy" else "Buy",
+    #         order_type="Limit",
+    #         # TODO
+    #         qty=round(qty_per_tp[i], 6),
+    #         price=round(tp_price, 6),
+    #         time_in_force="GTC",
+    #         reduce_only=True
+    #     )
+    #     tp_orders.append(tp_response)
     orders['tp'] = tp_orders
     return orders
 
-def enter_trade(signal, df, symbol, risk_pct=0.1):
+def enter_trade(signal, df, symbol, risk_pct):
     global leverage
     global current_trade_info
 
@@ -262,30 +296,23 @@ def enter_trade(signal, df, symbol, risk_pct=0.1):
         return None
 
     entry_price = get_mark_price(symbol)  # or df['Close'].iloc[-1] — pick one
-
     balance = get_balance()
-    risk_amount = max(balance * risk_pct, 6)  # minimum risk amount 7
+    risk_amount = max(balance * risk_pct, 5)  # minimum risk amount 5
 
     step, min_qty = get_qty_step(symbol)
     atr = df['ATR'].iloc[-1]
-    # total_qty = calculate_dynamic_qty(symbol, risk_amount, atr)
-    
+
     # Round total_qty down to nearest step
     total_qty = math.floor(risk_amount / entry_price) * step
 
-    print(f"risk amount: {risk_amount}")
-    print(f"step: {step}")
-    print(f"total_qty: {total_qty}")
-    
     if total_qty < min_qty:
         print(f"[WARN] Quantity {total_qty} below minimum {min_qty}, skipping trade.")
         return None
 
     side = "Buy" if signal == "Buy" else "Sell"
 
-    sl_price = round(entry_price - atr * 1.5, 6) if side == "Buy" else round(entry_price + atr * 1.5, 6)
-
-    tp_price = round(entry_price + atr * 4.5, 6) if side == "Buy" else round(entry_price - atr * 4.5, 6)
+    sl_price = round(entry_price - atr * 1.2, 6) if side == "Buy" else round(entry_price + atr * 1.2, 6)
+    tp_price = round(entry_price + atr * 2.5, 6) if side == "Buy" else round(entry_price - atr * 2.5, 6)
 
     try:
         print(f"Placing order for {symbol} side={side} qty={total_qty}")
@@ -299,48 +326,37 @@ def enter_trade(signal, df, symbol, risk_pct=0.1):
             take_profit=str(tp_price),
             stop_loss=str(sl_price)
         )
-        order_id = response.get("result", {}).get("orderId")
+
+        # ✅ Validate API response before accessing
+        if not response or 'result' not in response or not response['result']:
+            print(f"[ERROR] Bad order response for {symbol}: {response}")
+            return None
+
+        order_id = response['result'].get("orderId")
         print(f"[INFO] Placed {side} order with TP={tp_price}, SL={sl_price}")
+
     except Exception as e:
         print(f"[ERROR] Failed to place order: {e}")
         return None
 
     # Optionally place additional SL/TP if your function returns more orders/info
     orders = place_sl_and_tp(symbol, side, entry_price, atr, total_qty)
-    
-    # You need to adapt this depending on what place_sl_and_tp returns
-    # For example:
-    if orders:
-        # Assuming orders contains keys like 'sl', 'tps', 'order_id'
-        current_trade_info = {
-            "symbol": symbol,
-            "entry_price": entry_price,
-            "signal": side,
-            "qty": total_qty,
-            "remaining_qty": total_qty,
-            "sl": sl_price,
-            "tps": [tp_price],  # or orders['tps'] if multiple levels
-            "atr": atr,
-            "active_tp_index": 0,
-            "order_id": order_id or orders.get('order_id')
-        }
-    else:
-        # If no additional orders placed
-        current_trade_info = {
-            "symbol": symbol,
-            "entry_price": entry_price,
-            "signal": side,
-            "qty": total_qty,
-            "remaining_qty": total_qty,
-            "sl": sl_price,
-            "tps": [tp_price],
-            "atr": atr,
-            "active_tp_index": 0,
-            "order_id": order_id
-        }
 
-# def get_open_orders(symbol):
-    
+    # if orders:
+    trade_info = {
+        "symbol": symbol,
+        "entry_price": entry_price,
+        "signal": side,
+        "qty": total_qty,
+        "remaining_qty": total_qty,
+        "sl": sl_price,
+        "tps": [tp_price],  # or orders['tps'] if you use multi-level TPs
+        "atr": atr,
+        "active_tp_index": 0,
+        "order_id": order_id or orders.get('order_id')
+    }
+    current_trade_info = trade_info
+    return trade_info
 def cancel_old_orders(symbol):
     try:
         # Fetch active orders for the symbol (category may be needed depending on API)
@@ -360,9 +376,9 @@ def manage_trailing_sl(current_price):
     sl = trade_info['sl']
 
     if side == "Buy":
-        new_sl = max(sl, current_price - atr * 1.5)
+        new_sl = max(sl, current_price - atr * 1.2)
     else:
-        new_sl = min(sl, current_price + atr * 1.5)
+        new_sl = min(sl, current_price + atr * 1.2)
 
     trade_info['sl'] = new_sl
 
@@ -453,7 +469,7 @@ def get_position(symbol):
         return None
 def update_trailing_sl(symbol, close, atr):
     pos = get_position(symbol)
-    new_sl = close - atr * 1.5 if pos['side'] == "Buy" else close + atr * 1.5
+    new_sl = close - atr * 1.2 if pos['side'] == "Buy" else close + atr * 1.2
     if (pos['side'] == "Buy" and new_sl > pos['sl']) or (pos['side'] == "Sell" and new_sl < pos['sl']):
         print(f"Updating trailing SL on {symbol} to {new_sl}")
         session.set_trading_stop(
@@ -487,13 +503,14 @@ def run_bot():
     global current_trade_info
     previous_signals = {symbol: "" for symbol in SYMBOLS}  # track last signal per symbol
     trade_info = []
+    risk_pct = 0.35
     while True:
         for symbol in SYMBOLS:
             try:
                 df = get_klines_df(symbol)
                 df = calculate_indicators(df)
-                df['signal'] = generate_signal(df)
-                risk_amount = max(get_balance() * 0.1, 6) 
+                df['signal'] = generate_signals(df)
+                risk_amount = max(get_balance() * risk_pct, 6) 
                 atr = df['ATR'].iloc[-1]
                 step, min_qty = get_qty_step(symbol)
                 total_qty = math.floor(risk_amount / df['Close'].iloc[-1]) * step
@@ -503,19 +520,21 @@ def run_bot():
                 print(f"=== {symbol} Stats ===")
                 print(f"Signal: {latest['signal']}")
                 print(f"Close: {latest['Close']:.6f}")
-                print(f"EMA7: {latest['EMA_7']:.6f}")
-                print(f"EMA14: {latest['EMA_14']:.6f}")
+                # print(f"EMA7: {latest['EMA_7']:.6f}")
+                # print(f"EMA14: {latest['EMA_14']:.6f}")
                 print(f"EMA21: {latest['EMA_21']:.6f}")
                 print(f"EMA50: {latest['EMA_50']:.6f}")
-                print(f"MacD trend up/down: {latest['Macd_trending_up']}/{latest['Macd_trending_down']}")
-                print(f"RSI: {latest['RSI']:.2f}")
+                print(f"MacD trend up/down: {latest['macd_trending_up']}/{latest['macd_trending_down']}")
+                print(f"MacdD cross up/down: {latest['macd_cross_up']}/{latest['macd_cross_down']}")
+                print(f"MacdD histogram increasing/decreasing: {latest['macd_histogram_increasing']}/{latest['macd_histogram_decreasing']}")
+                # print(f"RSI: {latest['RSI']:.2f}")
                 print(f"ADX: {latest['ADX']:.2f}")
-                print(f"+DI: {latest['+DI']:.2f}")
-                print(f"-DI: {latest['-DI']:.2f}")
-                print(f"BullsPower: {latest['Bulls']:.6f}")
-                print(f"BearsPower: {latest['Bears']:.6f}")
-                print(f"Momentum: {latest['Momentum']:.2f}")
-                print(f"Momentum increasing/decreasing: {latest['Momentum_increasing']}/{latest['Momentum_decreasing']}")
+                # print(f"+DI: {latest['+DI']:.2f}")
+                # print(f"-DI: {latest['-DI']:.2f}")
+                # print(f"BullsPower: {latest['Bulls']:.6f}")
+                # print(f"BearsPower: {latest['Bears']:.6f}")
+                # print(f"Momentum: {latest['Momentum']:.2f}")
+                # print(f"Momentum increasing/decreasing: {latest['Momentum_increasing']}/{latest['Momentum_decreasing']}")
                 print(f"ATR: {atr:.6f}")
                 print(f"Trade Qty (calculated): {total_qty}")
                 print(f"Balance: {balance:.2f}")
@@ -533,8 +552,13 @@ def run_bot():
                         cancel_old_orders(symbol)
                         time.sleep(2)  # Give time for exit to process
                         # Enter opposite trade
-                        enter_trade(latest['signal'], df, symbol)
-                        print(f"[TRADE] Reversed position to {latest['signal']}")
+                        trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
+                        if trade_info:
+                            print(f"[TRADE] Reversed position to {latest['signal']}")
+                            current_trade_info = trade_info
+                        else:
+                            print(f"[WARN] Failed to enter trade for {symbol}, skipping update.")
+                            continue
                         # Update last known signal
                         previous_signals[symbol] = latest['signal']
                     else:
@@ -544,10 +568,16 @@ def run_bot():
                 else:
                     if latest['signal'] != "":
                         print(f"[INFO] No open position — entering new {latest['signal']} trade.")
-                        enter_trade(latest['signal'], df, symbol)
-                        print(f"current_trade_info: {current_trade_info}")
-                        avg_pnl = calculate_avg_pnl(df, symbol)
-                        print(f"avg_pnl: {avg_pnl}")
+                        trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
+                        if trade_info:
+                            print(f"[INFO] Entered trade for {symbol} at {trade_info['entry_price']}")
+                            current_trade_info = trade_info
+                        else:
+                            print(f"[WARN] Failed to enter trade for {symbol}, skipping update.")
+                            continue  # or continue
+                        # print(f"current_trade_info: {current_trade_info}")
+                        # avg_pnl = calculate_avg_pnl(df, symbol)
+                        # print(f"avg_pnl: {avg_pnl}")
                         previous_signals[symbol] = latest['signal']
                 time.sleep(2)
             except Exception as e:
