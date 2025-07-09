@@ -185,31 +185,6 @@ def calculate_dynamic_qty(symbol, risk_amount, atr):
     stop_distance = atr * 1.5
     qty = risk_amount / stop_distance
     return round(qty, 6)
-# def get_trade_qty(symbol, atr):
-#     wallet = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
-#     usdt_balance = float(wallet[0]["totalEquity"])
-#     if usdt_balance <= 5:
-#         return usdt_balance  # or whatever fallback you want if balance too low
-# 
-#     # Calculate desired trade amount (5% or $5 minimum)
-#     desired_usd_amount = max(usdt_balance * 0.1, 6)
-# 
-#     # Cap desired amount to max_risk_pct * balance
-#     max_allowed_usd = usdt_balance * 0.1
-#     trade_usd_amount = min(desired_usd_amount, max_allowed_usd)
-# 
-#     price = float(session.get_tickers(category="linear", symbol=symbol)["result"]["list"][0]["lastPrice"])
-#     raw_qty = trade_usd_amount / price
-# 
-#     step, min_qty = get_qty_step(symbol)
-#     # qty = math.floor(raw_qty / step) * step
-#     # qty = round(qty, 6)  # round for precision
-#     qty = calculate_dynamic_qty(symbol, trade_usd_amount, )
-# 
-#     if qty < min_qty:
-#         qty = min_qty
-# 
-#     return qty
 def place_sl_and_tp(symbol, side, entry_price, atr, qty, levels=[1.5, 2.5, 3.5, 4.5]):
     """
     Places initial SL and multiple TP orders based on ATR multiples.
@@ -288,7 +263,7 @@ def enter_trade(signal, df, symbol, risk_pct=0.1):
     entry_price = get_mark_price(symbol)  # or df['Close'].iloc[-1] — pick one
 
     balance = get_balance()
-    risk_amount = max(balance * risk_pct, 7)  # minimum risk amount 7
+    risk_amount = max(balance * risk_pct, 6)  # minimum risk amount 7
 
     step, min_qty = get_qty_step(symbol)
     atr = df['ATR'].iloc[-1]
@@ -364,11 +339,9 @@ def cancel_old_orders(symbol):
         # Fetch active orders for the symbol (category may be needed depending on API)
         # open_orders = session.get_active_order(category="linear", symbol=symbol)['result']['list']
         open_orders = session.get_open_orders(category="linear", symbol=symbol)['result']['list']
-        
         for order in open_orders:
             order_id = order['orderId']
-            session.cancel_active_order(category="linear", symbol=symbol, orderId=order_id)
-        
+            session.cancel_active_orders(category="linear", symbol=symbol, orderId=order_id)
         print(f"Cancelled old orders for {symbol}")
     except Exception as e:
         print(f"Failed to cancel orders for {symbol}: {e}")
@@ -382,10 +355,11 @@ def cancel_old_orders(symbol):
     #     print(f"Cancelled old orders for {symbol}")
     # except Exception as e:
     #     print(f"Failed to cancel orders for {symbol}: {e}")
-def manage_trailing_sl(current_price, trade_info):
+def manage_trailing_sl(current_price):
+    global current_trade_info
     atr = trade_info['atr']
-    side = trade_info['side']
-    entry = trade_info['entry_price']
+    side = trade_info['signal']
+    entry_price = trade_info['entry_price']
     sl = trade_info['sl']
 
     if side == "Buy":
@@ -394,7 +368,6 @@ def manage_trailing_sl(current_price, trade_info):
         new_sl = min(sl, current_price + atr * 1.5)
 
     trade_info['sl'] = new_sl
-    return trade_info
 
 def take_partial_profit(symbol, side, qty):
     close_side = "Sell" if side == "Buy" else "Buy"
@@ -437,17 +410,24 @@ def check_exit_conditions(current_price, atr):
         cancel_old_orders(current_trade_info['symbol'])
         return 'stop'
 
+    portion = [0.4, 0.2, 0.2, 0.2]
+
     # Check TP hit
     if active_index < len(tps):
         target = tps[active_index]
-        exit_condition = ""
         if (side == "Buy" and current_price >= target) or (side == "Sell" and current_price <= target):
             print(f"[INFO] Take profit level {active_index + 1} hit")
             trade_info['active_tp_index'] += 1
-            exit_condition = manage_trailing_sl(current_price, trade_info)
-            take_partial_profit(current_trade_info['symbol'], current_trade_info['side'], current_trade_info['qty'])
-        return exit_confition
-    if trade_info['active_tp_index'] >= len(trade_info['tps']):
+
+            exit_condition = manage_trailing_sl(current_price)
+
+            if active_index < len(portion):  # avoid index error
+                qty_to_close = portion[active_index] * current_trade_info['qty']
+                take_partial_profit(current_trade_info['symbol'], current_trade_info['side'], qty_to_close)
+
+            return exit_condition
+
+    if trade_info['active_tp_index'] >= len(tps):
         print("[INFO] All TP levels hit.")
         cancel_old_orders(current_trade_info['symbol'])
         return 'complete'
@@ -510,7 +490,7 @@ def wait_until_next_candle(interval_minutes):
     sleep_seconds = seconds_per_candle - (now % seconds_per_candle)
     # print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
     time.sleep(sleep_seconds)
-def main_loop():
+def run_bot():
     global current_trade_info
     previous_signals = {symbol: "" for symbol in SYMBOLS}  # track last signal per symbol
     trade_info = []
@@ -548,10 +528,10 @@ def main_loop():
                 print(f"Trade Qty (calculated): {total_qty}")
                 # print(f"Step: {step}")
                 # print(f"Avg PnL: {latest['avg_PnL']:.6f}")
-                print(f"Balance: {balance}")
+                print(f"Balance: {balance:.2f}")
 
                 # Cancel old orders if signal changed
-                if latest['signal'] != previous_signals[symbol] and latest['signal'] != "":
+                if latest['signal'] != previous_signals[symbol] and latest['signal'] != "" and previous_singals[symbol] != "":
                     print(f"Signal changed for {symbol}: {previous_signals[symbol]} -> {latest['signal']}")
                     cancel_old_orders(symbol)
                     previous_signals[symbol] = latest['signal']
@@ -560,16 +540,27 @@ def main_loop():
                 position = get_position(symbol)
                 if position:
                     print(f"Open Position: Side={position['side']} Entry={position['entry_price']:.6f} Qty={position['qty']} PnL={position['unrealizedPnl']:.2f}")
-                    exit_reason = check_exit_conditions(df['Close'].iloc[-1], current_trade_info)
-                else:
-                    if latest['signal'] != "":
-                        print(f"Entering position at {symbol} with side {latest['signal']}")
-                        current_trade_info = enter_trade(latest['signal'], df, symbol)
-                        print(f"current_tade_info: {current_trade_info}")
-                        avg_pnl = calculate_avg_pnl(df, symbol)
-                        print(f"avg_pnl: {avg_pnl}")
+                    
+                    if latest['signal'] != "" and latest['signal'] != position['side'] and position['side'] != "":
+                        print(f"[INFO] Opposite signal detected ({latest['signal']} vs position {position['side']}) — consider closing or reversing.")
+                        # Optional: you could close or reverse here.
+                        
+                        # exit_reason = check_exit_conditions(df['Close'].iloc[-1], current_trade_info)
+                        cnacel_old_orders(symbol)
+                        enter_trade(latest['signal'], df, symbol)
+                        
                     else:
-                        print(f"Signal for {symbol} is ''")
+                        if latest['signal'] != "":
+                            print(f"[INFO] No position, signal is {latest['signal']} — entering new trade.")
+                            current_trade_info = enter_trade(latest['signal'], df, symbol)
+                            print(f"current_trade_info: {current_trade_info}")
+                            avg_pnl = calculate_avg_pnl(df, symbol)
+                            print(f"avg_pnl: {avg_pnl}")
+                        else:
+                            print(f"Signal for {symbol} is ''")
+
+                    # else:
+                    #     print(f"Signal for {symbol} is ''")
 
                 # print("\n")
                 time.sleep(2)
@@ -582,7 +573,7 @@ def main_loop():
 
         
 if __name__ == "__main__":
-    main_loop()
+    run_bot()
 # set trailing stop
 # session.set_trading_stop(
 #     category="linear",
