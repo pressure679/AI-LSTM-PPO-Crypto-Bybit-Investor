@@ -9,6 +9,12 @@ from math import floor
 import traceback
 from decimal import Decimal, ROUND_DOWN
 
+# ───────── daily per‑mode caps ─────────
+MODE_CAP      = 5               # 5 trades per mode per day
+mode_counter  = {"ema": 0, "macd": 0, "sar": 0}
+day_anchor    = int(time.time() // 86400)  # UTC day‑number
+# ────────────────────────────────────────
+
 SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
 
 # ── trade‑frequency throttle ─────────────────────────
@@ -37,6 +43,13 @@ leverage=25
 current_trade_info = []
 balance = 168
 now = time.time()
+def reset_mode_counters_if_new_day():
+    global mode_counter, day_anchor
+    today = int(time.time() // 86400)
+    if today != day_anchor:
+        mode_counter = {"ema": 0, "macd": 0, "sar": 0}
+        day_anchor   = today
+        print("─── New UTC day: per‑mode counters reset ───")
 def reset_daily_counter_if_new_day():
     global trade_counter, day_anchor
     today = int(time.time() // 86400)
@@ -360,28 +373,16 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     # ───────────── Stop‑loss ─────────────
     sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
     try:
-
-        # ── open a fresh trade only if signal present & cool‑down met ──
-        if latest['signal'] and (now - last_trade_time[symbol] >= MIN_GAP):
-            print(f"[INFO] Cool‑down satisfied → opening {latest['signal']} on {symbol}")
-            trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
-            if trade_info:
-                last_trade_time[symbol] = now           # stamp the fill time
-                current_trade_info = trade_info
-            else:
-                if latest['signal']:
-                    wait_left = MIN_GAP - (now - last_trade_time[symbol])
-                    print(f"[{symbol}] Cool‑down active: {wait_left/60:.1f} min left")
-        # orders['sl'] = session.set_trading_stop(
-        #     category="linear",
-        #     symbol=symbol,
-        #     side=side,
-        #     stop_loss=str(round(sl_price, 6))
-        # )
-        # if orders['sl'].get('retCode') == 0:
-        #     print(f"[{symbol}] SL placed.")
-        # else:
-        #     print(f"[{symbol}] SL failed: {orders['sl']}")
+        orders['sl'] = session.set_trading_stop(
+            category="linear",
+            symbol=symbol,
+            side=side,
+            stop_loss=str(round(sl_price, 6))
+        )
+        if orders['sl'].get('retCode') == 0:
+            print(f"[{symbol}] SL placed.")
+        else:
+            print(f"[{symbol}] SL failed: {orders['sl']}")
     except Exception as e:
         if "ErrCode: 10001" in str(e):
             pass                              # silent
@@ -699,6 +700,8 @@ def run_bot():
     previous_signals = {symbol: "" for symbol in SYMBOLS}  # track last signal per symbol
     risk_pct = 0.1
     while True:
+        reset_mode_counters_if_new_day()
+        reset_daily_counter_if_new_day()
         for symbol in SYMBOLS:
             try:
                 # trade_info = []
@@ -714,6 +717,17 @@ def run_bot():
                 total_qty = calc_order_qty(risk_amount, df['Close'].iloc[-1], min_qty, qty_step)
                 df['symbol'] = symbol
                 latest = df.iloc[-1]
+                # ── open a fresh trade only if signal present & cool‑down met ──
+                if latest['signal'] and (now - last_trade_time[symbol] >= MIN_GAP):
+                    print(f"[INFO] Cool‑down satisfied → opening {latest['signal']} on {symbol}")
+                    trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
+                    if trade_info:
+                        last_trade_time[symbol] = now           # stamp the fill time
+                        current_trade_info = trade_info
+                    else:
+                        if latest['signal']:
+                            wait_left = MIN_GAP - (now - last_trade_time[symbol])
+                            print(f"[{symbol}] Cool‑down active: {wait_left/60:.1f} min left")
                 balance = get_balance()
                 print(f"=== {symbol} Stats ===")
                 print(f"signal: {latest['signal']}")
