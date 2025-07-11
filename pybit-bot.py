@@ -498,7 +498,7 @@ def enter_trade(signal, df, symbol, risk_pct):
         "remaining_qty": total_qty,
         "sl": sl_price,
         # "tps": [tp_price],  # or orders['tps'] if you use multi-level TPs
-        "tps": orders['tp'],  # or orders['tps'] if you use multi-level TPs
+        # "tps": orders['tp'],  # or orders['tps'] if you use multi-level TPs
         "atr": atr,
         "active_tp_index": 0,
         # "order_id": order_id or orders.get('order_id')
@@ -520,17 +520,17 @@ def cancel_old_orders(symbol):
         print(f"Failed to cancel orders for {symbol}: {e}")
 def manage_trailing_sl(current_price):
     global current_trade_info
-    atr = trade_info['atr']
-    side = trade_info['signal']
-    entry_price = trade_info['entry_price']
-    sl = trade_info['sl']
+    atr = current_trade_info['atr']
+    side = current_trade_info['signal']
+    entry_price = current_trade_info['entry_price']
+    sl = current_trade_info['sl']
 
     if side == "Buy":
         new_sl = max(sl, current_price - atr * 1.5)
     else:
         new_sl = min(sl, current_price + atr * 1.5)
 
-    trade_info['sl'] = new_sl
+    current_trade_info['sl'] = new_sl
 
 def take_partial_profit(symbol, side, qty):
     close_side = "Sell" if side == "Buy" else "Buy"
@@ -576,7 +576,7 @@ def check_exit_conditions(current_price, atr):
     portion = [0.4, 0.2, 0.2, 0.2]
 
     # Check TP hit
-    if active_index < len(tps):
+    if active_index < 4:
         target = tps[active_index]
         if (side == "Buy" and current_price >= target) or (side == "Sell" and current_price <= target):
             print(f"[INFO] Take profit level {active_index + 1} hit")
@@ -718,7 +718,7 @@ def run_bot():
                 # print(f"ADX over 14: {latest['ADX'] / 14:.2f}")
                 print(f"Balance: {balance:.2f}")
                 # total_qty = calculate_dynamic_qty(symbol, risk_amount, latest['atr_bearish_multiplier'])
-                total_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
+                total_qty = calc_order_qty(risk_amount, latest['Close'], min_qty, qty_step)
                 print(f"position size: {total_qty}")
                 # print(f"EMA7: {latest['EMA_7']:.6f}")
                 # print(f"EMA14: {latest['EMA_14']:.6f}")
@@ -779,7 +779,7 @@ def run_bot():
                     else:
                         print("[INFO] Holding current position — no reversal needed.")
                         # update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1], latest['signal'], current_trade_info)
-                        exit_condition = check_exit_conditions(symbol, df['ATR'].iloc[-1])
+                        # exit_condition = check_exit_conditions(symbol, df['ATR'].iloc[-1])
                 else:
                     if latest['signal'] != "":
                         print(f"[INFO] No open position — entering new {latest['signal']} trade.")
@@ -801,20 +801,3 @@ def run_bot():
         wait_until_next_candle(1)
 if __name__ == "__main__":
     run_bot()
-# set trailing stop
-# session.set_trading_stop(
-#     category="linear",
-#     symbol=symbol,
-#     stop_loss=new_stop_loss
-# )
-
-# partial close order
-# response = session.place_active_order(
-#     symbol=coin,
-#     side="Sell",  # opposite side to close position
-#     order_type="Market",
-#     qty=qty_to_close,
-#     reduce_only=True,
-#     time_in_force="ImmediateOrCancel",
-#     leverage=leverage
-# )
