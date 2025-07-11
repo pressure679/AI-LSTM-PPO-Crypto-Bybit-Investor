@@ -328,68 +328,45 @@ def calculate_dynamic_qty(symbol, risk_amount, atr):
     qty = risk_amount / stop_distance
     return round(qty, 6)
 def place_sl_and_tp(symbol, side, entry_price, atr, qty):
-    """ Places initial SL and multiple TP orders based on ATR multiples.
-    Args:
-        symbol (str): e.g. "DOGEUSDT"
-        side (str): "Buy" or "Sell"
-        entry_price (float): entry price
-        atr (float): current ATR
-        qty (float): trade size
-        levels (list): ATR multiples for TP levels
-        
-    Returns:
-        dict with SL and TP responses
     """
+    Place initial SL plus four TP limit orders.
+    Silent‑skip ErrCode 10001 (zero‑position on SL) and
+    ErrCode 110017 (zero‑position on reduce‑only TP).
+    """
+    levels  = [1.5, 2.5, 3.5, 4.5]
+    orders  = {'sl': None, 'tp': []}
 
-    levels = [
-        1.5,
-        2.5,
-        3.5,
-        4.5
-    ]
-    orders = {}
-
-    if side == "Buy":
-        sl_price = entry_price - 1.5 * atr
-    else:
-        sl_price = entry_price + 1.5 * atr
-
-    print(f"[{symbol}] Attempting to set SL at: {sl_price:.6f}")
-
+    # ───────────── Stop‑loss ─────────────
+    sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
     try:
-        sl_response = session.set_trading_stop(
+        orders['sl'] = session.set_trading_stop(
             category="linear",
             symbol=symbol,
             side=side,
             stop_loss=str(round(sl_price, 6))
         )
-        if sl_response and sl_response.get('retCode') == 0:
-            print(f"[{symbol}] SL placed successfully.")
+        if orders['sl'].get('retCode') == 0:
+            print(f"[{symbol}] SL placed.")
         else:
-            print(f"[{symbol}] SL failed: {sl_response}")
-        orders['sl'] = sl_response
+            print(f"[{symbol}] SL failed: {orders['sl']}")
     except Exception as e:
-        error_msg = str(e).split("Request")[0].strip()
-        print(f"[{symbol}] SL exception: {error_msg}")
-        orders['sl'] = None
+        if "ErrCode: 10001" in str(e):
+            pass                              # silent
+        else:
+            msg = str(e).split("Request")[0].strip()
+            print(f"[{symbol}] SL exception: {msg}")
 
-    qty_per_tp = [qty * 0.4, qty * 0.2, qty * 0.2, qty * 0.2]
-    tp_orders = []
+    # ───────────── Take‑profits ─────────────
+    qty_split = [qty * 0.4, qty * 0.2, qty * 0.2, qty * 0.2]
 
     for i, mult in enumerate(levels):
         try:
-            if side == "Buy":
-                tp_price = entry_price + mult * atr
-                tp_side = "Sell"
-            else:
-                tp_price = entry_price - mult * atr
-                tp_side = "Buy"
-            
-            # Round the qty for each TP level using round_qty
-            rounded_qty = round_qty(symbol, qty_per_tp[i], entry_price)
-            print(f"[{symbol}] TP Level {i+1}: placing {tp_side} at {tp_price:.6f}, qty={rounded_qty:.6f}")
+            tp_price = entry_price + mult * atr if side == "Buy" else entry_price - mult * atr
+            tp_side  = "Sell" if side == "Buy" else "Buy"
+            rounded_qty = round_qty(symbol, qty_split[i], entry_price)
 
-            tp_response = session.place_order(
+            print(f"[{symbol}] TP {i+1}: {tp_side} {rounded_qty} @ {tp_price:.6f}")
+            tp_resp = session.place_order(
                 category="linear",
                 symbol=symbol,
                 side=tp_side,
@@ -399,21 +376,17 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
                 time_in_force="GTC",
                 reduce_only=True
             )
-
-            if tp_response and tp_response.get('retCode') == 0:
-                print(f"[{symbol}] TP Level {i+1} placed successfully.")
-            else:
-                print(f"[{symbol}] TP Level {i+1} failed: {tp_response}")
-            tp_orders.append(tp_response)
-
+            orders['tp'].append(tp_resp)
         except Exception as e:
-            if "orderQty will be truncated to zero" in str(e):
-                print(f"[{symbol}] TP Level {i+1}: qty too small, skipping order.")
+            if "ErrCode: 110017" in str(e):
+                # silent skip: no position yet for reduce‑only order
+                orders['tp'].append(None)
             else:
-                print(f"[{symbol}] Exception in TP Level {i+1}: {e}")
-            tp_orders.append(None)
-    orders['tp'] = tp_orders
+                print(f"[{symbol}] TP {i+1} exception: {e}")
+                orders['tp'].append(None)
+
     return orders
+
 def enter_trade(signal, df, symbol, risk_pct):
     global balance
     global leverage
