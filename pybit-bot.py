@@ -43,13 +43,18 @@ leverage=25
 current_trade_info = []
 balance = 168
 now = time.time()
-def reset_mode_counters_if_new_day():
-    global mode_counter, day_anchor
+
+def reset_and_log_if_new_day():
+    global counters
     today = int(time.time() // 86400)
-    if today != day_anchor:
-        mode_counter = {"ema": 0, "macd": 0, "sar": 0}
-        day_anchor   = today
-        print("─── New UTC day: per‑mode counters reset ───")
+
+    # — roll over to new day —
+    if today != counters["day"]:
+        counters = {"day": today, "totals": {"ema": 0, "macd": 0, "sar": 0}}
+        save_counters(counters)
+        with open(LOG_FILE, "a") as log:
+            log.write(f"\n======== NEW UTC DAY {today} ========\n")
+
 def reset_daily_counter_if_new_day():
     global trade_counter, day_anchor
     today = int(time.time() // 86400)
@@ -700,7 +705,8 @@ def run_bot():
     previous_signals = {symbol: "" for symbol in SYMBOLS}  # track last signal per symbol
     risk_pct = 0.1
     while True:
-        reset_mode_counters_if_new_day()
+        # reset_mode_counters_if_new_day()
+        reset_and_log_if_new_day()
         reset_daily_counter_if_new_day()
         for symbol in SYMBOLS:
             try:
@@ -724,6 +730,18 @@ def run_bot():
                     if trade_info:
                         last_trade_time[symbol] = now           # stamp the fill time
                         current_trade_info = trade_info
+
+                        counters["totals"][this_mode] += 1
+                        save_counters(counters)                 # persist immediately
+                        count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
+                        msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
+                               f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
+                               f"Totals → {count_str}\n")
+                        with open(LOG_FILE, "a") as log:
+                            log.write(msg)
+                            print(msg.strip())                      # echo to console
+                            current_trade_info = trade_info
+
                     else:
                         if latest['signal']:
                             wait_left = MIN_GAP - (now - last_trade_time[symbol])
