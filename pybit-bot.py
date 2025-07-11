@@ -12,24 +12,26 @@ import os
 
 COUNTER_FILE = "pybit-log-counter.txt.log"
 
-# ───────── daily per‑mode caps ─────────
-MODE_CAP      = 5               # 5 trades per mode per day
-mode_counter  = {"ema": 0, "macd": 0, "sar": 0}
-day_anchor    = int(time.time() // 86400)  # UTC day‑number
-# ────────────────────────────────────────
+import time
 
+# ───────── per‑mode and daily caps ──────────────────────────
+MODE_CAP   = 2                               # ≤ 2 trades per mode per UTC‑day
+DAILY_CAP  = 6                               # ≤ 6 total trades per UTC‑day
+
+# counters persist via JSON file (see helper code)
+mode_counter = {"ema": 0, "macd": 0, "sar": 0}
+trade_counter = 0
+
+# keep one day anchor for both caps
+day_anchor = int(time.time() // 86400)       # UTC‑day number
+# ────────────────────────────────────────────────────────────
+
+# ───────── trade‑frequency throttle (cool‑down) ─────────────
+# optional secondary guard: min gap between *any* two entries
+MIN_GAP = 60 * 96        # 5 760 s ≈ 1 h 36 m
 SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
-
-# ── trade‑frequency throttle ─────────────────────────
-MIN_GAP = 60 * 96   # 5 760 s ≈ 1 h 36 m
 last_trade_time = {sym: 0 for sym in SYMBOLS}
-# ─────────────────────────────────────────────────────
-
-# ───────── daily trade cap ─────────
-DAILY_CAP      = 15          # max new positions in 24 h
-trade_counter  = 0           # how many entries placed so far today
-day_anchor     = int(time.time() // 86400)  # day number since Unix epoch
-# ───────────────────────────────────
+# ────────────────────────────────────────────────────────────
 
 # API setup
 api_key = "wLqYZxlM27F01smJFS"
@@ -64,7 +66,6 @@ def save_counters(data):
         json.dump(data, f)
 
 counters = load_counters() 
-        
 def reset_and_log_if_new_day():
     global counters
     today = int(time.time() // 86400)
@@ -875,7 +876,7 @@ def run_bot():
             except Exception as e:
                 print(f"Error processing {symbol}: {e}")
         print("Cycle complete. Waiting for next candle...\n")
-        wait_until_next_candle(1)
+        wait_until_next_candle(15)
 if __name__ == "__main__":
     run_bot()
 # set trailing stop
