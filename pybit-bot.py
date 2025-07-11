@@ -7,6 +7,7 @@ import requests
 import math
 from math import floor
 import traceback
+from decimal import Decimal, ROUND_DOWN
 
 # API setup
 api_key = "wLqYZxlM27F01smJFS"
@@ -15,11 +16,13 @@ session = HTTP(testnet=False, api_key=api_key, api_secret=api_secret)
 # SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT"]
 # SYMBOLS = ["BNBUSDT", "XRPUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
 # SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
-SYMBOLS = ["FARTCOINUSDT", "DOGEUSDT", "1000PEPEUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
+# SYMBOLS = ["FARTCOINUSDT", "DOGEUSDT", "1000PEPEUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
+SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
 # SYMBOLS = ["XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
 risk_pct = 0.1  # Example risk per trade
-leverage=75
+leverage=50
 current_trade_info = []
+balance = 168
 def keep_session_alive(symbol):
     for attempt in range(30):
         try:
@@ -102,30 +105,10 @@ def BearsPower(df, period=13):
 def Momentum(series, period=10):
     return series - series.shift(period)
 
-# def calculate_fractals(df):
-#     highs = df['High']
-#     lows = df['Low']
-#     
-#     up_fractals = [None] * len(df)
-#     down_fractals = [None] * len(df)
-# 
-#     for i in range(2, len(df) - 2):
-#         if highs[i] > highs[i-2] and highs[i] > highs[i-1] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
-#             up_fractals[i] = highs[i]
-#         if lows[i] < lows[i-2] and lows[i] < lows[i-1] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
-#             down_fractals[i] = lows[i]
-#     df['Fractal_Up'] = up_fractals
-#     df['Fractal_Down'] = down_fractals
-#     # print("Fractal Highs (non-None):", [v for v in df['Fractal_Up'] if v is not None])
-#     # print("Fractal Lows (non-None):", [v for v in df['Fractal_Down'] if v is not None])
-#     # return df['Fractal_Up'], df['Fractal_Down']
-#     return df
-
 def calculate_indicators(df):
     df['EMA_7'] = df['Close'].ewm(span=7).mean()
     df['EMA_14'] = df['Close'].ewm(span=14).mean()
-    df['EMA_21'] = df['Close'].ewm(span=21).mean()
-    df['EMA_50'] = df['Close'].ewm(span=50).mean()
+    df['EMA_28'] = df['Close'].ewm(span=28).mean()
 
     df['H-L'] = df['High'] - df['Low']
     df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
@@ -190,7 +173,7 @@ def calculate_signal_scores(latest):
         'bull_bear_diff': latest.get('Bull_Bear_Diff', latest.get('Bull_Bear_Diff', 0)) < 0,
         'macd_trending_down': latest.get('macd_trending_down', False),
         'macd_histogram': latest.get('macd_histogram', latest.get('macd_histogram', 0)) < 0,
-        'ema_cross': latest.get('EMA_21', 0) < latest.get('EMA_50', 0),
+        'ema_cross': latest.get('EMA_7', 0) < latest.get('EMA_14', 0),
         'momentum': latest.get('Momentum', latest.get('Momentum', 0)) < 0
     }
 
@@ -202,7 +185,7 @@ def calculate_signal_scores(latest):
         'bull_bear_diff': latest.get('Bull_Bear_Diff', latest.get('Bull_Bear_Diff', 0)) > 0,
         'macd_trending_up': latest.get('macd_trending_up', False),
         'macd_histogram': latest.get('macd_histogram', latest.get('macd_histogram', 0)) > 0,
-        'ema_cross': latest.get('EMA_21', 0) > latest.get('EMA_50', 0),
+        'ema_cross': latest.get('EMA_7', 0) > latest.get('EMA_14', 0),
         'momentum': latest.get('Momentum', latest.get('Momentum', 0)) > 0
     }
 
@@ -210,82 +193,77 @@ def calculate_signal_scores(latest):
     bullish_score = sum(bool(v) for v in bullish_conditions.values()) / len(bullish_conditions)
     return bearish_score, bullish_score
 def generate_signals(df):
-    signals = []
+    """
+    Three exclusive modes with EMA priority:
+      1) ema_up  / ema_down
+      2) macd_up / macd_down
+      3) sar_up  / sar_down
+    EMA alignment instantly overrides any other mode.
+    """
+
+    signals = [""] * len(df)
+    mode = None  # None or one of the six mode strings
 
     for i in range(len(df)):
-        signal = ""
         latest = df.iloc[i]
-        # sl, tp = 0, 0
-        # Buy condition
-        # if df['Fractal_Down'].iloc[i] and df['Close'].iloc[i] > df['EMA_50'].iloc[i]:
-        #     # signals.append('Buy')
-        #     signal = "Buy"
-        #     # SL: last up fractal before signal
-        #     prev_up = df['Fractal_Up'].iloc[:i].dropna()
-        #     if not prev_up.empty:
-        #         sl = prev_up.iloc[-1]
+        signal = ""
 
-        #     # TP: next up fractal after signal
-        #     next_up = df['Fractal_Up'].iloc[i+1:].dropna()
-        #     if not next_up.empty:
-        #         tp = next_up.iloc[0]
+        # ---------- 0) GLOBAL EMA PRIORITY ----------
+        ema_up   = latest.EMA_7 > latest.EMA_14 > latest.EMA_28
+        ema_down = latest.EMA_7 < latest.EMA_14 < latest.EMA_28
+        if ema_up or ema_down:
+            mode = "ema_up" if ema_up else "ema_down"
+            signal = "Buy" if ema_up else "Sell"
+            signals[i] = signal
+            continue  # skip rest; EMA outranks everything
 
-        #         # Sell condition
-        # elif df['Fractal_Ip'].iloc[i] and df['Close'].iloc[i] < df['EMA_50'].iloc[i]:
-        #         signal = 'Sell'
-        #         entry_price = df['Close'].iloc[i]
+        # ---------- 1) Maintain / exit non‑EMA modes ----------
+        if mode == "macd_up":
+            if not (latest.macd_trending_up and latest.macd_histogram >= df["macd_histogram"].iloc[i-1]):
+                mode = None
+        elif mode == "macd_down":
+            if not (latest.macd_trending_down and latest.macd_histogram <= df["macd_histogram"].iloc[i-1]):
+                mode = None
+        elif mode == "sar_up":
+            if latest.SAR >= latest.Close:
+                mode = None
+        elif mode == "sar_down":
+            if latest.SAR <= latest.Close:
+                mode = None
 
-        #         # SL: last down fractal before signal
-        #         prev_down = df['Fractal_Down'].iloc[:i].dropna()
-        #         if not prev_down.empty:
-        #             sl = prev_down.iloc[-1]
+        # ---------- 2) If a mode is still active, keep its signal ----------
+        if mode:
+            signal = "Buy" if mode.endswith("_up") else "Sell"
+            signals[i] = signal
+            continue
 
-        #         # TP: next down fractal after signal
-        #         next_down = df['Fractal_Down'].iloc[i+1:].dropna()
-        #         if not next_down.empty:
-        #             tp = next_down.iloc[0]
-            
-        # elif df['Fractal_Up'].iloc[i] and df['Close'].iloc[i] < df['EMA_50'].iloc[i]:
-        #     # signals.append('Sell')
-        #     signal = "Sell"
-        # else:
-        #     signals.append("")
-            
-        if latest['ADX'] > 20 and latest['RSI'] > 30 and latest['RSI'] < 70:
-            price_range = df["High"].iloc[i-10:i].max() - df["Low"].iloc[i-10:i].min()
-            close_10 = df["Close"].iloc[i-10:i]
-            ratio = price_range / close_10
-            # if price_range / df["Close"].iloc[i-10:i] > 0.01:
-            #     print("Price range too small")
-            #     continue
-            if (ratio <= 0.01).all():
-                print("Price range too small")
-                signal = ""
-                signals.append(signal)
+        # ---------- 3) No active mode: evaluate fresh entries ----------
+        # Basic filters + flat‑market gate
+        if latest.ADX > 20 and 30 < latest.RSI < 70 and i >= 10:
+            window = df.iloc[i-10:i]
+            price_range = window["High"].max() - window["Low"].min()
+            ratio = price_range / window["Close"]
+            if (ratio <= 0.003).all():
+                signals[i] = ""
                 continue
-            # Buy Signal
-            if (latest['Momentum_increasing'] and
-                (latest['+DI'] > latest['-DI'] or latest['Bulls'] > latest['Bears']) and
-                (latest['Bull_Bear_Diff'] > 0 or latest['Di_Diff'] > 3) and
-                (latest['macd_trending_up'] or latest['macd_histogram_increasing']) and
-                latest['EMA_21'] > latest['EMA_50']
-                ):
-                signal = "Buy"
-                # print("Buy")
-                # Sell Signal
-            elif (latest['Momentum_decreasing'] and
-                  (latest['+DI'] < latest['-DI'] or latest['Bulls'] < latest['Bears']) and
-                  (latest['Bull_Bear_Diff'] < 0 or latest['Di_Diff'] < -3) and
-                  (latest['macd_trending_down'] or latest['macd_histogram_decreasing']) and
-                  latest['EMA_21'] < latest['EMA_50']
-                  ):
 
-                signal = "Sell"
-                
-        signals.append(signal)
-    # print(len(signals), len(df))  # should both be 181
-    df['signal'] = signals
-    return df['signal']
+            # 3a) MACD‑momentum entry
+            if (latest.Bull_Bear_Diff > 0 or latest.Di_Diff > 0) and latest.macd_cross_up:
+                mode, signal = "macd_up", "Buy"
+            elif (latest.Bull_Bear_Diff < 0 or latest.Di_Diff < 0) and latest.macd_cross_down:
+                mode, signal = "macd_down", "Sell"
+
+            # 3b) SAR‑glide entry (only if MACD didn’t trigger)
+            elif "SAR" in df.columns:
+                if latest.SAR < latest.Close:
+                    mode, signal = "sar_up", "Buy"
+                elif latest.SAR > latest.Close:
+                    mode, signal = "sar_down", "Sell"
+
+        signals[i] = signal
+
+    df["signal"] = signals
+    return df["signal"]
 def get_balance():
     balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
     return float(balance_data[0]["totalEquity"])
@@ -300,6 +278,46 @@ def get_qty_step(symbol):
     step = float(data["lotSizeFilter"]["qtyStep"])
     min_qty = float(data["lotSizeFilter"]["minOrderQty"])
     return step, min_qty
+def calc_order_qty(balance_usdt: float, entry_price: float, min_qty: float, qty_step: float) -> float:
+    """
+    Calculate a Bybit‑compliant futures quantity.
+
+    Parameters
+    ----------
+    balance_usdt : float
+        Amount of USDT you’re willing to commit.
+    entry_price  : float
+        Expected fill price of the contract.
+    leverage     : int
+        Leverage to apply (>= 1).
+    min_qty      : float
+        Exchange minimum order size for the symbol (e.g. 0.001).
+    qty_step     : float
+        Exchange quantity step for the symbol (e.g. 0.001).
+
+    Returns
+    -------
+    float
+        Order quantity rounded *down* to the nearest step, or 0.0
+        if the wallet is too small to meet `min_qty`.
+    """
+
+    if leverage <= 0:
+        raise ValueError("Leverage must be positive")
+
+    # 1) raw contract size (before rounding)
+    # raw_qty = (balance_usdt * leverage) / entry_price
+    min_qty, qty_step = get_qty_step(symbol)
+    raw_qty = (risk_amount * df['Close'].iloc[-1]) * qty_step
+    order_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
+
+def calc_order_qty(risk_amount, entry_price, min_qty, qty_step):
+    """Return Bybit‑compliant qty rounded *down* or 0.0 if below min."""
+    raw_qty = risk_amount / entry_price
+    step = Decimal(str(qty_step))
+    min_qty  = Decimal(str(raw_qty)).quantize(step, rounding=ROUND_DOWN)
+    return float(min_qty) if min_qty >= Decimal(str(min_qty)) else 0.0
+# ---------------------------------------------------------------------
 def round_qty(symbol, qty, mark_price):
     # Simple static example; ideally fetch from exchange info
     step, min_qty = get_qty_step(symbol)
@@ -309,7 +327,7 @@ def calculate_dynamic_qty(symbol, risk_amount, atr):
     stop_distance = atr * 1.5
     qty = risk_amount / stop_distance
     return round(qty, 6)
-def place_sl_and_tp(symbol, side, entry_price, atr, atr_bullish_multiplier, atr_bearish_multiplier, qty):
+def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     """ Places initial SL and multiple TP orders based on ATR multiples.
     Args:
         symbol (str): e.g. "DOGEUSDT"
@@ -396,7 +414,8 @@ def place_sl_and_tp(symbol, side, entry_price, atr, atr_bullish_multiplier, atr_
             tp_orders.append(None)
     orders['tp'] = tp_orders
     return orders
-def enter_trade(signal, df, symbol, risk_pct, atr_bearish_multiplier, atr_bullish_multiplier):
+def enter_trade(signal, df, symbol, risk_pct):
+    global balance
     global leverage
     global current_trade_info
 
@@ -408,15 +427,16 @@ def enter_trade(signal, df, symbol, risk_pct, atr_bearish_multiplier, atr_bullis
     balance = get_balance()
     risk_amount = max(balance * risk_pct, 6)  # minimum risk amount 5
 
-    step, min_qty = get_qty_step(symbol)
+    qty_step, min_qty = get_qty_step(symbol)
     atr = df['ATR'].iloc[-1]
     adx = df['ADX'].iloc[-1]
     # adxtoatr_ratio = adx / 100 / atr
     # total_qty = calculate_dynamic_qty(symbol, risk_amount, atr_bearish_multiplier)
     # print(total_qty)
+    total_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
 
     # Round total_qty down to nearest step
-    total_qty = math.floor(risk_amount / entry_price) * step
+    order_qty = math.floor(risk_amount / entry_price) * qty_step
 
     order_id = ""
 
@@ -428,7 +448,7 @@ def enter_trade(signal, df, symbol, risk_pct, atr_bearish_multiplier, atr_bullis
 
     sl_price = round_qty(symbol, entry_price - atr * 1.5, entry_price) if side == "Buy" else round_qty(symbol, entry_price + atr * 1.5, entry_price)
     tp_price = round_qty(symbol, entry_price + atr * 4.5, entry_price) if side == "Buy" else round_qty(symbol, entry_price - atr * 4.5, entry_price)
-    print(f"tp_price: {tp_price}")
+    # print(f"tp_price: {tp_price}")
 
     try:
         print(f"Placing order for {symbol} side={side} qty={total_qty}")
@@ -465,7 +485,7 @@ def enter_trade(signal, df, symbol, risk_pct, atr_bearish_multiplier, atr_bullis
     # Optionally place additional SL/TP if your function returns more orders/info
     orders = {}
     try:
-        orders = place_sl_and_tp(symbol, side, entry_price, atr, df['atr_bullish_multiplier'].iloc[-1], df['atr_bearish_multiplier'].iloc[-1], total_qty)
+        orders = place_sl_and_tp(symbol, side, entry_price, atr, total_qty)
     except Exception as e:
         print(f"Error placing SL/TP for {symbol}: {e}")
 
@@ -668,6 +688,7 @@ def wait_until_next_candle(interval_minutes):
     # print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
     time.sleep(sleep_seconds)
 def run_bot():
+    global balanc
     global current_trade_info
     previous_signals = {symbol: "" for symbol in SYMBOLS}  # track last signal per symbol
     risk_pct = 0.1
@@ -679,66 +700,31 @@ def run_bot():
                 df = get_klines_df(symbol, "15")
                 df = calculate_indicators(df)
                 df['signal'] = generate_signals(df)
-                # print(f"Fractal up: {df['Fractal_Up']}")
-                # print(f"Fractal down: {df['Fractal_Down']}")
-                # print(df["Fractal_Up"].iloc[-1], df["Fractal_Down"].iloc[-1])
-                # last_up = next((v for v in reversed(df['Fractal_Up']) if v is not None), None)
-                # last_down = next((v for v in reversed(df['Fractal_Down']) if v is not None), None)
-                # print(last_up, last_down)
-                # print(df["Fractal_Up"], df["Fractal_Down"])
-                # print("Up Fractals:", [v for v in df['Fractal_Up'] if v is not None])
-                # if df.empty or len(df) < 5:
-                #     print(f"{symbol}: Not enough data.")
-                #     continue
                 risk_amount = max(get_balance() * risk_pct, 6) 
                 atr = df['ATR'].iloc[-1]
-                step, min_qty = get_qty_step(symbol)
-                total_qty = math.floor(risk_amount / df['Close'].iloc[-1]) * step
+                qty_step, min_qty = get_qty_step(symbol)
+                # total_qty = math.floor(risk_amount / df['Close'].iloc[-1]) * step
+                # total_qty = calc_order_qty(math.floor(risk_amount, df['Close'].iloc[-1], step))
+                total_qty = calc_order_qty(risk_amount, df['Close'].iloc[-1], min_qty, qty_step)
                 df['symbol'] = symbol
                 latest = df.iloc[-1]
                 balance = get_balance()
-                # try:
-                #     latest = df.iloc[-1]
-                #     sell_signals = latest[
-                #         (latest['Momentum_decreasing']) &
-                #         ((latest['+DI'] < latest['-DI']) | (latest['Bulls'] < latest['Bears'])) &
-                #         (latest['Bearish_DI'] > 2) &
-                #         (latest['macd_histogram_decreasing']) &
-                #         (latest['Bull_Bear_Diff'] < -0.5)
-                #     ]
-                #     buy_signals = (latest['Momentum_increasing'] and
-                #                    (latest['+DI'] > latest['-DI'] or latest['Bulls'] > latest['Bears']) and
-                #                    latest['Bullish_DI'] > 2 and
-                #                    # latest['macd_trending_up'] and
-                #                    latest['macd_histogram_increasing'] and
-                #                    # latest['EMA_21'] > latest['EMA_50'] and
-                #                    # latest['ADX'] / 14 > 1.5 and
-                #                    latest['Bull_Bear_Diff'] > 0.5)
                 print(f"=== {symbol} Stats ===")
                 print(f"signal: {latest['signal']}")
-                #     print(f"Sell signals triggered: {len(sell_signals)} out of {len(df)} candles")
-                #     print(f"Buy signals triggered: {len(buy_signals)} out of {len(df)} candles")
-                # except Exception as e:
-                #     print(f"Error processing {symbol}: {e}")
-                # print(f"Signal: {latest['signal']}")
                 print(f"Close: {latest['Close']:.6f}")
                 print(f"ADX: {latest['ADX']:.2f}")
                 print(f"RSI: {latest['RSI']:.2f}")
                 print(f"ATR: {atr:.6f}")
-                # print(f"bearish ATR: {latest['atr_bearish_multiplier']:.2f}")
-                # print(f"bullish ATR: {latest['atr_bullish_multiplier']:.2f}")
                 # print(f"ADX over 14: {latest['ADX'] / 14:.2f}")
                 print(f"Balance: {balance:.2f}")
                 # total_qty = calculate_dynamic_qty(symbol, risk_amount, latest['atr_bearish_multiplier'])
-                total_qty = round_qty(symbol, risk_amount, latest['Close'])
+                total_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
                 print(f"position size: {total_qty}")
-                # print(f"Up Fractals: {df[Fractal_Up].iloc[i]}")
                 # print(f"EMA7: {latest['EMA_7']:.6f}")
                 # print(f"EMA14: {latest['EMA_14']:.6f}")
-                # print(f"EMA21: {latest['EMA_21']:.6f}")
-                # print(f"EMA50: {latest['EMA_50']:.6f}")
-                bias_ema_crossover = "Bullish" if latest['EMA_21'] > latest['EMA_50'] else "Bearish" if latest['EMA_21'] < latest['EMA_50'] else "Neutral"
-                print(f"EMA21/50 crossover above/below: {latest['EMA_21'] > latest['EMA_50']}/{latest['EMA_21'] < latest['EMA_50']} ({bias_ema_crossover})")
+                # print(f"EMA28: {latest['EMA_28']:.6f}")
+                bias_ema_crossover = "Bullish" if latest['EMA_7'] > latest['EMA_14'] else "Bearish" if latest['EMA_7'] < latest['EMA_14'] else "Neutral"
+                print(f"EMA7/14 crossover above/below: {latest['EMA_7'] > latest['EMA_14']}/{latest['EMA_7'] < latest['EMA_14']} ({bias_ema_crossover})")
                 bias_macd_trend = "Bullish" if latest['macd_trending_up'] else "Bearish" if latest['macd_trending_down'] else "Neutral"
                 print(f"MacD trend up/down: {latest['macd_trending_up']}/{latest['macd_trending_down']} ({bias_macd_trend})")
                 # print(f"MacdD cross up/down: {latest['macd_cross_up']}/{latest['macd_cross_down']}")
@@ -758,10 +744,6 @@ def run_bot():
                 print(f"Momentum: {latest['Momentum']:.2f} - ({bias_momentum})")
                 bias_momentum_incr_decr = "Bullish" if latest['Momentum_increasing'] else "Bearish" if latest['Momentum_decreasing'] else "Neutral"
                 print(f"Momentum increasing/decreasing: {latest['Momentum_increasing']}/{latest['Momentum_decreasing']} ({bias_momentum_incr_decr})")
-                # print(f"Fractals up: {df['Fractal_Up'].iloc[-1]}")
-                # print(f"Fractals down: {df['Fractal_Down'].iloc[-1]}")
-                # print(f"{latest['Fractal_Up']}")
-                # print(f"{latest['Fractal_Down']}")
                 # print(f"Trade Qty (calculated): {total_qty}")
                 # print(f"Balance: {balance:.2f}")
                 position = get_position(symbol)
@@ -785,7 +767,7 @@ def run_bot():
                         cancel_old_orders(symbol)
                         time.sleep(2)  # Give time for exit to process
                         # Enter opposite trade
-                        trade_info = enter_trade(latest['signal'], df, symbol, risk_pct, latest['atr_bearish_multiplier'], latest['atr_bullish_multiplier'])
+                        trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
                         if trade_info:
                             print(f"[TRADE] Reversed position to {latest['signal']}")
                             current_trade_info = trade_info
@@ -796,12 +778,12 @@ def run_bot():
                         previous_signals[symbol] = latest['signal']
                     else:
                         print("[INFO] Holding current position — no reversal needed.")
-                        update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1], latest['signal'], current_trade_info)
+                        # update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1], latest['signal'], current_trade_info)
                         exit_condition = check_exit_conditions(symbol, df['ATR'].iloc[-1])
                 else:
                     if latest['signal'] != "":
                         print(f"[INFO] No open position — entering new {latest['signal']} trade.")
-                        trade_info = enter_trade(latest['signal'], df, symbol, risk_pct, latest['atr_bearish_multiplier'], latest['atr_bullish_multiplier'])
+                        trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
                         if trade_info:
                             print(f"[INFO] Entered trade for {symbol} at {trade_info['entry_price']}")
                             current_trade_info = trade_info
