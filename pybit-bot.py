@@ -9,6 +9,19 @@ from math import floor
 import traceback
 from decimal import Decimal, ROUND_DOWN
 
+# ── trade‑frequency throttle ─────────────────────────
+MIN_GAP = 60 * 96   # 5 760 s ≈ 1 h 36 m
+last_trade_time = {sym: 0 for sym in SYMBOLS}
+# ─────────────────────────────────────────────────────
+
+SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
+
+# ───────── daily trade cap ─────────
+DAILY_CAP      = 15          # max new positions in 24 h
+trade_counter  = 0           # how many entries placed so far today
+day_anchor     = int(time.time() // 86400)  # day number since Unix epoch
+# ───────────────────────────────────
+
 # API setup
 api_key = "wLqYZxlM27F01smJFS"
 api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
@@ -23,6 +36,14 @@ risk_pct = 0.1  # Example risk per trade
 leverage=25
 current_trade_info = []
 balance = 168
+now = time.time()
+def reset_daily_counter_if_new_day():
+    global trade_counter, day_anchor
+    today = int(time.time() // 86400)
+    if today != day_anchor:           # crossed into a new UTC day
+        trade_counter = 0
+        day_anchor    = today
+        print("─── New day detected: trade counter reset to 0 ───")
 def keep_session_alive(symbol):
     for attempt in range(30):
         try:
@@ -339,16 +360,28 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     # ───────────── Stop‑loss ─────────────
     sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
     try:
-        orders['sl'] = session.set_trading_stop(
-            category="linear",
-            symbol=symbol,
-            side=side,
-            stop_loss=str(round(sl_price, 6))
-        )
-        if orders['sl'].get('retCode') == 0:
-            print(f"[{symbol}] SL placed.")
-        else:
-            print(f"[{symbol}] SL failed: {orders['sl']}")
+
+        # ── open a fresh trade only if signal present & cool‑down met ──
+        if latest['signal'] and (now - last_trade_time[symbol] >= MIN_GAP):
+            print(f"[INFO] Cool‑down satisfied → opening {latest['signal']} on {symbol}")
+            trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
+            if trade_info:
+                last_trade_time[symbol] = now           # stamp the fill time
+                current_trade_info = trade_info
+            else:
+                if latest['signal']:
+                    wait_left = MIN_GAP - (now - last_trade_time[symbol])
+                    print(f"[{symbol}] Cool‑down active: {wait_left/60:.1f} min left")
+        # orders['sl'] = session.set_trading_stop(
+        #     category="linear",
+        #     symbol=symbol,
+        #     side=side,
+        #     stop_loss=str(round(sl_price, 6))
+        # )
+        # if orders['sl'].get('retCode') == 0:
+        #     print(f"[{symbol}] SL placed.")
+        # else:
+        #     print(f"[{symbol}] SL failed: {orders['sl']}")
     except Exception as e:
         if "ErrCode: 10001" in str(e):
             pass                              # silent
@@ -661,7 +694,7 @@ def wait_until_next_candle(interval_minutes):
     # print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
     time.sleep(sleep_seconds)
 def run_bot():
-    global balanc
+    global balance
     global current_trade_info
     previous_signals = {symbol: "" for symbol in SYMBOLS}  # track last signal per symbol
     risk_pct = 0.1
@@ -774,3 +807,21 @@ def run_bot():
         wait_until_next_candle(1)
 if __name__ == "__main__":
     run_bot()
+# set trailing stop
+# session.set_trading_stop(
+#     category="linear",
+#     symbol=symbol,
+#     stop_loss=new_stop_loss
+# )
+
+# partial close order
+# response = session.place_active_order(
+#     symbol=coin,
+#     side="Sell",  # opposite side to close position
+#     order_type="Market",
+#     qty=qty_to_close,
+#     reduce_only=True,
+#     time_in_force="ImmediateOrCancel",
+#     leverage=leverage
+# )
+
