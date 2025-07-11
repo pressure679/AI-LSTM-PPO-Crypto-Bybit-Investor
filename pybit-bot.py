@@ -9,12 +9,12 @@ from math import floor
 import traceback
 from decimal import Decimal, ROUND_DOWN
 
+SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
+
 # ── trade‑frequency throttle ─────────────────────────
 MIN_GAP = 60 * 96   # 5 760 s ≈ 1 h 36 m
 last_trade_time = {sym: 0 for sym in SYMBOLS}
 # ─────────────────────────────────────────────────────
-
-SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
 
 # ───────── daily trade cap ─────────
 DAILY_CAP      = 15          # max new positions in 24 h
