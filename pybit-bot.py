@@ -8,6 +8,9 @@ import math
 from math import floor
 import traceback
 from decimal import Decimal, ROUND_DOWN
+import os
+
+COUNTER_FILE = "pybit-log-counter.txt.log"
 
 # ───────── daily per‑mode caps ─────────
 MODE_CAP      = 5               # 5 trades per mode per day
@@ -44,6 +47,24 @@ current_trade_info = []
 balance = 168
 now = time.time()
 
+def load_counters():
+    """Return dict {"day": <utc‑day‑int>, "totals": {"ema":0,"macd":0,"sar":0}}."""
+    if os.path.exists(COUNTER_FILE):
+        try:
+            with open(COUNTER_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass  # treat as corrupt → start fresh
+    # default structure
+    return {"day": int(time.time() // 86400),
+            "totals": {"ema": 0, "macd": 0, "sar": 0}}
+
+def save_counters(data):
+    with open(COUNTER_FILE, "w") as f:
+        json.dump(data, f)
+
+counters = load_counters() 
+        
 def reset_and_log_if_new_day():
     global counters
     today = int(time.time() // 86400)
@@ -808,6 +829,15 @@ def run_bot():
                         trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
                         if trade_info:
                             print(f"[TRADE] Reversed position to {latest['signal']}")
+                            counters["totals"][this_mode] += 1
+                            save_counters(counters)                 # persist immediately
+                            count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
+                            msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
+                                   f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
+                                   f"Totals → {count_str}\n")
+                            with open(LOG_FILE, "a") as log:
+                                    log.write(msg)
+                                    print(msg.strip())
                             current_trade_info = trade_info
                         else:
                             print(f"[WARN] Failed to enter trade for {symbol}, skipping update.")
@@ -824,6 +854,15 @@ def run_bot():
                         trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
                         if trade_info:
                             print(f"[INFO] Entered trade for {symbol} at {trade_info['entry_price']}")
+                            counters["totals"][this_mode] += 1
+                            save_counters(counters)                 # persist immediately
+                            count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
+                            msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
+                                   f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
+                                   f"Totals → {count_str}\n")
+                            with open(LOG_FILE, "a") as log:
+                                    log.write(msg)
+                                    print(msg.strip())
                             current_trade_info = trade_info
                         else:
                             print(f"[WARN] Failed to enter trade for {symbol}, skipping update.")
