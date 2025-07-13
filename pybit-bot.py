@@ -468,7 +468,8 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     SL at 1.5×ATR.
     Four TP limits at Fibonacci ratios < 1 of a 3×ATR base distance.
     """
-    fib = [0.236, 0.382, 0.500, 0.618]      # ratios < 1
+    # fib_levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618]
+    fib = [0.382, 0.5, 0.618, 0.786]      # ratios < 1
     base = 3.0 * atr
     tp_distances = [base * f for f in fib]
 
@@ -569,6 +570,7 @@ def enter_trade(signal, df, symbol, risk_pct):
             take_profit=str(tp_price),
             stop_loss=str(sl_price)
         )
+        print("ORDER RESPONSE: {response}")
 
         # ✅ Validate API response before accessing
         # if not response or 'result' not in response or not response['result']:
@@ -718,7 +720,7 @@ def get_position(symbol):
         # print(f"[DEBUG] Raw position data for {symbol}: {positions[0]}")
 
         pos = positions[0]
-        # print("OPEN POSITION:", pos)
+        print("OPEN POSITION:", pos)
         size = float(pos.get("size", 0))
         return pos
     # try:
