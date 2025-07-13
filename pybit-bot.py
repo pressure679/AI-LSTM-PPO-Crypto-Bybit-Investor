@@ -47,7 +47,7 @@ session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 SYMBOLS = ["SHIB1000USDT", "XRPUSDT", "DOGEUSDT"]
 # SYMBOLS = ["XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
 risk_pct = 0.1  # Example risk per trade
-leverage=25
+leverage=20
 current_trade_info = []
 # balance = 160
 
@@ -391,41 +391,6 @@ def get_qty_step(symbol):
     step = float(data["lotSizeFilter"]["qtyStep"])
     min_qty = float(data["lotSizeFilter"]["minOrderQty"])
     return step, min_qty
-# def calc_order_qty(balance_usdt: float, entry_price: float, min_qty: float, qty_step: float) -> float:
-#     """
-#     Calculate a Bybit‑compliant futures quantity.
-
-#     Parameters
-#     ----------
-#     balance_usdt : float
-#         Amount of USDT you’re willing to commit.
-#     entry_price  : float
-#         Expected fill price of the contract.
-#     leverage     : int
-#         Leverage to apply (>= 1).
-#     min_qty      : float
-#         Exchange minimum order size for the symbol (e.g. 0.001).
-#     qty_step     : float
-#         Exchange quantity step for the symbol (e.g. 0.001).
-
-#     Returns
-#     -------
-#     float
-#         Order quantity rounded *down* to the nearest step, or 0.0
-#         if the wallet is too small to meet `min_qty`.
-#     """
-
-#     if leverage <= 0:
-#         raise ValueError("Leverage must be positive")
-
-#     # 1) raw contract size (before rounding)
-#     # raw_qty = (balance_usdt * leverage) / entry_price
-#     min_qty, qty_step = get_qty_step(symbol)
-#     raw_qty = (risk_amount * df['Close'].iloc[-1]) * qty_step
-#     order_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
-
-from decimal import Decimal, ROUND_DOWN
-
 def calc_order_qty(risk_amount: float,
                    entry_price: float,
                    min_qty: float,
@@ -463,64 +428,123 @@ def calculate_dynamic_qty(symbol, risk_amount, atr):
     stop_distance = atr * 1.5
     qty = risk_amount / stop_distance
     return round(qty, 6)
-def place_sl_and_tp(symbol, side, entry_price, atr, qty):
+def place_sl_and_tp(symbol, side, entry_price, atr, qty, leverage=1):
     """
-    SL at 1.5×ATR.
-    Four TP limits at Fibonacci ratios < 1 of a 3×ATR base distance.
+    • SL : 1.5 × ATR (not sent here – call set_trading_stop separately if desired)
+    • TP : 4 Fibonacci legs below 1 × base distance (3 × ATR)
+      Qty split 40 / 20 / 20 / 20 %, rounded to exchange step size.
+      Prints ROI (USDT & %) expected at each leg.
     """
+    # ── Bybit precision helpers ──────────────────────────────────────────
+    step, min_qty = get_qty_step(symbol)          # e.g. (68, 68) for XRP
+    def round_down(q):                            # floor to step
+        return math.floor(q / step) * step
+
+    # ── Fibonacci distances (<1) on 3 × ATR base ────────────────────────
     # fib_levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618]
-    fib = [0.382, 0.5, 0.618, 0.786]      # ratios < 1
-    base = 3.0 * atr
-    tp_distances = [base * f for f in fib]
+    fib     = [0.236, 0.382, 0.5, 0.618]
+    base    = 3.0 * atr
+    tp_dist = [base * r for r in fib]
 
-    orders = {'sl': None, 'tp': []}
+    # ── Split quantities (remainder on last TP) ─────────────────────────
+    raw_frac = [0.4, 0.2, 0.2, 0.2]
+    split, used = [], 0
+    for f in raw_frac[:-1]:
+        q = max(round_down(qty * f), min_qty)
+        split.append(q);  used += q
+    split.append(max(qty - used, min_qty))        # last TP gets remainder
 
-    # ───────── Stop‑loss (1.5×ATR) ─────────
-    sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
-    try:
-        orders['sl'] = session.set_trading_stop(
-            category="linear",
-            symbol=symbol,
-            side=side,
-            stop_loss=str(round(sl_price, 6))
-        )
-        if orders['sl'].get('retCode') == 0:
-            print(f"[{symbol}] SL placed @ {sl_price:.6f}")
-        else:
-            print(f"[{symbol}] SL failed: {orders['sl']}")
-    except Exception as e:
-        if "ErrCode: 10001" not in str(e):
-            print(f"[{symbol}] SL exception: {e}")
-
-    # ───────── Take‑profits ─────────
-    qty_split = [qty * 0.4, qty * 0.2, qty * 0.2, qty * 0.2]
+    # ── Place orders ────────────────────────────────────────────────────
     tp_side = "Sell" if side == "Buy" else "Buy"
+    orders  = {'tp': []}
 
-    for i, dist in enumerate(tp_distances):
-        try:
-            tp_price = entry_price + atr * 3 * dist if side == "Buy" else entry_price - atr * 3 * dist
-            rounded_qty = round_qty(symbol, qty_split[i], entry_price)
+    for i, (dist, q) in enumerate(zip(tp_dist, split), start=1):
+        tp_price = entry_price + dist if side == "Buy" else entry_price - dist
 
-            print(f"[{symbol}] TP {i+1}: {tp_side} {rounded_qty} @ {tp_price:.6f}")
-            tp_resp = session.place_order(
-                category="linear",
-                symbol=symbol,
-                side=tp_side,
-                order_type="Limit",
-                qty=rounded_qty,
-                price=tp_price,
-                time_in_force="GTC",
-                reduce_only=True
-            )
-            if tp_resp.get("retCode") != 0:
-                print(f"[{symbol}] TP {i+1} failed: {tp_resp}")
-            orders['tp'].append(tp_resp)
-        except Exception as e:
-            if "ErrCode: 110017" not in str(e):
-                print(f"[{symbol}] TP {i+1} exception: {e}")
-            orders['tp'].append(None)
+        # ROI calculations
+        price_diff = (tp_price - entry_price) if side == "Buy" else (entry_price - tp_price)
+        roi_pct    = price_diff / entry_price * 100 * leverage
+        roi_usdt   = price_diff * q * leverage
+
+        print(f"[{symbol}] TP {i}: {tp_side} {q} @ {tp_price:.6f} "
+              f"→ ROI ≈ {roi_usdt:.2f} USDT ({roi_pct:.2f} %)")
+
+        resp = session.place_order(
+            category      ="linear",
+            symbol        =symbol,
+            side          =tp_side,
+            order_type    ="Limit",
+            qty           =q,
+            price         =round(tp_price, 6),
+            time_in_force ="GTC",
+            reduce_only   =True
+        )
+        if resp.get("retCode") != 0:
+            print(f"[{symbol}] TP {i} failed: {resp}")
+        orders['tp'].append(resp)
 
     return orders
+
+# def place_sl_and_tp(symbol, side, entry_price, atr, qty):
+#     """
+#     SL at 1.5×ATR.
+#     Four TP limits at Fibonacci ratios < 1 of a 3×ATR base distance.
+#     """
+#     # fib_levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618]
+#     fib = [0.236, 0.382, 0.5, 0.618]      # ratios < 1
+#     base = 3.0 * atr
+#     tp_distances = [base * f for f in fib]
+# 
+#     orders = {'sl': None, 'tp': []}
+# 
+#     # ───────── Stop‑loss (1.5×ATR) ─────────
+#     sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
+#     # try:
+#     #     orders['sl'] = session.set_trading_stop(
+#     #         category="linear",
+#     #         symbol=symbol,
+#     #         side=side,
+#     #         stop_loss=str(round(sl_price, 6))
+#     #     )
+#     #     if orders['sl'].get('retCode') == 0:
+#     #         print(f"[{symbol}] SL placed @ {sl_price:.6f}")
+#     #     else:
+#     #         print(f"[{symbol}] SL failed: {orders['sl']}")
+#     # except Exception as e:
+#     #     if "ErrCode: 10001" not in str(e):
+#     #         print(f"[{symbol}] SL exception: {e}")
+# 
+#     # ───────── Take‑profits ─────────
+#     qty_split = [qty * 0.4, qty * 0.2, qty * 0.2, qty * 0.2]
+#     tp_side = "Sell" if side == "Buy" else "Buy"
+# 
+#     for i, dist in enumerate(tp_distances):
+#         try:
+#             tp_price = entry_price + dist if side == "Buy" else entry_price - dist
+#             # rounded_qty = round_qty(symbol, qty_split[i], entry_price)
+#             rounded_qty = round(qty_split[i], 6)
+# 
+#             print(f"[{symbol}] TP {i+1}: {tp_side} {rounded_qty} @ {tp_price:.6f}")
+#             tp_resp = session.place_order(
+#                 category="linear",
+#                 symbol=symbol,
+#                 side=tp_side,
+#                 order_type="Limit",
+#                 qty=rounded_qty,
+#                 price=tp_price,
+#                 time_in_force="GTC",
+#                 reduce_only=True
+#             )
+#             # print(f"tp response: {tp_resp}")
+#             if tp_resp.get("retCode") != 0:
+#                 print(f"[{symbol}] TP {i+1} failed: {tp_resp}")
+#             orders['tp'].append(tp_resp)
+#         except Exception as e:
+#             if "ErrCode: 110017" not in str(e):
+#                 print(f"[{symbol}] TP {i+1} exception: {e}")
+#             orders['tp'].append(None)
+# 
+#     return orders
 
 def enter_trade(signal, df, symbol, risk_pct):
     global balance
@@ -533,20 +557,13 @@ def enter_trade(signal, df, symbol, risk_pct):
 
     entry_price = get_mark_price(symbol)  # or df['Close'].iloc[-1] — pick one
     balance = get_balance()
-    risk_amount = max(balance * risk_pct, 6)  # minimum risk amount 5
+    risk_amount = max(balance * risk_pct, 6)  # minimum risk amount 6
 
     qty_step, min_qty = get_qty_step(symbol)
     atr = df['ATR'].iloc[-1]
     adx = df['ADX'].iloc[-1]
-    # adxtoatr_ratio = adx / 100 / atr
-    # total_qty = calculate_dynamic_qty(symbol, risk_amount, atr_bearish_multiplier)
-    # print(total_qty)
+
     total_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
-
-    # Round total_qty down to nearest step
-    order_qty = math.floor(risk_amount / entry_price) * qty_step
-
-    order_id = ""
 
     if total_qty < min_qty:
         print(f"[WARN] Quantity {total_qty} below minimum {min_qty}, skipping trade.")
@@ -554,9 +571,9 @@ def enter_trade(signal, df, symbol, risk_pct):
 
     side = "Buy" if signal == "Buy" else "Sell"
 
-    sl_price = round_qty(symbol, entry_price - atr * 1.5, entry_price) if side == "Buy" else round_qty(symbol, entry_price + atr * 1.5, entry_price)
-    tp_price = round_qty(symbol, entry_price + atr * 3 * 0.786, entry_price) if side == "Buy" else round_qty(symbol, entry_price - atr * 3 * 0.786, entry_price)
-    # print(f"tp_price: {tp_price}")
+    # Calculate SL price before placing order
+    sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
+    sl_price = round(sl_price, 6)  # round to appropriate precision
 
     try:
         print(f"Placing order for {symbol} side={side} qty={total_qty}")
@@ -566,67 +583,98 @@ def enter_trade(signal, df, symbol, risk_pct):
             side=side,
             order_type="Market",
             qty=total_qty,
-            leverage=leverage,
-            take_profit=str(tp_price),
+            buyLeverage=leverage,
+            sellLeverage=leverage,
             stop_loss=str(sl_price)
         )
         # print(f"ORDER RESPONSE: {response}")
 
-        # ✅ Validate API response before accessing
-        # if not response or 'result' not in response or not response['result']:
-        #     print(f"[ERROR] Bad order response for {symbol}: {response}")
-        #     return None
         if response['retCode'] != 0:
             if response['retCode'] == 110007:
                 print(f"[{symbol}] Skipping order: Insufficient balance (ErrCode: 110007)")
             else:
                 print(f"[{symbol}] Order failed: {response['retMsg']} (ErrCode: {response['retCode']})")
+            return None
+
         order_id = response['result'].get("orderId")
-        print(f"[INFO] Placed {side} order with TP={tp_price}, SL={sl_price}")
+        print(f"[INFO] Placed {side} order")
     except Exception as e:
         if "110007" in str(e):
             print(f"[{symbol}] Suppressed balance error: {str(e)}")
-        # else:
-        #     print(f"[{symbol}] Unexpected exception in order: {str(e)}")
-        # print(f"[ERROR] Failed to place order: {e}")
-        # return None
+        else:
+            print(f"[ERROR] Failed to place order: {e}")
+        return None
 
-    # Optionally place additional SL/TP if your function returns more orders/info
+    # Place SL and TPs separately if needed
     orders = {}
     try:
         orders = place_sl_and_tp(symbol, side, entry_price, atr, total_qty)
     except Exception as e:
         print(f"Error placing SL/TP for {symbol}: {e}")
 
-    # if orders:
     trade_info = {
         "symbol": symbol,
         "entry_price": entry_price,
         "signal": side,
         "qty": total_qty,
         "remaining_qty": total_qty,
-        "sl": sl_price,
-        # "tps": [tp_price],  # or orders['tps'] if you use multi-level TPs
-        # "tps": orders['tp'],  # or orders['tps'] if you use multi-level TPs
+        "tps": orders.get('tp', []),
         "atr": atr,
         "active_tp_index": 0,
-        # "order_id": order_id or orders.get('order_id')
         "order_id": order_id
     }
     current_trade_info = trade_info
     return trade_info
+
 def cancel_old_orders(symbol):
-    try:
-        # Fetch active orders for the symbol (category may be needed depending on API)
-        # open_orders = session.get_active_order(category="linear", symbol=symbol)['result']['list']
-        open_orders = session.get_open_orders(category="linear", symbol=symbol)['result']['list']
-        for order in open_orders:
-            order_id = order['orderId']
-            # session.cancel_order(category="linear", symbol=symbol, orderId=order_id)
-            session.cancel_order(category="linear", symbol=symbol)
-        print(f"Cancelled old orders for {symbol}")
-    except Exception as e:
-        print(f"Failed to cancel orders for {symbol}: {e}")
+    """
+    1) Close any live position at market (reduce‑only).
+    2) Cancel all outstanding TP / SL / limit orders.
+    """
+
+    # ── 1) Close the live position ─────────────────────────────
+    pos = get_position(symbol)                # returns dict or None
+    if pos and float(pos.get("size", 0)) > 0:
+        side        = pos["side"]             # "Buy" or "Sell"
+        close_side  = "Sell" if side == "Buy" else "Buy"
+        # qty         = round_qty(
+        #                  symbol,
+        #                  float(pos["size"]),
+        #                  float(pos["avgPrice"])
+        #              )
+        qty = pos["size"]
+
+        resp_close = session.place_order(
+            category     = "linear",
+            symbol       = symbol,
+            side         = close_side,
+            order_type   = "Market",
+            qty          = qty,
+            reduce_only  = True,
+            time_in_force= "IOC"
+        )
+        if resp_close.get("retCode") == 0:
+            print(f"[{symbol}] Position closed ({side} → {close_side}) qty={qty}")
+        else:
+            print(f"[{symbol}] Close‑position fail: {resp_close}")
+
+        # tiny pause to let Bybit settle before we yank orders
+        time.sleep(0.3)
+
+    # ── 2) Cancel all open orders ──────────────────────────────
+    # try:
+    #     open_list = session.get_open_orders(
+    #         category="linear", symbol=symbol
+    #     )["result"]["list"]
+
+    #     if open_list:
+    #         session.cancel_all_orders(category="linear", symbol=symbol)
+    #         print(f"[{symbol}] {len(open_list)} open orders cancelled.")
+    #     else:
+    #         print(f"[{symbol}] No open orders to cancel.")
+    # except Exception as e:
+    #     print(f"[{symbol}] Error cancelling orders: {e}")
+
 def manage_trailing_sl(current_price):
     global current_trade_info
     atr = current_trade_info['atr']
@@ -910,7 +958,7 @@ def run_bot():
                         trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
                         if trade_info:
                             print(f"[TRADE] Reversed position to {latest['signal']}")
-                            counters["totals"][this_mode] += 1
+                            # counters["totals"][this_mode] += 1
                             # save_counters(counters)                 # persist immediately
                             # count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
                             # msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
@@ -927,7 +975,7 @@ def run_bot():
                         previous_signals[symbol] = latest['signal']
                     else:
                         print("[INFO] Holding current position — no reversal needed.")
-                        update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1], latest['signal'], current_trade_info)
+                        # update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1], latest['signal'], current_trade_info)
                         # exit_condition = check_exit_conditions(symbol, df['ATR'].iloc[-1])
                 else:
                     if latest['signal'] != "":
