@@ -9,81 +9,84 @@ from math import floor
 import traceback
 from decimal import Decimal, ROUND_DOWN
 import os
-
-COUNTER_FILE = "pybit-log-counter.txt.log"
-
 import time
-
-# ───────── per‑mode and daily caps ──────────────────────────
-MODE_CAP   = 2                               # ≤ 2 trades per mode per UTC‑day
-DAILY_CAP  = 6                               # ≤ 6 total trades per UTC‑day
-
-# counters persist via JSON file (see helper code)
-mode_counter = {"ema": 0, "macd": 0, "sar": 0}
-trade_counter = 0
-
-# keep one day anchor for both caps
-day_anchor = int(time.time() // 86400)       # UTC‑day number
-# ────────────────────────────────────────────────────────────
-
-# ───────── trade‑frequency throttle (cool‑down) ─────────────
-# optional secondary guard: min gap between *any* two entries
-MIN_GAP = 60 * 96        # 5 760 s ≈ 1 h 36 m
-SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
-last_trade_time = {sym: 0 for sym in SYMBOLS}
-# ────────────────────────────────────────────────────────────
+pd.set_option('future.no_silent_downcasting', True)
+# COUNTER_FILE = "pybit-log-counter.txt.log"
+# # ───────── per‑mode and daily caps ──────────────────────────
+# MODE_CAP   = 2                               # ≤ 2 trades per mode per UTC‑day
+# DAILY_CAP  = 6                               # ≤ 6 total trades per UTC‑day
+# 
+# # counters persist via JSON file (see helper code)
+# mode_counter = {"ema": 0, "macd": 0, "sar": 0}
+# trade_counter = 0
+# 
+# # keep one day anchor for both caps
+# day_anchor = int(time.time() // 86400)       # UTC‑day number
+# # ────────────────────────────────────────────────────────────
+# 
+# # ───────── trade‑frequency throttle (cool‑down) ─────────────
+# # optional secondary guard: min gap between *any* two entries
+# MIN_GAP = 60 * 96        # 5 760 s ≈ 1 h 36 m
+# SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
+# last_trade_time = {sym: 0 for sym in SYMBOLS}
+# # ────────────────────────────────────────────────────────────
 
 # API setup
-api_key = "wLqYZxlM27F01smJFS"
-api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
-session = HTTP(testnet=False, api_key=api_key, api_secret=api_secret)
+# Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
+# Bybit Demo API Key and Secret - 8g4j5EW0EehZEbIaRD - ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4
+# Bybit Testnet API Key and Secret - -
+api_key = "8g4j5EW0EehZEbIaRD"
+api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
+session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 # SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT"]
 # SYMBOLS = ["BNBUSDT", "XRPUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
 # SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
 # SYMBOLS = ["FARTCOINUSDT", "DOGEUSDT", "1000PEPEUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
-SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
+# SYMBOLS = ["SHIB1000USDT", "XAUTUSDT", "XAUUSD+", "USDJPY+", "EURUSD+", "GBPUSD+"]
+# SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
+SYMBOLS = ["SHIB1000USDT"]
 # SYMBOLS = ["XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
 risk_pct = 0.1  # Example risk per trade
 leverage=25
 current_trade_info = []
-balance = 168
-now = time.time()
+# balance = 160
 
-def load_counters():
-    """Return dict {"day": <utc‑day‑int>, "totals": {"ema":0,"macd":0,"sar":0}}."""
-    if os.path.exists(COUNTER_FILE):
-        try:
-            with open(COUNTER_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass  # treat as corrupt → start fresh
-    # default structure
-    return {"day": int(time.time() // 86400),
-            "totals": {"ema": 0, "macd": 0, "sar": 0}}
+# now = time.time()
+# def load_counters():
+#     """Return dict {"day": <utc‑day‑int>, "totals": {"ema":0,"macd":0,"sar":0}}."""
+#     if os.path.exists(COUNTER_FILE):
+#         try:
+#             with open(COUNTER_FILE, "r") as f:
+#                 return json.load(f)
+#         except Exception:
+#             pass  # treat as corrupt → start fresh
+#     # default structure
+#     return {"day": int(time.time() // 86400),
+#             "totals": {"ema": 0, "macd": 0, "sar": 0}}
 
-def save_counters(data):
-    with open(COUNTER_FILE, "w") as f:
-        json.dump(data, f)
+# def save_counters(data):
+#     with open(COUNTER_FILE, "w") as f:
+#         json.dump(data, f)
 
-counters = load_counters() 
-def reset_and_log_if_new_day():
-    global counters
-    today = int(time.time() // 86400)
+# counters = load_counters() 
+# def reset_and_log_if_new_day():
+#     global counters
+#     today = int(time.time() // 86400)
 
-    # — roll over to new day —
-    if today != counters["day"]:
-        counters = {"day": today, "totals": {"ema": 0, "macd": 0, "sar": 0}}
-        save_counters(counters)
-        with open(LOG_FILE, "a") as log:
-            log.write(f"\n======== NEW UTC DAY {today} ========\n")
+#     # — roll over to new day —
+#     if today != counters["day"]:
+#         counters = {"day": today, "totals": {"ema": 0, "macd": 0, "sar": 0}}
+#         save_counters(counters)
+#         with open(LOG_FILE, "a") as log:
+#             log.write(f"\n======== NEW UTC DAY {today} ========\n")
 
-def reset_daily_counter_if_new_day():
-    global trade_counter, day_anchor
-    today = int(time.time() // 86400)
-    if today != day_anchor:           # crossed into a new UTC day
-        trade_counter = 0
-        day_anchor    = today
-        print("─── New day detected: trade counter reset to 0 ───")
+# def reset_daily_counter_if_new_day():
+#     global trade_counter, day_anchor
+#     today = int(time.time() // 86400)
+#     if today != day_anchor:           # crossed into a new UTC day
+#         trade_counter = 0
+#         day_anchor    = today
+#         print("─── New day detected: trade counter reset to 0 ───")
 def keep_session_alive(symbol):
     for attempt in range(30):
         try:
@@ -166,10 +169,103 @@ def BearsPower(df, period=13):
 def Momentum(series, period=10):
     return series - series.shift(period)
 
+# df['SAR'].iloc[n] returns sar values for n candle
+def SAR(df: pd.DataFrame,
+        step: float = 0.02,
+        max_step: float = 0.2) -> pd.DataFrame:
+    """
+    Adds column 'sar' (Parabolic SAR) to df and returns df.
+
+    Parameters
+    ----------
+    step : float
+        AF increment (default 0.02)
+    max_step : float
+        Maximum AF (default 0.2)
+    """
+    high, low = df['High'].values, df['Low'].values
+    n = len(df)
+    sar = np.zeros(n)
+
+    # Initialisation
+    trend = 1                    # 1 = up, -1 = down
+    sar[0] = low[0]              # seed with first low
+    ep = high[0]                 # extreme point
+    af = step
+
+    for i in range(1, n):
+        # 1) tentative SAR
+        sar[i] = sar[i-1] + af * (ep - sar[i-1])
+
+        # 2) keep SAR on the correct side of price
+        if trend == 1:
+            sar[i] = min(sar[i], low[i-1], low[i-2] if i > 1 else sar[i])
+        else:
+            sar[i] = max(sar[i], high[i-1], high[i-2] if i > 1 else sar[i])
+
+        # 3) trend‑flip checks
+        if trend == 1:
+            if low[i] < sar[i]:                 # bullish → bearish flip
+                trend = -1
+                sar[i] = ep                     # reset SAR to last EP
+                ep = low[i]
+                af = step
+            else:                               # still bullish
+                if high[i] > ep:
+                    ep = high[i]
+                    af = min(af + step, max_step)
+        else:
+            if high[i] > sar[i]:                # bearish → bullish flip
+                trend = 1
+                sar[i] = ep
+                ep = high[i]
+                af = step
+            else:                               # still bearish
+                if low[i] < ep:
+                    ep = low[i]
+                    af = min(af + step, max_step)
+
+    df['SAR'] = sar
+    return df
+# df['Fractal_High].iloc[n] and df['Fractal_Low].iloc[n] return true if candle if a fractal high or low.
+def Fractals(df: pd.DataFrame,
+             window: int = 2) -> pd.DataFrame:
+    """
+    Adds columns 'fractal_high' and 'fractal_low' to df.
+    A 5‑bar fractal uses window=2 (2 bars on each side of the pivot).
+
+    Parameters
+    ----------
+    window : int
+        Half‑window size. 2 → 5‑bar, 3 → 7‑bar, etc.
+    """
+    h, l = df['High'], df['Low']
+    w = window
+
+    high_mask = (
+        (h.shift(w) > h.shift(w+1)) &
+        (h.shift(w) > h.shift(w+2)) &
+        (h.shift(w) > h.shift(w-1)) &
+        (h.shift(w) > h)
+    )
+
+    low_mask = (
+        (l.shift(w) < l.shift(w+1)) &
+        (l.shift(w) < l.shift(w+2)) &
+        (l.shift(w) < l.shift(w-1)) &
+        (l.shift(w) < l)
+    )
+
+    df['Fractal_High'] = high_mask.shift(-w).fillna(False).infer_objects().astype(bool)
+    df['Fractal_Low']  = low_mask.shift(-w).fillna(False).infer_objects().astype(bool)
+    return df
 def calculate_indicators(df):
     df['EMA_7'] = df['Close'].ewm(span=7).mean()
     df['EMA_14'] = df['Close'].ewm(span=14).mean()
     df['EMA_28'] = df['Close'].ewm(span=28).mean()
+    df['EMA_7_Diff'] = df['EMA_7'].diff()
+    df['EMA_14_Diff'] = df['EMA_14'].diff()
+    df['EMA_28_Diff'] = df['EMA_28'].diff()
 
     df['H-L'] = df['High'] - df['Low']
     df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
@@ -204,129 +300,75 @@ def calculate_indicators(df):
     df['ADX'] = adx
     df['+DI'] = plus_di
     df['-DI'] = minus_di
+    df['Di_Diff'] = (df['+DI'] - df['-DI']).abs()
+
+
     df['Bulls'] = df['High'] - df['Close'].shift(1)
     df['Bears'] = df['Close'].shift(1) - df['Low']
-
-    df['atr_bullish_multiplier'] = (df['Bulls'] - df['Bears']) / df['ATR']
-    df['atr_bearish_multiplier'] = (df['Bears'] - df['Bulls']) / df['ATR']
-    df['Di_Diff'] = df['+DI'] - df['-DI']
-    df['Bullish_DI'] = df['+DI'] - df['-DI']
-    df['Bearish_DI'] = df['-DI'] - df['+DI']
+    # df['Bullish_DI'] = df['Bulls'] - df['Bears']
+    # df['Bullish_DI'] = df['+DI'] - df['-DI']
+    # df['Bearish_DI'] = df['-DI'] - df['+DI']
     # df['Bull_Bear_Diff'] = (df['Bulls'] - df['Bears']) / df['ATR']
-    df['Bull_Bear_Diff'] = (df['Bulls'] - df['Bears'])
-    df['ADX_to_ATR_ratio'] = df['ADX'] / 100 / df['ATR']
+    # df['Bull_Bear_Diff'] = (df['Bulls'] - df['Bears'])
 
-    # df = calculate_fractals(df)
+    df['OSMA'] = df['macd_line'] - df['macd_signal']
+
+    df = SAR(df)
+
+    df = Fractals(df)
+
+    # df[]
 
     df.dropna(inplace=True)
     return df
-def calculate_signal_scores(latest):
-    """
-    Calculate bullish and bearish signal strength scores (0.0 to 1.0).
-    Uses smoothed indicators if available.
-    """
-
-    # ---- Bearish Conditions ----
-    bearish_conditions = {
-        'momentum_decreasing': latest.get('Momentum_decreasing', False),
-        'di_relation': latest.get('+DI', 0) < latest.get('-DI', 0) or latest.get('Bulls', 0) < latest.get('Bears', 0),
-        'di_diff': latest.get('Di_Diff', latest.get('Di_Diff', 0)) < 0,
-        'bull_bear_diff': latest.get('Bull_Bear_Diff', latest.get('Bull_Bear_Diff', 0)) < 0,
-        'macd_trending_down': latest.get('macd_trending_down', False),
-        'macd_histogram': latest.get('macd_histogram', latest.get('macd_histogram', 0)) < 0,
-        'ema_cross': latest.get('EMA_7', 0) < latest.get('EMA_14', 0),
-        'momentum': latest.get('Momentum', latest.get('Momentum', 0)) < 0
-    }
-
-    # ---- Bullish Conditions ----
-    bullish_conditions = {
-        'momentum_increasing': latest.get('Momentum_increasing', False),
-        'di_relation': latest.get('+DI', 0) > latest.get('-DI', 0) or latest.get('Bulls', 0) > latest.get('Bears', 0),
-        'di_diff': latest.get('Di_Diff', latest.get('Di_Diff', 0)) > 0,
-        'bull_bear_diff': latest.get('Bull_Bear_Diff', latest.get('Bull_Bear_Diff', 0)) > 0,
-        'macd_trending_up': latest.get('macd_trending_up', False),
-        'macd_histogram': latest.get('macd_histogram', latest.get('macd_histogram', 0)) > 0,
-        'ema_cross': latest.get('EMA_7', 0) > latest.get('EMA_14', 0),
-        'momentum': latest.get('Momentum', latest.get('Momentum', 0)) > 0
-    }
-
-    bearish_score = sum(bool(v) for v in bearish_conditions.values()) / len(bearish_conditions)
-    bullish_score = sum(bool(v) for v in bullish_conditions.values()) / len(bullish_conditions)
-    return bearish_score, bullish_score
 def generate_signals(df):
     """
-    Three exclusive modes with EMA priority:
-      1) ema_up  / ema_down
-      2) macd_up / macd_down
-      3) sar_up  / sar_down
-    EMA alignment instantly overrides any other mode.
+    Return a Series of 'Buy', 'Sell', or '' using:
+        • EMA 7‑14‑28 alignment (optional)
+        • MACD‑histogram confirmation
+        • Flat‑market veto based on 10‑bar range
     """
-
     signals = [""] * len(df)
-    mode = None  # None or one of the six mode strings
 
     for i in range(len(df)):
-        latest = df.iloc[i]
         signal = ""
 
-        # ---------- 0) GLOBAL EMA PRIORITY ----------
-        ema_up   = latest.EMA_7 > latest.EMA_14 > latest.EMA_28
-        ema_down = latest.EMA_7 < latest.EMA_14 < latest.EMA_28
-        if ema_up or ema_down:
-            mode = "ema_up" if ema_up else "ema_down"
-            signal = "Buy" if ema_up else "Sell"
-            signals[i] = signal
-            continue  # skip rest; EMA outranks everything
-
-        # ---------- 1) Maintain / exit non‑EMA modes ----------
-        if mode == "macd_up":
-            if not (latest.macd_trending_up and latest.macd_histogram >= df["macd_histogram"].iloc[i-1]):
-                mode = None
-        elif mode == "macd_down":
-            if not (latest.macd_trending_down and latest.macd_histogram <= df["macd_histogram"].iloc[i-1]):
-                mode = None
-        elif mode == "sar_up":
-            if latest.SAR >= latest.Close:
-                mode = None
-        elif mode == "sar_down":
-            if latest.SAR <= latest.Close:
-                mode = None
-
-        # ---------- 2) If a mode is still active, keep its signal ----------
-        if mode:
-            signal = "Buy" if mode.endswith("_up") else "Sell"
-            signals[i] = signal
-            continue
-
-        # ---------- 3) No active mode: evaluate fresh entries ----------
-        # Basic filters + flat‑market gate
-        if latest.ADX > 20 and 30 < latest.RSI < 70 and i >= 10:
-            window = df.iloc[i-10:i]
+        # ----- flat-market veto -----
+        if i >= 10:
+            window = df.iloc[i - 10 : i]
             price_range = window["High"].max() - window["Low"].min()
-            ratio = price_range / window["Close"]
-            if (ratio <= 0.003).all():
-                signals[i] = ""
+            avg_price = window["Close"].mean()
+
+            if (price_range / avg_price) <= 0.003:
+                signals[i] = ""  # flat → no trade
                 continue
 
-            # 3a) MACD‑momentum entry
-            if (latest.Bull_Bear_Diff > 0 or latest.Di_Diff > 0) and latest.macd_cross_up:
-                mode, signal = "macd_up", "Buy"
-            elif (latest.Bull_Bear_Diff < 0 or latest.Di_Diff < 0) and latest.macd_cross_down:
-                mode, signal = "macd_down", "Sell"
+            latest = df.iloc[i]
 
-            # 3b) SAR‑glide entry (only if MACD didn’t trigger)
-            elif "SAR" in df.columns:
-                if latest.SAR < latest.Close:
-                    mode, signal = "sar_up", "Buy"
-                elif latest.SAR > latest.Close:
-                    mode, signal = "sar_down", "Sell"
+            # ----- MACD Histogram Trend -----
+            if latest.macd_cross_up:
+                signal = "Buy"
+            elif latest.macd_cross_down:
+                signal = "Sell"
+
+            # OPTIONAL: add EMA confirmation here
+            # ema_up   = latest.EMA_7 > latest.EMA_14 > latest.EMA_28
+            # ema_down = latest.EMA_7 < latest.EMA_14 < latest.EMA_28
+            # if signal == "Buy" and not ema_up:
+            #     signal = ""
+            # elif signal == "Sell" and not ema_down:
+            #     signal = ""
 
         signals[i] = signal
 
     df["signal"] = signals
     return df["signal"]
+
 def get_balance():
-    balance_data = session.get_wallet_balance(accountType="UNIFIED")["result"]["list"]
+    # print(session.get_server_time())           # should succeed
+    # print(session.get_wallet_balance(accountType="UNIFIED"))
+    balance_data = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")["result"]["list"]
+    # print(balance_data)
     return float(balance_data[0]["totalEquity"])
 
 def get_mark_price(symbol):
@@ -339,40 +381,40 @@ def get_qty_step(symbol):
     step = float(data["lotSizeFilter"]["qtyStep"])
     min_qty = float(data["lotSizeFilter"]["minOrderQty"])
     return step, min_qty
-def calc_order_qty(balance_usdt: float, entry_price: float, min_qty: float, qty_step: float) -> float:
-    """
-    Calculate a Bybit‑compliant futures quantity.
+# def calc_order_qty(balance_usdt: float, entry_price: float, min_qty: float, qty_step: float) -> float:
+#     """
+#     Calculate a Bybit‑compliant futures quantity.
 
-    Parameters
-    ----------
-    balance_usdt : float
-        Amount of USDT you’re willing to commit.
-    entry_price  : float
-        Expected fill price of the contract.
-    leverage     : int
-        Leverage to apply (>= 1).
-    min_qty      : float
-        Exchange minimum order size for the symbol (e.g. 0.001).
-    qty_step     : float
-        Exchange quantity step for the symbol (e.g. 0.001).
+#     Parameters
+#     ----------
+#     balance_usdt : float
+#         Amount of USDT you’re willing to commit.
+#     entry_price  : float
+#         Expected fill price of the contract.
+#     leverage     : int
+#         Leverage to apply (>= 1).
+#     min_qty      : float
+#         Exchange minimum order size for the symbol (e.g. 0.001).
+#     qty_step     : float
+#         Exchange quantity step for the symbol (e.g. 0.001).
 
-    Returns
-    -------
-    float
-        Order quantity rounded *down* to the nearest step, or 0.0
-        if the wallet is too small to meet `min_qty`.
-    """
+#     Returns
+#     -------
+#     float
+#         Order quantity rounded *down* to the nearest step, or 0.0
+#         if the wallet is too small to meet `min_qty`.
+#     """
 
-    if leverage <= 0:
-        raise ValueError("Leverage must be positive")
+#     if leverage <= 0:
+#         raise ValueError("Leverage must be positive")
 
-    # 1) raw contract size (before rounding)
-    # raw_qty = (balance_usdt * leverage) / entry_price
-    min_qty, qty_step = get_qty_step(symbol)
-    raw_qty = (risk_amount * df['Close'].iloc[-1]) * qty_step
-    order_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
+#     # 1) raw contract size (before rounding)
+#     # raw_qty = (balance_usdt * leverage) / entry_price
+#     min_qty, qty_step = get_qty_step(symbol)
+#     raw_qty = (risk_amount * df['Close'].iloc[-1]) * qty_step
+#     order_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
 
-def calc_order_qty(risk_amount, entry_price, min_qty, qty_step):
+def calc_order_qty(risk_amount: float, entry_price: float, min_qty: float, qty_step: float) -> float:
     """Return Bybit‑compliant qty rounded *down* or 0.0 if below min."""
     raw_qty = risk_amount / entry_price
     step = Decimal(str(qty_step))
@@ -728,13 +770,13 @@ def run_bot():
     risk_pct = 0.1
     while True:
         # reset_mode_counters_if_new_day()
-        reset_and_log_if_new_day()
-        reset_daily_counter_if_new_day()
+        # reset_and_log_if_new_day()
+        # reset_daily_counter_if_new_day()
         for symbol in SYMBOLS:
             try:
                 # trade_info = []
                 trade_info = None
-                df = get_klines_df(symbol, "15")
+                df = get_klines_df(symbol, "1")
                 df = calculate_indicators(df)
                 df['signal'] = generate_signals(df)
                 risk_amount = max(get_balance() * risk_pct, 6) 
@@ -746,28 +788,27 @@ def run_bot():
                 df['symbol'] = symbol
                 latest = df.iloc[-1]
                 # ── open a fresh trade only if signal present & cool‑down met ──
-                if latest['signal'] and (now - last_trade_time[symbol] >= MIN_GAP):
-                    print(f"[INFO] Cool‑down satisfied → opening {latest['signal']} on {symbol}")
-                    trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
-                    if trade_info:
-                        last_trade_time[symbol] = now           # stamp the fill time
-                        current_trade_info = trade_info
+                # if latest['signal'] and (now - last_trade_time[symbol] >= MIN_GAP):
+                    # print(f"[INFO] Cool‑down satisfied → opening {latest['signal']} on {symbol}")
+                # trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
+                # if trade_info:
+                    # last_trade_time[symbol] = now           # stamp the fill time
+                    # current_trade_info = trade_info
 
-                        counters["totals"][this_mode] += 1
-                        save_counters(counters)                 # persist immediately
-                        count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
-                        msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
-                               f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
-                               f"Totals → {count_str}\n")
-                        with open(LOG_FILE, "a") as log:
-                            log.write(msg)
-                            print(msg.strip())                      # echo to console
-                            current_trade_info = trade_info
-
-                    else:
-                        if latest['signal']:
-                            wait_left = MIN_GAP - (now - last_trade_time[symbol])
-                            print(f"[{symbol}] Cool‑down active: {wait_left/60:.1f} min left")
+                        # counters["totals"][this_mode] += 1
+                        # save_counters(counters)                 # persist immediately
+                        # count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
+                        # msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
+                        #        f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
+                        #        f"Totals → {count_str}\n")
+                        # with open(LOG_FILE, "a") as log:
+                        #     log.write(msg)
+                        #     print(msg.strip())                      # echo to console
+                        #     current_trade_info = trade_info
+                # else:
+                    # if latest['signal']:
+                        # wait_left = MIN_GAP - (now - last_trade_time[symbol])
+                        # print(f"[{symbol}] Cool‑down active: {wait_left/60:.1f} min left")
                 balance = get_balance()
                 print(f"=== {symbol} Stats ===")
                 print(f"signal: {latest['signal']}")
@@ -783,15 +824,15 @@ def run_bot():
                 # print(f"EMA7: {latest['EMA_7']:.6f}")
                 # print(f"EMA14: {latest['EMA_14']:.6f}")
                 # print(f"EMA28: {latest['EMA_28']:.6f}")
-                bias_ema_crossover = "Bullish" if latest['EMA_7'] > latest['EMA_14'] else "Bearish" if latest['EMA_7'] < latest['EMA_14'] else "Neutral"
+                bias_ema_crossover = "Bullish" if latest['EMA_7'] > latest['EMA_14'] > latest['EMA_28'] else "Bearish" if latest['EMA_7'] < latest['EMA_14'] < latest['EMA_28'] else "Neutral"
                 print(f"EMA7/14 crossover above/below: {latest['EMA_7'] > latest['EMA_14']}/{latest['EMA_7'] < latest['EMA_14']} ({bias_ema_crossover})")
-                bias_macd_trend = "Bullish" if latest['macd_trending_up'] else "Bearish" if latest['macd_trending_down'] else "Neutral"
-                print(f"MacD trend up/down: {latest['macd_trending_up']}/{latest['macd_trending_down']} ({bias_macd_trend})")
+                # bias_macd_trend = "Bullish" if latest['macd_trending_up'] else "Bearish" if latest['macd_trending_down'] else "Neutral"
+                # print(f"MacD trend up/down: {latest['macd_trending_up']}/{latest['macd_trending_down']} ({bias_macd_trend})")
                 # print(f"MacdD cross up/down: {latest['macd_cross_up']}/{latest['macd_cross_down']}")
-                # print(f"MacdD histogram increasing/decreasing: {latest['macd_histogram_increasing']}/{latest['macd_histogram_decreasing']}")
+                print(f"MacdD histogram increasing/decreasing: {latest['macd_histogram_increasing']}/{latest['macd_histogram_decreasing']}")
                 di_diff = latest['+DI'] - latest['-DI']
                 bias_di_diff = "Bullish" if latest['Di_Diff'] > 0 else "Bearish" if latest['Di_Diff'] < 0 else "Neutral"
-                print(f"+DI/-DI: {latest['+DI']:.2f}/{latest['-DI']:.2f} - Diff: {di_diff:.2f} ({bias_di_diff})")
+                print(f"+DI/-DI: {latest['+DI']:.2f}/{latest['-DI']:.2f} - Diff: {latest['Di_Diff']:.2f} ({bias_di_diff})")
                 # print(f"Bullish/Bearish DI: {latest['Bullish_DI']}/{latest['Bearish_DI']}")
                 power_diff = latest['Bulls'] - latest['Bears']
                 bias_power_diff = "Bullish" if power_diff > 0 else "Bearish" if power_diff < 0 else "Neutral"
@@ -800,10 +841,10 @@ def run_bot():
                 # bearish_diff = latest['Bears'] - latest['Bulls']
                 # bias_bullish_bearish_diff = "Bullish" if bullish_diff > 0.5 else "Bearish" if bearish_diff < -0.5 else "Neutral"
                 # print(f"Bullish/Bearish diffs: {latest['+DI']-latest['-DI']:.2f}/{latest['-DI']-latest['+DI']:.2f} ({bias_bullish_bearish_diff})")
-                bias_momentum = "Bullish" if latest['Momentum'] > 0 else "Bearish" if latest['Momentum'] < 0 else "Neutral"
-                print(f"Momentum: {latest['Momentum']:.2f} - ({bias_momentum})")
-                bias_momentum_incr_decr = "Bullish" if latest['Momentum_increasing'] else "Bearish" if latest['Momentum_decreasing'] else "Neutral"
-                print(f"Momentum increasing/decreasing: {latest['Momentum_increasing']}/{latest['Momentum_decreasing']} ({bias_momentum_incr_decr})")
+                # bias_momentum = "Bullish" if latest['Momentum'] > 0 else "Bearish" if latest['Momentum'] < 0 else "Neutral"
+                # print(f"Momentum: {latest['Momentum']:.2f} - ({bias_momentum})")
+                # bias_momentum_incr_decr = "Bullish" if latest['Momentum_increasing'] else "Bearish" if latest['Momentum_decreasing'] else "Neutral"
+                # print(f"Momentum increasing/decreasing: {latest['Momentum_increasing']}/{latest['Momentum_decreasing']} ({bias_momentum_incr_decr})")
                 # print(f"Trade Qty (calculated): {total_qty}")
                 # print(f"Balance: {balance:.2f}")
                 position = get_position(symbol)
@@ -847,7 +888,7 @@ def run_bot():
                         previous_signals[symbol] = latest['signal']
                     else:
                         print("[INFO] Holding current position — no reversal needed.")
-                        # update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1], latest['signal'], current_trade_info)
+                        update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1], latest['signal'], current_trade_info)
                         # exit_condition = check_exit_conditions(symbol, df['ATR'].iloc[-1])
                 else:
                     if latest['signal'] != "":
@@ -855,15 +896,15 @@ def run_bot():
                         trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
                         if trade_info:
                             print(f"[INFO] Entered trade for {symbol} at {trade_info['entry_price']}")
-                            counters["totals"][this_mode] += 1
-                            save_counters(counters)                 # persist immediately
-                            count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
-                            msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
-                                   f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
-                                   f"Totals → {count_str}\n")
-                            with open(LOG_FILE, "a") as log:
-                                    log.write(msg)
-                                    print(msg.strip())
+                            # counters["totals"][this_mode] += 1
+                            # save_counters(counters)                 # persist immediately
+                            # count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
+                            # msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
+                            #        f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
+                            #        f"Totals → {count_str}\n")
+                            # with open(LOG_FILE, "a") as log:
+                            #         log.write(msg)
+                            #         print(msg.strip())
                             current_trade_info = trade_info
                         else:
                             print(f"[WARN] Failed to enter trade for {symbol}, skipping update.")
@@ -876,7 +917,7 @@ def run_bot():
             except Exception as e:
                 print(f"Error processing {symbol}: {e}")
         print("Cycle complete. Waiting for next candle...\n")
-        wait_until_next_candle(15)
+        wait_until_next_candle(1)
 if __name__ == "__main__":
     run_bot()
 # set trailing stop
