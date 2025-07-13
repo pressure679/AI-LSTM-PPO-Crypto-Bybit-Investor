@@ -44,7 +44,7 @@ session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 # SYMBOLS = ["FARTCOINUSDT", "DOGEUSDT", "1000PEPEUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
 # SYMBOLS = ["SHIB1000USDT", "XAUTUSDT", "XAUUSD+", "USDJPY+", "EURUSD+", "GBPUSD+"]
 # SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
-SYMBOLS = ["SHIB1000USDT"]
+SYMBOLS = ["SHIB1000USDT", "XRPUSDT", "DOGEUSDT"]
 # SYMBOLS = ["XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
 risk_pct = 0.1  # Example risk per trade
 leverage=25
@@ -365,11 +365,21 @@ def generate_signals(df):
     return df["signal"]
 
 def get_balance():
-    # print(session.get_server_time())           # should succeed
-    # print(session.get_wallet_balance(accountType="UNIFIED"))
-    balance_data = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")["result"]["list"]
-    # print(balance_data)
-    return float(balance_data[0]["totalEquity"])
+    """
+    Return total equity in USDT only.
+    """
+    try:
+        resp = session.get_wallet_balance(
+            accountType="UNIFIED",
+            coin="USDT"               # still useful – filters server‑side
+        )
+
+        coins = resp["result"]["list"][0]["coin"]   # ← go into the coin array
+        usdt_row = next(c for c in coins if c["coin"] == "USDT")
+        return float(usdt_row["equity"])            # or "availableToWithdraw"
+    except (KeyError, StopIteration, IndexError) as e:
+        print("[get_balance] parsing error:", e, resp)
+        return 0.0
 
 def get_mark_price(symbol):
     price_data = session.get_tickers(category="linear", symbol=symbol)["result"]["list"][0]
@@ -414,12 +424,35 @@ def get_qty_step(symbol):
 #     raw_qty = (risk_amount * df['Close'].iloc[-1]) * qty_step
 #     order_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
 
-def calc_order_qty(risk_amount: float, entry_price: float, min_qty: float, qty_step: float) -> float:
-    """Return Bybit‑compliant qty rounded *down* or 0.0 if below min."""
-    raw_qty = risk_amount / entry_price
-    step = Decimal(str(qty_step))
-    min_qty  = Decimal(str(raw_qty)).quantize(step, rounding=ROUND_DOWN)
-    return float(min_qty) if min_qty >= Decimal(str(min_qty)) else 0.0
+from decimal import Decimal, ROUND_DOWN
+
+def calc_order_qty(risk_amount: float,
+                   entry_price: float,
+                   min_qty: float,
+                   qty_step: float) -> float:
+    """
+    Return a Bybit‑compliant order quantity, rounded *down* to the nearest
+    step size.  If the rounded amount is below `min_qty`, return 0.0.
+    """
+    # 1️⃣  Convert everything to Decimal
+    risk_amt   = Decimal(str(risk_amount))
+    price      = Decimal(str(entry_price))
+    step       = Decimal(str(qty_step))
+    min_q      = Decimal(str(min_qty))
+
+    # 2️⃣  Raw qty (no rounding yet)
+    raw_qty = risk_amt / price           # still Decimal
+
+    # 3️⃣  Round *down* to the nearest step
+    qty = (raw_qty // step) * step       # floor division works (both Decimal)
+
+    # 4️⃣  Enforce minimum
+    if qty < min_q:
+        return 0.0
+
+    # 5️⃣  Cast once for the API
+    return float(qty)
+
 # ---------------------------------------------------------------------
 def round_qty(symbol, qty, mark_price):
     # Simple static example; ideally fetch from exchange info
@@ -432,14 +465,16 @@ def calculate_dynamic_qty(symbol, risk_amount, atr):
     return round(qty, 6)
 def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     """
-    Place initial SL plus four TP limit orders.
-    Silent‑skip ErrCode 10001 (zero‑position on SL) and
-    ErrCode 110017 (zero‑position on reduce‑only TP).
+    SL at 1.5×ATR.
+    Four TP limits at Fibonacci ratios < 1 of a 3×ATR base distance.
     """
-    levels  = [1.5, 2.5, 3.5, 4.5]
-    orders  = {'sl': None, 'tp': []}
+    fib = [0.236, 0.382, 0.500, 0.618]      # ratios < 1
+    base = 3.0 * atr
+    tp_distances = [base * f for f in fib]
 
-    # ───────────── Stop‑loss ─────────────
+    orders = {'sl': None, 'tp': []}
+
+    # ───────── Stop‑loss (1.5×ATR) ─────────
     sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
     try:
         orders['sl'] = session.set_trading_stop(
@@ -449,23 +484,20 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
             stop_loss=str(round(sl_price, 6))
         )
         if orders['sl'].get('retCode') == 0:
-            print(f"[{symbol}] SL placed.")
+            print(f"[{symbol}] SL placed @ {sl_price:.6f}")
         else:
             print(f"[{symbol}] SL failed: {orders['sl']}")
     except Exception as e:
-        if "ErrCode: 10001" in str(e):
-            pass                              # silent
-        else:
-            msg = str(e).split("Request")[0].strip()
-            print(f"[{symbol}] SL exception: {msg}")
+        if "ErrCode: 10001" not in str(e):
+            print(f"[{symbol}] SL exception: {e}")
 
-    # ───────────── Take‑profits ─────────────
+    # ───────── Take‑profits ─────────
     qty_split = [qty * 0.4, qty * 0.2, qty * 0.2, qty * 0.2]
+    tp_side = "Sell" if side == "Buy" else "Buy"
 
-    for i, mult in enumerate(levels):
+    for i, dist in enumerate(tp_distances):
         try:
-            tp_price = entry_price + mult * atr if side == "Buy" else entry_price - mult * atr
-            tp_side  = "Sell" if side == "Buy" else "Buy"
+            tp_price = entry_price + dist if side == "Buy" else entry_price - dist
             rounded_qty = round_qty(symbol, qty_split[i], entry_price)
 
             print(f"[{symbol}] TP {i+1}: {tp_side} {rounded_qty} @ {tp_price:.6f}")
@@ -479,14 +511,13 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
                 time_in_force="GTC",
                 reduce_only=True
             )
+            if tp_resp.get("retCode") != 0:
+                print(f"[{symbol}] TP {i+1} failed: {tp_resp}")
             orders['tp'].append(tp_resp)
         except Exception as e:
-            if "ErrCode: 110017" in str(e):
-                # silent skip: no position yet for reduce‑only order
-                orders['tp'].append(None)
-            else:
+            if "ErrCode: 110017" not in str(e):
                 print(f"[{symbol}] TP {i+1} exception: {e}")
-                orders['tp'].append(None)
+            orders['tp'].append(None)
 
     return orders
 
@@ -509,7 +540,7 @@ def enter_trade(signal, df, symbol, risk_pct):
     # adxtoatr_ratio = adx / 100 / atr
     # total_qty = calculate_dynamic_qty(symbol, risk_amount, atr_bearish_multiplier)
     # print(total_qty)
-    total_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
+    # total_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
 
     # Round total_qty down to nearest step
     order_qty = math.floor(risk_amount / entry_price) * qty_step
@@ -687,6 +718,7 @@ def get_position(symbol):
         # print(f"[DEBUG] Raw position data for {symbol}: {positions[0]}")
 
         pos = positions[0]
+        # print("OPEN POSITION:", pos)
         size = float(pos.get("size", 0))
         return pos
     # try:
@@ -825,7 +857,7 @@ def run_bot():
                 # print(f"EMA14: {latest['EMA_14']:.6f}")
                 # print(f"EMA28: {latest['EMA_28']:.6f}")
                 bias_ema_crossover = "Bullish" if latest['EMA_7'] > latest['EMA_14'] > latest['EMA_28'] else "Bearish" if latest['EMA_7'] < latest['EMA_14'] < latest['EMA_28'] else "Neutral"
-                print(f"EMA7/14 crossover above/below: {latest['EMA_7'] > latest['EMA_14']}/{latest['EMA_7'] < latest['EMA_14']} ({bias_ema_crossover})")
+                print(f"EMA7/14/28 crossover above/below: {latest['EMA_7'] > latest['EMA_14']}/{latest['EMA_7'] < latest['EMA_14']} ({bias_ema_crossover})")
                 # bias_macd_trend = "Bullish" if latest['macd_trending_up'] else "Bearish" if latest['macd_trending_down'] else "Neutral"
                 # print(f"MacD trend up/down: {latest['macd_trending_up']}/{latest['macd_trending_down']} ({bias_macd_trend})")
                 # print(f"MacdD cross up/down: {latest['macd_cross_up']}/{latest['macd_cross_down']}")
