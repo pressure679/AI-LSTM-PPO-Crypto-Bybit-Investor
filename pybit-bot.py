@@ -498,7 +498,7 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
 
     for i, dist in enumerate(tp_distances):
         try:
-            tp_price = entry_price + dist if side == "Buy" else entry_price - dist
+            tp_price = entry_price + atr * 3 * dist if side == "Buy" else entry_price - atr * 3 * dist
             rounded_qty = round_qty(symbol, qty_split[i], entry_price)
 
             print(f"[{symbol}] TP {i+1}: {tp_side} {rounded_qty} @ {tp_price:.6f}")
@@ -555,7 +555,7 @@ def enter_trade(signal, df, symbol, risk_pct):
     side = "Buy" if signal == "Buy" else "Sell"
 
     sl_price = round_qty(symbol, entry_price - atr * 1.5, entry_price) if side == "Buy" else round_qty(symbol, entry_price + atr * 1.5, entry_price)
-    tp_price = round_qty(symbol, entry_price + atr * 4.5, entry_price) if side == "Buy" else round_qty(symbol, entry_price - atr * 4.5, entry_price)
+    tp_price = round_qty(symbol, entry_price + atr * 3 * 0.786, entry_price) if side == "Buy" else round_qty(symbol, entry_price - atr * 3 * 0.786, entry_price)
     # print(f"tp_price: {tp_price}")
 
     try:
@@ -570,7 +570,7 @@ def enter_trade(signal, df, symbol, risk_pct):
             take_profit=str(tp_price),
             stop_loss=str(sl_price)
         )
-        print("ORDER RESPONSE: {response}")
+        # print(f"ORDER RESPONSE: {response}")
 
         # ✅ Validate API response before accessing
         # if not response or 'result' not in response or not response['result']:
@@ -720,7 +720,7 @@ def get_position(symbol):
         # print(f"[DEBUG] Raw position data for {symbol}: {positions[0]}")
 
         pos = positions[0]
-        print("OPEN POSITION:", pos)
+        # print("OPEN POSITION:", pos)
         size = float(pos.get("size", 0))
         return pos
     # try:
@@ -731,6 +731,7 @@ def get_position(symbol):
         print(f"[get_position] Error fetching position for {symbol}: {e}")
         return None
 def update_trailing_sl(symbol, close, atr, side, current_trade_info):
+    position = []
     try:
         # pos = get_position(symbol)
         # if not pos or float(pos['size']) == 0:
@@ -740,10 +741,10 @@ def update_trailing_sl(symbol, close, atr, side, current_trade_info):
         # current_sl = float(pos.get('sl', 0)) or 0.0
         # print(f"[{symbol}] current_trade_info: {current_trade_info}")
         position = current_trade_info[0] if current_trade_info else None
+        print(f"POSITION in update_trailing_sl: {position}")
         if position is None:
             print(f"[{symbol}] No position info available.")
             return
-        
         current_sl = float(position.get('sl', 0)) or 0.0
 
         # current_sl = float(current_trade_info['sl']) or 0.0
@@ -771,6 +772,7 @@ def update_trailing_sl(symbol, close, atr, side, current_trade_info):
             print(f"[{symbol}] No SL update needed (new_sl: {new_sl}, current_sl: {current_sl})")
 
     except Exception as e:
+        print(f"ERROR in updating sl: {e}")
         if "orderQty will be truncated to zero" in str(e):
             print(f"[{symbol}] Skipping SL update: Qty too small. (Suppressed Error 110017)")
         else:
@@ -890,15 +892,17 @@ def run_bot():
                     elif isinstance(position, dict):
                         current_trade_info = position
                 open_orders = session.get_open_orders(category="linear", symbol=symbol)['result']['list']
-                # print(f"position: {position}")
-                # print(f"open orders: {open_orders}")
-                if open_orders:
+                # print(f"OPEN POSITION: {position}")
+                # print(f"OPEN ORDERS: {open_orders}")
+                in_position = bool(position and float(position.get("size", 0)))
+                if in_position:
                     # print(f"Open Position: Side={position['side']} Entry={position['entry_price']:.6f} Qty={position['qty']} PnL={position['unrealizedPnl']:.2f}")
+                    print(f"Open Position: Side={position['side']} Entry={position['avgPrice']} Qty={position['size']}")
                     # update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1])
                     # exit_condition = check_exit_conditions(symbol, df['ATR'].iloc[-1])
                     # --- AUTO-REVERSE LOGIC ---
-                    if latest['signal'] != "" and latest['signal'] != previous_signals[symbol] and previous_signals[symbol] != "":
-                        print(f"[AUTO-REVERSE] Opposite signal detected: Closing {previous_signals[symbol]} and entering {latest['signal']}")
+                    if latest['signal'] != "" and latest['signal'] != position['side'] and position['side'] != "":
+                        print(f"[AUTO-REVERSE] Opposite signal detected: Closing {position['side']} and entering {latest['signal']}")
                         # Exit current position
                         cancel_old_orders(symbol)
                         time.sleep(2)  # Give time for exit to process
@@ -907,14 +911,14 @@ def run_bot():
                         if trade_info:
                             print(f"[TRADE] Reversed position to {latest['signal']}")
                             counters["totals"][this_mode] += 1
-                            save_counters(counters)                 # persist immediately
-                            count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
-                            msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
-                                   f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
-                                   f"Totals → {count_str}\n")
-                            with open(LOG_FILE, "a") as log:
-                                    log.write(msg)
-                                    print(msg.strip())
+                            # save_counters(counters)                 # persist immediately
+                            # count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
+                            # msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
+                            #        f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
+                            #        f"Totals → {count_str}\n")
+                            # with open(LOG_FILE, "a") as log:
+                            #         log.write(msg)
+                            #         print(msg.strip())
                             current_trade_info = trade_info
                         else:
                             print(f"[WARN] Failed to enter trade for {symbol}, skipping update.")
