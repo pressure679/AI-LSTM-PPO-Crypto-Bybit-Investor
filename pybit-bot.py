@@ -540,7 +540,7 @@ def enter_trade(signal, df, symbol, risk_pct):
     # adxtoatr_ratio = adx / 100 / atr
     # total_qty = calculate_dynamic_qty(symbol, risk_amount, atr_bearish_multiplier)
     # print(total_qty)
-    # total_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
+    total_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
 
     # Round total_qty down to nearest step
     order_qty = math.floor(risk_amount / entry_price) * qty_step
@@ -811,14 +811,15 @@ def run_bot():
                 df = get_klines_df(symbol, "1")
                 df = calculate_indicators(df)
                 df['signal'] = generate_signals(df)
+                # total_qty = math.floor(risk_amount / df['Close'].iloc[-1]) * step
+                # total_qty = calc_order_qty(math.floor(risk_amount, df['Close'].iloc[-1], step))
+                # total_qty = calc_order_qty(risk_amount, df['Close'].iloc[-1], min_qty, qty_step)
+                df['symbol'] = symbol
+                latest = df.iloc[-1]
                 risk_amount = max(get_balance() * risk_pct, 6) 
                 atr = df['ATR'].iloc[-1]
                 qty_step, min_qty = get_qty_step(symbol)
-                # total_qty = math.floor(risk_amount / df['Close'].iloc[-1]) * step
-                # total_qty = calc_order_qty(math.floor(risk_amount, df['Close'].iloc[-1], step))
-                total_qty = calc_order_qty(risk_amount, df['Close'].iloc[-1], min_qty, qty_step)
-                df['symbol'] = symbol
-                latest = df.iloc[-1]
+                total_qty = calc_order_qty(risk_amount, latest['Close'], min_qty, qty_step)
                 # ── open a fresh trade only if signal present & cool‑down met ──
                 # if latest['signal'] and (now - last_trade_time[symbol] >= MIN_GAP):
                     # print(f"[INFO] Cool‑down satisfied → opening {latest['signal']} on {symbol}")
@@ -851,7 +852,6 @@ def run_bot():
                 # print(f"ADX over 14: {latest['ADX'] / 14:.2f}")
                 print(f"Balance: {balance:.2f}")
                 # total_qty = calculate_dynamic_qty(symbol, risk_amount, latest['atr_bearish_multiplier'])
-                total_qty = calc_order_qty(risk_amount, latest['Close'], min_qty, qty_step)
                 print(f"position size: {total_qty}")
                 # print(f"EMA7: {latest['EMA_7']:.6f}")
                 # print(f"EMA14: {latest['EMA_14']:.6f}")
@@ -861,7 +861,8 @@ def run_bot():
                 # bias_macd_trend = "Bullish" if latest['macd_trending_up'] else "Bearish" if latest['macd_trending_down'] else "Neutral"
                 # print(f"MacD trend up/down: {latest['macd_trending_up']}/{latest['macd_trending_down']} ({bias_macd_trend})")
                 # print(f"MacdD cross up/down: {latest['macd_cross_up']}/{latest['macd_cross_down']}")
-                print(f"MacdD histogram increasing/decreasing: {latest['macd_histogram_increasing']}/{latest['macd_histogram_decreasing']}")
+                bias_macd_hist = "Bullish" if latest['macd_histogram_increasing'] else "Bearish" if latest['macd_histogram_decreasing'] else "Neutral"
+                print(f"MacdD histogram increasing/decreasing: {latest['macd_histogram_increasing']}/{latest['macd_histogram_decreasing']} ({bias_macd_hist})")
                 di_diff = latest['+DI'] - latest['-DI']
                 bias_di_diff = "Bullish" if latest['Di_Diff'] > 0 else "Bearish" if latest['Di_Diff'] < 0 else "Neutral"
                 print(f"+DI/-DI: {latest['+DI']:.2f}/{latest['-DI']:.2f} - Diff: {latest['Di_Diff']:.2f} ({bias_di_diff})")
