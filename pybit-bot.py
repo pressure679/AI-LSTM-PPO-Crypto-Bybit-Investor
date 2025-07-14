@@ -506,7 +506,7 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     Four TP limits at Fibonacci ratios < 1 of a 3×ATR base distance.
     """
     # fib_levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618]
-    fib = [0.382, 0.5, 0.618, 0.786]      # ratios < 1
+    fib = [0.5, 0.618, 0.786, 1.0]      # ratios < 1
     base = 3.0 * atr
     tp_distances = [base * f for f in fib]
 
