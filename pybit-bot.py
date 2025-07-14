@@ -32,8 +32,13 @@ pd.set_option('future.no_silent_downcasting', True)
 # # ────────────────────────────────────────────────────────────
 
 # API setup
-api_key = ""
-api_secret = ""
+# Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
+# Bybit Demo API Key and Secret - 8g4j5EW0EehZEbIaRD - ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4
+# Bybit Testnet API Key and Secret - -
+# api_key = "wLqYZxlM27F01smJFS"
+# api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
+api_key = "8g4j5EW0EehZEbIaRD"
+api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 # SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT"]
 # SYMBOLS = ["BNBUSDT", "XRPUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
@@ -345,49 +350,63 @@ def calculate_indicators(df):
     return df
 def generate_signals(df):
     """
-    Return a Series of 'Buy', 'Sell', or '' using:
-        • EMA 7‑14‑28 alignment (optional)
-        • MACD‑histogram confirmation
-        • Flat‑market veto based on 10‑bar range
+    Return a Series of 'Buy', 'Sell', or '' using
+        • flat‑market veto             (10‑bar High/Low range)
+        • ADX strength > 20
+        • MACD‑angle filter            (current slope > 5‑bar avg slope)
+        • MACD hook skip               (no trade immediately after peak/valley)
+        • DI / Bull‑Bear / OSMA logic  (your original direction rules)
     """
+
     signals = [""] * len(df)
 
+    # --- pre‑compute helpers once ------------------------------------
+    macd_slope      = df['MACD_line'].diff()
+    macd_slope_ma_5 = macd_slope.rolling(5).mean()
+
+    # “hook” is True on the bar *right after* MACD slope changes sign
+    macd_hook = (
+        (macd_slope.shift(1) > 0) & (macd_slope <= 0) |   # bullish peak
+        (macd_slope.shift(1) < 0) & (macd_slope >= 0)     # bearish valley
+    )
+
     for i in range(len(df)):
-        signal = ""
+        if i < 10:        # need at least 10 bars for range filter
+            continue
 
-        # ----- flat-market veto -----
-        if i >= 10:
-            window = df.iloc[i - 10 : i]
-            price_range = window["High"].max() - window["Low"].min()
-            avg_price = window["Close"].mean()
+        latest = df.iloc[i]
 
-            if (price_range / avg_price) <= 0.005:
-                signals[i] = ""  # flat → no trade
-                continue
+        # -------------- flat‑market veto ------------------------------
+        window = df.iloc[i - 10 : i]
+        price_range = window["High"].max() - window["Low"].min()
+        if (price_range / window["Close"].mean()) <= 0.005:
+            continue
 
+        # -------------- trend strength check --------------------------
+        if latest.ADX < 20:
+            continue
 
-            latest = df.iloc[i]
+        # -------------- MACD angle filter -----------------------------
+        angle_ok = abs(macd_slope.iloc[i]) > abs(macd_slope_ma_5.iloc[i])
+        if not angle_ok:
+            continue
 
-            if latest.ADX < 20:
-                continue
-            # ----- MACD Histogram Trend -----
-            # if latest.macd_cross_up:
-            if latest.macd_signal_diff > 0 and latest['+DI'] > latest['-DI'] and latest['Bull_Bear_Diff'] > 0:
-            # if latest.macd_cross_up and latest['+DI'] > latest['-DI'] and latest['Bull_Bear_Diff'] > 0:
-            # if latest.macd_histogram_increasing:
-            # if latest['+DI'] > latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] > 0  and latest.OSMA_Diff > 0:
-            # if latest['EMA_7'] > latest['EMA_14'] > latest['EMA_28'] and latest['+DI'] > latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] > 0 and latest.OSMA_Diff > 0:
-                signal = "Buy"
-            # elif latest.macd_cross_down:
-            elif latest.macd_signal_diff < 0 and latest['+DI'] < latest['-DI'] and latest['Bull_Bear_Diff'] < 0:
-            # elif latest.macd_cross_down and latest['+DI'] < latest['-DI'] and latest['Bull_Bear_Diff'] < 0:
-            # elif latest.macd_histogram_decreasing:
-            # elif latest.Bull_Bear_Diff < 0:
-            # elif latest['+DI'] < latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] < 0 and latest.OSMA_Diff < 0:
-            # elif latest['EMA_7'] < latest['EMA_14'] < latest['EMA_28'] and latest['+DI'] < latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] < 0 and latest.OSMA_Diff < 0:
-                signal = "Sell"
+        # -------------- hook (peak/valley) skip -----------------------
+        if macd_hook.iloc[i]:
+            continue
 
-        signals[i] = signal
+        # -------------- directional logic -----------------------------
+        if (latest.macd_signal_diff > 0 and
+            latest['+DI'] > latest['-DI'] and
+            latest.Bull_Bear_Diff > 0 and
+            latest.OSMA_Diff > 0):
+            signals[i] = "Buy"
+
+        elif (latest.macd_signal_diff < 0 and
+              latest['+DI'] < latest['-DI'] and
+              latest.Bull_Bear_Diff < 0 and
+              latest.OSMA_Diff < 0):
+            signals[i] = "Sell"
 
     df["signal"] = signals
     return df["signal"]
@@ -501,7 +520,7 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     Four TP limits at Fibonacci ratios < 1 of a 3×ATR base distance.
     """
     # fib_levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618]
-    fib = [0.5, 0.618, 0.786, 1.0]      # ratios < 1
+    fib = [0.236, 0.382, 0.5, 0.618]      # ratios < 1
     base = 3.0 * atr
     tp_distances = [base * f for f in fib]
     # tp_levels = [
@@ -867,7 +886,7 @@ def run_bot():
             try:
                 # trade_info = []
                 trade_info = None
-                df = get_klines_df(symbol, "1")
+                df = get_klines_df(symbol, "5")
                 df = df.sort_values("Timestamp")      # oldest → newest
                 df.reset_index(drop=True, inplace=True)
                 df = calculate_indicators(df)
@@ -1021,7 +1040,7 @@ def run_bot():
             except Exception as e:
                 print(f"Error processing {symbol}: {e}")
         print("Cycle complete. Waiting for next candle...\n")
-        wait_until_next_candle(1)
+        wait_until_next_candle(5)
 if __name__ == "__main__":
     run_bot()
 # set trailing stop
