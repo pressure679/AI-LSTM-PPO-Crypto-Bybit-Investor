@@ -10,47 +10,27 @@ import traceback
 from decimal import Decimal, ROUND_DOWN
 import os
 import time
+
 pd.set_option('future.no_silent_downcasting', True)
-# COUNTER_FILE = "pybit-log-counter.txt.log"
-# # ───────── per‑mode and daily caps ──────────────────────────
-# MODE_CAP   = 2                               # ≤ 2 trades per mode per UTC‑day
-# DAILY_CAP  = 6                               # ≤ 6 total trades per UTC‑day
-# 
-# # counters persist via JSON file (see helper code)
-# mode_counter = {"ema": 0, "macd": 0, "sar": 0}
-# trade_counter = 0
-# 
-# # keep one day anchor for both caps
-# day_anchor = int(time.time() // 86400)       # UTC‑day number
-# # ────────────────────────────────────────────────────────────
-# 
-# # ───────── trade‑frequency throttle (cool‑down) ─────────────
-# # optional secondary guard: min gap between *any* two entries
-# MIN_GAP = 60 * 96        # 5 760 s ≈ 1 h 36 m
-# SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
-# last_trade_time = {sym: 0 for sym in SYMBOLS}
-# # ────────────────────────────────────────────────────────────
 
 # API setup
-api_key = ""
-api_secret = ""
+# Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
+# Bybit Demo API Key and Secret - 8g4j5EW0EehZEbIaRD - ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4
+# Bybit Testnet API Key and Secret - -
+# api_key = "wLqYZxlM27F01smJFS"
+# api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
+api_key = "8g4j5EW0EehZEbIaRD"
+api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
-# SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT"]
-# SYMBOLS = ["BNBUSDT", "XRPUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
-# SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
-# SYMBOLS = ["FARTCOINUSDT", "DOGEUSDT", "1000PEPEUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
-# SYMBOLS = ["SHIB1000USDT", "XAUTUSDT", "XAUUSD+", "USDJPY+", "EURUSD+", "GBPUSD+"]
-# SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
 SYMBOLS = ["SHIB1000USDT", "XRPUSDT", "DOGEUSDT", "FARTCOINUSDT", "SUIUSDT",
            "HYPEUSDT", "INITUSDT", "BABYUSDT", "NILUSDT", "XAUTUSDT"]
-# SYMBOLS = ["XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
 risk_pct = 0.1  # Example risk per trade
 leverage=50
 current_trade_info = []
 # balance = 160
 
-atr_sl_multiplier = 1
-atr_tp_multiplier = 2
+atr_sl_multiplier = 0.5
+atr_tp_multiplier = 1
 
 def keep_session_alive(symbol):
     for attempt in range(30):
