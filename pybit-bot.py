@@ -50,7 +50,7 @@ SYMBOLS = ["SHIB1000USDT", "XRPUSDT", "DOGEUSDT", "FARTCOINUSDT", "SUIUSDT",
            "HYPEUSDT", "INITUSDT", "BABYUSDT", "NILUSDT", "XAUTUSDT"]
 # SYMBOLS = ["XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
 risk_pct = 0.1  # Example risk per trade
-leverage=20
+leverage=50
 current_trade_info = []
 # balance = 160
 
@@ -140,8 +140,8 @@ def MACD(series, fast=12, slow=26, signal=9):
     macd_line = ema_fast - ema_slow
     signal_line = EMA(macd_line, signal)
     histogram = macd_line - signal_line
-    red_line = ema_fast - ema_slow
-    return macd_line, signal_line, histogram, red_line
+    # red_line = ema_fast - ema_slow
+    return macd_line, signal_line, histogram
 
 def Bollinger_Bands(series, period=20, num_std=2):
     sma = series.rolling(window=period).mean()
@@ -295,14 +295,15 @@ def calculate_indicators(df):
     tr = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
     df['ATR'] = tr.rolling(window=14).mean()
 
-    df['macd_line'], df['macd_signal'], df['macd_histogram'], df['macd_red_line'] = MACD(df['Close'])
+    df['macd_line'], df['macd_signal'], df['macd_histogram'] = MACD(df['Close'])
     # === MACD Crossovers ===
     # df['macd_cross_up'] = (df['macd_histogram'] > 0) & (df['macd_histogram'].shift(1) <= 0)
     # df['macd_cross_down'] = (df['macd_histogram'] < 0) & (df['macd_histogram'].shift(1) >= 0)
     df['macd_cross_up'] = (df['macd_line'] > df['macd_signal']) & (df['macd_line'].shift(1) <= df['macd_signal'].shift(1))
     df['macd_cross_down'] = (df['macd_line'] < df['macd_signal']) & (df['macd_line'].shift(1) >= df['macd_signal'].shift(1))
-    df['macd_red_line_cross_up'] = (df['macd_red_line'] > 0) & (df['macd_red_line'].shift(1) <= 0)
-    df['macd_red_line_cross_down'] = (df['macd_red_line'] < 0) & (df['macd_red_line'].shift(1) >= 0)
+    df['macd_signal_cross_up'] = (df['macd_signal'] > 0) & (df['macd_signal'].shift(1) <= 0)
+    df['macd_signal_cross_down'] = (df['macd_signal'] < 0) & (df['macd_signal'].shift(1) >= 0)
+    df['macd_signal_diff'] = df['macd_line'].diff()
 
     # === MACD Trend Status ===
     df['macd_trending_up'] = df['macd_line'] > df['macd_signal']
@@ -369,18 +370,21 @@ def generate_signals(df):
                 signals[i] = ""  # flat → no trade
                 continue
 
+
             latest = df.iloc[i]
 
+            if latest.ADX < 20:
+                continue
             # ----- MACD Histogram Trend -----
             # if latest.macd_cross_up:
-            if latest.macd_red_line_cross_up:
+            if latest.macd_signal_diff > 0 and latest['+DI'] > latest['-DI'] and latest['Bull_Bear_Diff'] > 0:
             # if latest.macd_cross_up and latest['+DI'] > latest['-DI'] and latest['Bull_Bear_Diff'] > 0:
             # if latest.macd_histogram_increasing:
             # if latest['+DI'] > latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] > 0  and latest.OSMA_Diff > 0:
             # if latest['EMA_7'] > latest['EMA_14'] > latest['EMA_28'] and latest['+DI'] > latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] > 0 and latest.OSMA_Diff > 0:
                 signal = "Buy"
             # elif latest.macd_cross_down:
-            elif latest.macd_red_line_cross_down:
+            elif latest.macd_signal_diff < 0 and latest['+DI'] < latest['-DI'] and latest['Bull_Bear_Diff'] < 0:
             # elif latest.macd_cross_down and latest['+DI'] < latest['-DI'] and latest['Bull_Bear_Diff'] < 0:
             # elif latest.macd_histogram_decreasing:
             # elif latest.Bull_Bear_Diff < 0:
@@ -459,103 +463,103 @@ def calculate_dynamic_qty(symbol, risk_amount, atr):
     return round(qty, 6)
 def _round_down(qty, step):
     return math.floor(qty / step) * step
-def place_sl_and_tp(symbol, side, entry_price, atr, qty,
-                    balance, risk_pct=0.10, leverage=50):
-    """
-    Place 1 reduce-only TP order at 10% ROI (with leverage).
-    """
-
-    step, min_qty = get_qty_step(symbol)
-    margin = balance * risk_pct
-
-    roi_target_pct = 30.0  # 30% ROI
-    price_diff = (roi_target_pct / 100) * entry_price / leverage
-
-    # Ensure qty respects exchange step
-    qty = max(_round_down(qty, step), min_qty)
-
-    tp_side = "Sell" if side == "Buy" else "Buy"
-    tp_price = entry_price + price_diff if side == "Buy" else entry_price - price_diff
-
-    roi_usdt = price_diff * qty * leverage
-
-    print(f"[{symbol}] TP1: {tp_side} {qty} @ {tp_price:.6f}  "
-          f"≈ {roi_usdt:.4f} USDT ({roi_target_pct:.2f}% ROI)")
-
-    resp = session.place_order(
-        category      ="linear",
-        symbol        =symbol,
-        side          =tp_side,
-        order_type    ="Limit",
-        qty           =qty,
-        price         =round(tp_price, 6),
-        time_in_force ="GTC",
-        reduce_only   =True
-    )
-    if resp.get("retCode") != 0:
-        print(f"[{symbol}] TP1 failed: {resp}")
-
-    return {'tp': [resp]}
-# def place_sl_and_tp(symbol, side, entry_price, atr, qty):
+# def place_sl_and_tp(symbol, side, entry_price, atr, qty,
+#                     balance, risk_pct=0.10, leverage=50):
 #     """
-#     SL at 1.5×ATR.
-#     Four TP limits at Fibonacci ratios < 1 of a 3×ATR base distance.
+#     Place 1 reduce-only TP order at 10% ROI (with leverage).
 #     """
-#     # fib_levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618]
-#     fib = [0.236, 0.382, 0.5, 0.618]      # ratios < 1
-#     base = 3.0 * atr
-#     tp_distances = [base * f for f in fib]
 # 
-#     orders = {'sl': None, 'tp': []}
+#     step, min_qty = get_qty_step(symbol)
+#     margin = balance * risk_pct
 # 
-#     # ───────── Stop‑loss (1.5×ATR) ─────────
-#     sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
-#     # try:
-#     #     orders['sl'] = session.set_trading_stop(
-#     #         category="linear",
-#     #         symbol=symbol,
-#     #         side=side,
-#     #         stop_loss=str(round(sl_price, 6))
-#     #     )
-#     #     if orders['sl'].get('retCode') == 0:
-#     #         print(f"[{symbol}] SL placed @ {sl_price:.6f}")
-#     #     else:
-#     #         print(f"[{symbol}] SL failed: {orders['sl']}")
-#     # except Exception as e:
-#     #     if "ErrCode: 10001" not in str(e):
-#     #         print(f"[{symbol}] SL exception: {e}")
+#     roi_target_pct = 30.0  # 30% ROI
+#     price_diff = (roi_target_pct / 100) * entry_price / leverage
 # 
-#     # ───────── Take‑profits ─────────
-#     qty_split = [qty * 0.4, qty * 0.2, qty * 0.2, qty * 0.2]
+#     # Ensure qty respects exchange step
+#     qty = max(_round_down(qty, step), min_qty)
+# 
 #     tp_side = "Sell" if side == "Buy" else "Buy"
+#     tp_price = entry_price + price_diff if side == "Buy" else entry_price - price_diff
 # 
-#     for i, dist in enumerate(tp_distances):
-#         try:
-#             tp_price = entry_price + dist if side == "Buy" else entry_price - dist
-#             # rounded_qty = round_qty(symbol, qty_split[i], entry_price)
-#             rounded_qty = round(qty_split[i], 6)
+#     roi_usdt = price_diff * qty * leverage
 # 
-#             print(f"[{symbol}] TP {i+1}: {tp_side} {rounded_qty} @ {tp_price:.6f}")
-#             tp_resp = session.place_order(
-#                 category="linear",
-#                 symbol=symbol,
-#                 side=tp_side,
-#                 order_type="Limit",
-#                 qty=rounded_qty,
-#                 price=tp_price,
-#                 time_in_force="GTC",
-#                 reduce_only=True
-#             )
-#             # print(f"tp response: {tp_resp}")
-#             if tp_resp.get("retCode") != 0:
-#                 print(f"[{symbol}] TP {i+1} failed: {tp_resp}")
-#             orders['tp'].append(tp_resp)
-#         except Exception as e:
-#             if "ErrCode: 110017" not in str(e):
-#                 print(f"[{symbol}] TP {i+1} exception: {e}")
-#             orders['tp'].append(None)
+#     print(f"[{symbol}] TP1: {tp_side} {qty} @ {tp_price:.6f}  "
+#           f"≈ {roi_usdt:.4f} USDT ({roi_target_pct:.2f}% ROI)")
 # 
-#     return orders
+#     resp = session.place_order(
+#         category      ="linear",
+#         symbol        =symbol,
+#         side          =tp_side,
+#         order_type    ="Limit",
+#         qty           =qty,
+#         price         =round(tp_price, 6),
+#         time_in_force ="GTC",
+#         reduce_only   =True
+#     )
+#     if resp.get("retCode") != 0:
+#         print(f"[{symbol}] TP1 failed: {resp}")
+# 
+#     return {'tp': [resp]}
+def place_sl_and_tp(symbol, side, entry_price, atr, qty):
+    """
+    SL at 1.5×ATR.
+    Four TP limits at Fibonacci ratios < 1 of a 3×ATR base distance.
+    """
+    # fib_levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618]
+    fib = [0.382, 0.5, 0.618, 0.786]      # ratios < 1
+    base = 3.0 * atr
+    tp_distances = [base * f for f in fib]
+
+    orders = {'sl': None, 'tp': []}
+
+    # ───────── Stop‑loss (1.5×ATR) ─────────
+    sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
+    # try:
+    #     orders['sl'] = session.set_trading_stop(
+    #         category="linear",
+    #         symbol=symbol,
+    #         side=side,
+    #         stop_loss=str(round(sl_price, 6))
+    #     )
+    #     if orders['sl'].get('retCode') == 0:
+    #         print(f"[{symbol}] SL placed @ {sl_price:.6f}")
+    #     else:
+    #         print(f"[{symbol}] SL failed: {orders['sl']}")
+    # except Exception as e:
+    #     if "ErrCode: 10001" not in str(e):
+    #         print(f"[{symbol}] SL exception: {e}")
+
+    # ───────── Take‑profits ─────────
+    qty_split = [qty * 0.4, qty * 0.2, qty * 0.2, qty * 0.2]
+    tp_side = "Sell" if side == "Buy" else "Buy"
+
+    for i, dist in enumerate(tp_distances):
+        try:
+            tp_price = entry_price + dist if side == "Buy" else entry_price - dist
+            # rounded_qty = round_qty(symbol, qty_split[i], entry_price)
+            rounded_qty = round(qty_split[i], 6)
+
+            print(f"[{symbol}] TP {i+1}: {tp_side} {rounded_qty} @ {tp_price:.6f}")
+            tp_resp = session.place_order(
+                category="linear",
+                symbol=symbol,
+                side=tp_side,
+                order_type="Limit",
+                qty=rounded_qty,
+                price=tp_price,
+                time_in_force="GTC",
+                reduce_only=True
+            )
+            # print(f"tp response: {tp_resp}")
+            if tp_resp.get("retCode") != 0:
+                print(f"[{symbol}] TP {i+1} failed: {tp_resp}")
+            orders['tp'].append(tp_resp)
+        except Exception as e:
+            if "ErrCode: 110017" not in str(e):
+                print(f"[{symbol}] TP {i+1} exception: {e}")
+            orders['tp'].append(None)
+
+    return orders
 def enter_trade(signal, df, symbol, risk_pct):
     global balance
     global leverage
@@ -570,7 +574,8 @@ def enter_trade(signal, df, symbol, risk_pct):
     risk_amount = max(balance * risk_pct, 6)  # minimum risk amount 6
 
     qty_step, min_qty = get_qty_step(symbol)
-    atr = df['ATR'].iloc[0]
+    atr = df['ATR'].iloc[-1]
+    # print("atr in enter_trade: {atr}")
     # adx = df['ADX'].iloc[0]
 
     total_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
@@ -582,10 +587,10 @@ def enter_trade(signal, df, symbol, risk_pct):
     side = "Buy" if signal == "Buy" else "Sell"
 
     # Calculate SL price before placing order
-    roi_target_pct = 15.0  # 15% ROI
-    price_diff = (roi_target_pct / 100) * entry_price / leverage
-    sl_price = entry_price - price_diff if side == "Buy" else entry_price + price_diff
-    # sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
+    # roi_target_pct = 15.0  # 15% ROI
+    # price_diff = (roi_target_pct / 100) * entry_price / leverage
+    # sl_price = entry_price - price_diff if side == "Buy" else entry_price + price_diff
+    sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
     sl_price = round(sl_price, 6)  # round to appropriate precision
 
     try:
@@ -598,7 +603,7 @@ def enter_trade(signal, df, symbol, risk_pct):
             qty=total_qty,
             buyLeverage=leverage,
             sellLeverage=leverage,
-            # stop_loss=str(sl_price)
+            stop_loss=str(sl_price)
         )
         # print(f"ORDER RESPONSE: {response}")
 
@@ -618,12 +623,12 @@ def enter_trade(signal, df, symbol, risk_pct):
             print(f"[ERROR] Failed to place order: {e}")
         return None
 
-    # # Place SL and TPs separately if needed
-    # orders = {}
-    # try:
-    #     orders = place_sl_and_tp(symbol, side, entry_price, atr, total_qty, balance)
-    # except Exception as e:
-    #     print(f"Error placing SL/TP for {symbol}: {e}")
+    # Place SL and TPs separately if needed
+    orders = {}
+    try:
+        orders = place_sl_and_tp(symbol, side, entry_price, atr, total_qty)
+    except Exception as e:
+        print(f"Error placing SL/TP for {symbol}: {e}")
 
     trade_info = {
         "symbol": symbol,
@@ -631,7 +636,7 @@ def enter_trade(signal, df, symbol, risk_pct):
         "signal": side,
         "qty": total_qty,
         "remaining_qty": total_qty,
-        # "tps": orders.get('tp', []),
+        "tps": orders.get('tp', []),
         "atr": atr,
         "active_tp_index": 0,
         "order_id": order_id
@@ -917,9 +922,10 @@ def run_bot():
                 # bias_macd_trend = "Bullish" if latest['macd_trending_up'] else "Bearish" if latest['macd_trending_down'] else "Neutral"
                 # print(f"MacD trend up/down: {latest['macd_trending_up']}/{latest['macd_trending_down']} ({bias_macd_trend})")
                 # print(f"MacdD cross up/down: {latest['macd_cross_up']}/{latest['macd_cross_down']}")
-                bias_macd_hist = "Bullish" if latest['macd_histogram_increasing'] else "Bearish" if latest['macd_histogram_decreasing'] else "Neutral"
-                print(f"MacdD zone: {latest['macd_histogram']} - histogram diff: {latest['OSMA_Diff']} ({bias_macd_hist})")
-                print(f"Macd red line: {latest['macd_red_line']}")
+                # bias_macd_hist = "Bullish" if latest['macd_histogram_increasing'] else "Bearish" if latest['macd_histogram_decreasing'] else "Neutral"
+                # print(f"MacdD zone: {latest['macd_histogram']} - histogram diff: {latest['OSMA_Diff']} ({bias_macd_hist})")
+                bias_macd_signal_diff = "Bullish" if latest['macd_signal_diff'] > 0 else "Bearish" if latest["macd_signal_diff"] < 0 else "Neutral"
+                print(f"Macd signal line: {latest['macd_signal']:.2f} - going up/down: {latest['macd_signal_diff']:.2f} ({bias_macd_signal_diff})")
                 # di_diff = latest['+DI'] - latest['-DI']
                 di_diff = latest['DI_Diff']
                 bias_di_diff = "Bullish" if latest['+DI'] > latest['-DI'] else "Bearish" if latest['+DI'] < latest['-DI'] else "Neutral"
