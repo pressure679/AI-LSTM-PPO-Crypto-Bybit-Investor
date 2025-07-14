@@ -140,7 +140,8 @@ def MACD(series, fast=12, slow=26, signal=9):
     macd_line = ema_fast - ema_slow
     signal_line = EMA(macd_line, signal)
     histogram = macd_line - signal_line
-    return macd_line, signal_line, histogram
+    red_line = ema_fast - ema_slow
+    return macd_line, signal_line, histogram, red_line
 
 def Bollinger_Bands(series, period=20, num_std=2):
     sma = series.rolling(window=period).mean()
@@ -294,12 +295,14 @@ def calculate_indicators(df):
     tr = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
     df['ATR'] = tr.rolling(window=14).mean()
 
-    df['macd_line'], df['macd_signal'], df['macd_histogram'] = MACD(df['Close'])
+    df['macd_line'], df['macd_signal'], df['macd_histogram'], df['macd_red_line'] = MACD(df['Close'])
     # === MACD Crossovers ===
     # df['macd_cross_up'] = (df['macd_histogram'] > 0) & (df['macd_histogram'].shift(1) <= 0)
     # df['macd_cross_down'] = (df['macd_histogram'] < 0) & (df['macd_histogram'].shift(1) >= 0)
     df['macd_cross_up'] = (df['macd_line'] > df['macd_signal']) & (df['macd_line'].shift(1) <= df['macd_signal'].shift(1))
     df['macd_cross_down'] = (df['macd_line'] < df['macd_signal']) & (df['macd_line'].shift(1) >= df['macd_signal'].shift(1))
+    df['macd_red_line_cross_up'] = (df['macd_red_line'] > 0) & (df['macd_red_line'].shift(1) <= 0)
+    df['macd_red_line_cross_down'] = (df['macd_red_line'] < 0) & (df['macd_red_line'].shift(1) >= 0)
 
     # === MACD Trend Status ===
     df['macd_trending_up'] = df['macd_line'] > df['macd_signal']
@@ -369,13 +372,15 @@ def generate_signals(df):
             latest = df.iloc[i]
 
             # ----- MACD Histogram Trend -----
-            if latest.macd_cross_up:
+            # if latest.macd_cross_up:
+            if latest.macd_red_line_cross_up:
             # if latest.macd_cross_up and latest['+DI'] > latest['-DI'] and latest['Bull_Bear_Diff'] > 0:
             # if latest.macd_histogram_increasing:
             # if latest['+DI'] > latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] > 0  and latest.OSMA_Diff > 0:
             # if latest['EMA_7'] > latest['EMA_14'] > latest['EMA_28'] and latest['+DI'] > latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] > 0 and latest.OSMA_Diff > 0:
                 signal = "Buy"
-            elif latest.macd_cross_down:
+            # elif latest.macd_cross_down:
+            elif latest.macd_red_line_cross_down:
             # elif latest.macd_cross_down and latest['+DI'] < latest['-DI'] and latest['Bull_Bear_Diff'] < 0:
             # elif latest.macd_histogram_decreasing:
             # elif latest.Bull_Bear_Diff < 0:
@@ -463,7 +468,7 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty,
     step, min_qty = get_qty_step(symbol)
     margin = balance * risk_pct
 
-    roi_target_pct = 10.0  # 10% ROI
+    roi_target_pct = 30.0  # 30% ROI
     price_diff = (roi_target_pct / 100) * entry_price / leverage
 
     # Ensure qty respects exchange step
@@ -577,8 +582,11 @@ def enter_trade(signal, df, symbol, risk_pct):
     side = "Buy" if signal == "Buy" else "Sell"
 
     # Calculate SL price before placing order
+    roi_target_pct = 15.0  # 15% ROI
+    price_diff = (roi_target_pct / 100) * entry_price / leverage
+    sl_price = entry_price - price_diff if side == "Buy" else entry_price + price_diff
     # sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
-    # sl_price = round(sl_price, 6)  # round to appropriate precision
+    sl_price = round(sl_price, 6)  # round to appropriate precision
 
     try:
         print(f"Placing order for {symbol} side={side} qty={total_qty}")
@@ -610,7 +618,7 @@ def enter_trade(signal, df, symbol, risk_pct):
             print(f"[ERROR] Failed to place order: {e}")
         return None
 
-    # Place SL and TPs separately if needed
+    # # Place SL and TPs separately if needed
     # orders = {}
     # try:
     #     orders = place_sl_and_tp(symbol, side, entry_price, atr, total_qty, balance)
@@ -911,6 +919,7 @@ def run_bot():
                 # print(f"MacdD cross up/down: {latest['macd_cross_up']}/{latest['macd_cross_down']}")
                 bias_macd_hist = "Bullish" if latest['macd_histogram_increasing'] else "Bearish" if latest['macd_histogram_decreasing'] else "Neutral"
                 print(f"MacdD zone: {latest['macd_histogram']} - histogram diff: {latest['OSMA_Diff']} ({bias_macd_hist})")
+                print(f"Macd red line: {latest['macd_red_line']}")
                 # di_diff = latest['+DI'] - latest['-DI']
                 di_diff = latest['DI_Diff']
                 bias_di_diff = "Bullish" if latest['+DI'] > latest['-DI'] else "Bearish" if latest['+DI'] < latest['-DI'] else "Neutral"
