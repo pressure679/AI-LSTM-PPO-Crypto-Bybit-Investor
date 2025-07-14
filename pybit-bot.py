@@ -32,8 +32,13 @@ pd.set_option('future.no_silent_downcasting', True)
 # # ────────────────────────────────────────────────────────────
 
 # API setup
-api_key = ""
-api_secret = ""
+# Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
+# Bybit Demo API Key and Secret - 8g4j5EW0EehZEbIaRD - ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4
+# Bybit Testnet API Key and Secret - -
+# api_key = "wLqYZxlM27F01smJFS"
+# api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
+api_key = "8g4j5EW0EehZEbIaRD"
+api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 # SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT"]
 # SYMBOLS = ["BNBUSDT", "XRPUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
@@ -49,42 +54,9 @@ leverage=50
 current_trade_info = []
 # balance = 160
 
-# now = time.time()
-# def load_counters():
-#     """Return dict {"day": <utc‑day‑int>, "totals": {"ema":0,"macd":0,"sar":0}}."""
-#     if os.path.exists(COUNTER_FILE):
-#         try:
-#             with open(COUNTER_FILE, "r") as f:
-#                 return json.load(f)
-#         except Exception:
-#             pass  # treat as corrupt → start fresh
-#     # default structure
-#     return {"day": int(time.time() // 86400),
-#             "totals": {"ema": 0, "macd": 0, "sar": 0}}
+atr_sl_multiplier = 1
+atr_tp_multiplier = 2
 
-# def save_counters(data):
-#     with open(COUNTER_FILE, "w") as f:
-#         json.dump(data, f)
-
-# counters = load_counters() 
-# def reset_and_log_if_new_day():
-#     global counters
-#     today = int(time.time() // 86400)
-
-#     # — roll over to new day —
-#     if today != counters["day"]:
-#         counters = {"day": today, "totals": {"ema": 0, "macd": 0, "sar": 0}}
-#         save_counters(counters)
-#         with open(LOG_FILE, "a") as log:
-#             log.write(f"\n======== NEW UTC DAY {today} ========\n")
-
-# def reset_daily_counter_if_new_day():
-#     global trade_counter, day_anchor
-#     today = int(time.time() // 86400)
-#     if today != day_anchor:           # crossed into a new UTC day
-#         trade_counter = 0
-#         day_anchor    = today
-#         print("─── New day detected: trade counter reset to 0 ───")
 def keep_session_alive(symbol):
     for attempt in range(30):
         try:
@@ -185,7 +157,6 @@ def BearsPower(df, period=13):
 def Momentum(series, period=10):
     return series - series.shift(period)
 
-# df['SAR'].iloc[n] returns sar values for n candle
 def SAR(df: pd.DataFrame,
         step: float = 0.02,
         max_step: float = 0.2) -> pd.DataFrame:
@@ -243,7 +214,6 @@ def SAR(df: pd.DataFrame,
 
     df['SAR'] = sar
     return df
-# df['Fractal_High].iloc[n] and df['Fractal_Low].iloc[n] return true if candle if a fractal high or low.
 def Fractals(df: pd.DataFrame,
              window: int = 2) -> pd.DataFrame:
     """
@@ -343,6 +313,7 @@ def calculate_indicators(df):
     # df[]
 
     return df
+
 def generate_signals(df):
     """
     Return a Series of 'Buy', 'Sell', or '' using
@@ -356,7 +327,7 @@ def generate_signals(df):
     signals = [""] * len(df)
 
     # --- pre‑compute helpers once ------------------------------------
-    macd_slope      = df['MACD_line'].diff()
+    macd_slope      = df['macd_line'].diff()
     macd_slope_ma_5 = macd_slope.rolling(5).mean()
 
     # “hook” is True on the bar *right after* MACD slope changes sign
@@ -472,43 +443,6 @@ def calculate_dynamic_qty(symbol, risk_amount, atr):
     return round(qty, 6)
 def _round_down(qty, step):
     return math.floor(qty / step) * step
-# def place_sl_and_tp(symbol, side, entry_price, atr, qty,
-#                     balance, risk_pct=0.10, leverage=50):
-#     """
-#     Place 1 reduce-only TP order at 10% ROI (with leverage).
-#     """
-# 
-#     step, min_qty = get_qty_step(symbol)
-#     margin = balance * risk_pct
-# 
-#     roi_target_pct = 30.0  # 30% ROI
-#     price_diff = (roi_target_pct / 100) * entry_price / leverage
-# 
-#     # Ensure qty respects exchange step
-#     qty = max(_round_down(qty, step), min_qty)
-# 
-#     tp_side = "Sell" if side == "Buy" else "Buy"
-#     tp_price = entry_price + price_diff if side == "Buy" else entry_price - price_diff
-# 
-#     roi_usdt = price_diff * qty * leverage
-# 
-#     print(f"[{symbol}] TP1: {tp_side} {qty} @ {tp_price:.6f}  "
-#           f"≈ {roi_usdt:.4f} USDT ({roi_target_pct:.2f}% ROI)")
-# 
-#     resp = session.place_order(
-#         category      ="linear",
-#         symbol        =symbol,
-#         side          =tp_side,
-#         order_type    ="Limit",
-#         qty           =qty,
-#         price         =round(tp_price, 6),
-#         time_in_force ="GTC",
-#         reduce_only   =True
-#     )
-#     if resp.get("retCode") != 0:
-#         print(f"[{symbol}] TP1 failed: {resp}")
-# 
-#     return {'tp': [resp]}
 def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     """
     SL at 1.5×ATR.
@@ -516,7 +450,7 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     """
     # fib_levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618]
     fib = [0.236, 0.382, 0.5, 0.618]      # ratios < 1
-    base = 3.0 * atr
+    base = atr_tp_multiplier * atr
     tp_distances = [base * f for f in fib]
     # tp_levels = [
     #     1.5,
@@ -528,7 +462,7 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     orders = {'sl': None, 'tp': []}
 
     # ───────── Stop‑loss (1.5×ATR) ─────────
-    sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
+    sl_price = entry_price - atr_sl_multiplier * atr if side == "Buy" else entry_price + atr_sl_multiplier * atr
     try:
         orders['sl'] = session.set_trading_stop(
             category="linear",
@@ -577,6 +511,7 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
             orders['tp'].append(None)
 
     return orders
+
 def enter_trade(signal, df, symbol, risk_pct):
     global balance
     global leverage
@@ -607,7 +542,7 @@ def enter_trade(signal, df, symbol, risk_pct):
     # roi_target_pct = 15.0  # 15% ROI
     # price_diff = (roi_target_pct / 100) * entry_price / leverage
     # sl_price = entry_price - price_diff if side == "Buy" else entry_price + price_diff
-    sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
+    sl_price = entry_price - atr_sl_multiplier * atr if side == "Buy" else entry_price + atr_sl_multiplier * atr
     sl_price = round(sl_price, 6)  # round to appropriate precision
 
     try:
@@ -799,53 +734,6 @@ def get_position(symbol):
     except Exception as e:
         print(f"[get_position] Error fetching position for {symbol}: {e}")
         return None
-def update_trailing_sl(symbol, close, atr, side, current_trade_info):
-    position = []
-    try:
-        # pos = get_position(symbol)
-        # if not pos or float(pos['size']) == 0:
-        #     print(f"[{symbol}] No open position to update trailing SL.")
-        #     return
-
-        # current_sl = float(pos.get('sl', 0)) or 0.0
-        # print(f"[{symbol}] current_trade_info: {current_trade_info}")
-        position = current_trade_info[0] if current_trade_info else None
-        print(f"POSITION in update_trailing_sl: {position}")
-        if position is None:
-            print(f"[{symbol}] No position info available.")
-            return
-        current_sl = float(position.get('sl', 0)) or 0.0
-
-        # current_sl = float(current_trade_info['sl']) or 0.0
-        new_sl = close - atr * 1.5 if side == "Buy" else close + atr * 1.5
-
-        # Ensure proper rounding to avoid invalid order
-        new_sl = round(new_sl, 6)  # Adjust precision as needed per symbol
-
-
-        should_update = (
-            (side == "Buy" and (current_sl == 0 or new_sl > current_sl)) or
-            (side == "Sell" and (current_sl == 0 or new_sl < current_sl))
-        )
-
-        if should_update:
-            print(f"[{symbol}] Updating trailing SL to {new_sl}")
-            response = session.set_trading_stop(
-                category="linear",
-                symbol=symbol,
-                stop_loss=new_sl
-            )
-            if response['retCode'] != 0:
-                print(f"[{symbol}] SL update failed: {response['retMsg']} (ErrCode: {response['retCode']})")
-        else:
-            print(f"[{symbol}] No SL update needed (new_sl: {new_sl}, current_sl: {current_sl})")
-
-    except Exception as e:
-        print(f"ERROR in updating sl: {e}")
-        if "orderQty will be truncated to zero" in str(e):
-            print(f"[{symbol}] Skipping SL update: Qty too small. (Suppressed Error 110017)")
-        else:
-            print(f"[{symbol}] Exception in trailing SL update: {str(e)}")
 def calculate_avg_pnl(df, symbol):
     global current_trade_info
     df['PnL'] = df['Close'] - current_trade_info['entry_price']
@@ -862,6 +750,46 @@ def calculate_avg_pnl(df, symbol):
     avg_pnl = df['adj_PnL'].rolling(window=360).mean()
     # return avg_pnl
     return avg_pnl
+def update_trailing_sl(symbol, close, atr, side, current_trade_info):
+    position = []
+    try:
+        position = current_trade_info[0] if current_trade_info else None
+        print(f"POSITION in update_trailing_sl: {position}")
+        if position is None:
+            print(f"[{symbol}] No position info available.")
+            return
+        current_sl = float(position.get('sl', 0)) or 0.0
+
+        new_sl = close - atr * atr_sl_multiplier if side == "Buy" else close + atr * atr_sl_multiplier
+        new_sl = round(new_sl, 6)  # Precision
+
+        should_update = (
+            (side == "Buy" and (current_sl == 0 or new_sl > current_sl)) or
+            (side == "Sell" and (current_sl == 0 or new_sl < current_sl))
+        )
+
+        if should_update:
+            print(f"[{symbol}] Updating trailing SL to {new_sl}")
+            response = session.set_trading_stop(
+                category="linear",
+                symbol=symbol,
+                stop_loss=new_sl
+            )
+            if response['retCode'] != 0:
+                # Suppress error code 34040 ("not modified")
+                if response['retCode'] == 34040:
+                    print(f"[{symbol}] SL already set to {new_sl}. No update needed.")
+                else:
+                    print(f"[{symbol}] SL update failed: {response['retMsg']} (ErrCode: {response['retCode']})")
+        else:
+            print(f"[{symbol}] No SL update needed (new_sl: {new_sl}, current_sl: {current_sl})")
+
+    except Exception as e:
+        if "orderQty will be truncated to zero" in str(e):
+            print(f"[{symbol}] Skipping SL update: Qty too small. (Suppressed Error 110017)")
+        else:
+            print(f"[{symbol}] Exception in trailing SL update: {str(e)}")
+
 def wait_until_next_candle(interval_minutes):
     now = time.time()
     seconds_per_candle = interval_minutes * 60
@@ -874,12 +802,8 @@ def run_bot():
     previous_signals = {symbol: "" for symbol in SYMBOLS}  # track last signal per symbol
     risk_pct = 0.1
     while True:
-        # reset_mode_counters_if_new_day()
-        # reset_and_log_if_new_day()
-        # reset_daily_counter_if_new_day()
         for symbol in SYMBOLS:
             try:
-                # trade_info = []
                 trade_info = None
                 df = get_klines_df(symbol, "5")
                 df = df.sort_values("Timestamp")      # oldest → newest
@@ -897,28 +821,6 @@ def run_bot():
                 atr = latest['ATR']
                 qty_step, min_qty = get_qty_step(symbol)
                 total_qty = calc_order_qty(risk_amount, latest['Close'], min_qty, qty_step)
-                # ── open a fresh trade only if signal present & cool‑down met ──
-                # if latest['signal'] and (now - last_trade_time[symbol] >= MIN_GAP):
-                    # print(f"[INFO] Cool‑down satisfied → opening {latest['signal']} on {symbol}")
-                # trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
-                # if trade_info:
-                    # last_trade_time[symbol] = now           # stamp the fill time
-                    # current_trade_info = trade_info
-
-                        # counters["totals"][this_mode] += 1
-                        # save_counters(counters)                 # persist immediately
-                        # count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
-                        # msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
-                        #        f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
-                        #        f"Totals → {count_str}\n")
-                        # with open(LOG_FILE, "a") as log:
-                        #     log.write(msg)
-                        #     print(msg.strip())                      # echo to console
-                        #     current_trade_info = trade_info
-                # else:
-                    # if latest['signal']:
-                        # wait_left = MIN_GAP - (now - last_trade_time[symbol])
-                        # print(f"[{symbol}] Cool‑down active: {wait_left/60:.1f} min left")
                 balance = get_balance()
                 print(f"=== {symbol} Stats ===")
                 # print(f"Open time: {latest['Timestamp']}")
@@ -943,24 +845,14 @@ def run_bot():
                 # print(f"MacdD zone: {latest['macd_histogram']} - histogram diff: {latest['OSMA_Diff']} ({bias_macd_hist})")
                 bias_macd_signal_diff = "Bullish" if latest['macd_signal_diff'] > 0 else "Bearish" if latest["macd_signal_diff"] < 0 else "Neutral"
                 print(f"Macd signal line: {latest['macd_signal']:.2f} - going up/down: {latest['macd_signal_diff']:.2f} ({bias_macd_signal_diff})")
-                # di_diff = latest['+DI'] - latest['-DI']
+                bias_osma_diff = "Bullish" if latest['OSMA_Diff'] > 0 else "Bearish" if latest['OSMA_Diff'] < 0 else "Neutral"
+                print(f"OSMA zone: {latest['OSMA']:.2f} - Direction: {latest['OSMA_Diff']:.2f} ({bias_osma_diff})")
                 di_diff = latest['DI_Diff']
                 bias_di_diff = "Bullish" if latest['+DI'] > latest['-DI'] else "Bearish" if latest['+DI'] < latest['-DI'] else "Neutral"
                 print(f"+DI/-DI: {latest['+DI']:.2f}/{latest['-DI']:.2f} - Diff: {latest['DI_Diff']:.2f} ({bias_di_diff})")
-                # print(f"Bullish/Bearish DI: {latest['Bullish_DI']}/{latest['Bearish_DI']}")
                 power_diff = latest['Bulls'] - latest['Bears']
                 bias_power_diff = "Bullish" if power_diff > 0 else "Bearish" if power_diff < 0 else "Neutral"
                 print(f"Bulls Power/Bears Power: {latest['Bulls']:.6f}/{latest['Bears']:.6f} - Diff: {power_diff:.6f} ({bias_power_diff})")
-                # bias_osma_diff = "Bullish" if latest['OSMA_Diff'] > 0 else "Bearish" if latest['OSMA_Diff'] < 0 else "Neutral"
-                # print(f"OSMA zone: {latest['OSMA']} - Direction: {latest['OSMA_Diff']} ({bias_osma_diff})")
-                # bullish_diff = latest['Bulls'] - latest['Bears']
-                # bearish_diff = latest['Bears'] - latest['Bulls']
-                # bias_bullish_bearish_diff = "Bullish" if bullish_diff > 0.5 else "Bearish" if bearish_diff < -0.5 else "Neutral"
-                # print(f"Bullish/Bearish diffs: {latest['+DI']-latest['-DI']:.2f}/{latest['-DI']-latest['+DI']:.2f} ({bias_bullish_bearish_diff})")
-                # bias_momentum = "Bullish" if latest['Momentum'] > 0 else "Bearish" if latest['Momentum'] < 0 else "Neutral"
-                # print(f"Momentum: {latest['Momentum']:.2f} - ({bias_momentum})")
-                # bias_momentum_incr_decr = "Bullish" if latest['Momentum_increasing'] else "Bearish" if latest['Momentum_decreasing'] else "Neutral"
-                # print(f"Momentum increasing/decreasing: {latest['Momentum_increasing']}/{latest['Momentum_decreasing']} ({bias_momentum_incr_decr})")
                 # print(f"Trade Qty (calculated): {total_qty}")
                 # print(f"Balance: {balance:.2f}")
                 position = get_position(symbol)
@@ -1006,7 +898,7 @@ def run_bot():
                         # previous_signals[symbol] = latest['signal']
                     else:
                         print("[INFO] Holding current position — no reversal needed.")
-                        # update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1], latest['signal'], current_trade_info)
+                        update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1], latest['signal'], current_trade_info)
                         # exit_condition = check_exit_conditions(symbol, df['ATR'].iloc[-1])
                 else:
                     if latest['signal'] != "":
@@ -1014,15 +906,6 @@ def run_bot():
                         trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
                         if trade_info:
                             print(f"[INFO] Entered trade for {symbol} at {trade_info['entry_price']}")
-                            # counters["totals"][this_mode] += 1
-                            # save_counters(counters)                 # persist immediately
-                            # count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
-                            # msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
-                            #        f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
-                            #        f"Totals → {count_str}\n")
-                            # with open(LOG_FILE, "a") as log:
-                            #         log.write(msg)
-                            #         print(msg.strip())
                             current_trade_info = trade_info
                         else:
                             print(f"[WARN] Failed to enter trade for {symbol}, skipping update.")
