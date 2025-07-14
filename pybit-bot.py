@@ -32,8 +32,13 @@ pd.set_option('future.no_silent_downcasting', True)
 # # ────────────────────────────────────────────────────────────
 
 # API setup
-api_key = ""
-api_secret = ""
+# Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
+# Bybit Demo API Key and Secret - 8g4j5EW0EehZEbIaRD - ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4
+# Bybit Testnet API Key and Secret - -
+# api_key = "wLqYZxlM27F01smJFS"
+# api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
+api_key = "8g4j5EW0EehZEbIaRD"
+api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 # SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT"]
 # SYMBOLS = ["BNBUSDT", "XRPUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
@@ -504,35 +509,43 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     fib = [0.5, 0.618, 0.786, 1.0]      # ratios < 1
     base = 3.0 * atr
     tp_distances = [base * f for f in fib]
+    # tp_levels = [
+    #     1.5,
+    #     2.5,
+    #     3.5,
+    #     4.5
+    # ]
 
     orders = {'sl': None, 'tp': []}
 
     # ───────── Stop‑loss (1.5×ATR) ─────────
     sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
-    # try:
-    #     orders['sl'] = session.set_trading_stop(
-    #         category="linear",
-    #         symbol=symbol,
-    #         side=side,
-    #         stop_loss=str(round(sl_price, 6))
-    #     )
-    #     if orders['sl'].get('retCode') == 0:
-    #         print(f"[{symbol}] SL placed @ {sl_price:.6f}")
-    #     else:
-    #         print(f"[{symbol}] SL failed: {orders['sl']}")
-    # except Exception as e:
-    #     if "ErrCode: 10001" not in str(e):
-    #         print(f"[{symbol}] SL exception: {e}")
+    try:
+        orders['sl'] = session.set_trading_stop(
+            category="linear",
+            symbol=symbol,
+            side=side,
+            stop_loss=str(round(sl_price, 6))
+        )
+        if orders['sl'].get('retCode') == 0:
+            print(f"[{symbol}] SL placed @ {sl_price:.6f}")
+        else:
+            print(f"[{symbol}] SL failed: {orders['sl']}")
+    except Exception as e:
+        if "ErrCode: 10001" not in str(e):
+            print(f"[{symbol}] SL exception: {e}")
 
     # ───────── Take‑profits ─────────
     qty_split = [qty * 0.4, qty * 0.2, qty * 0.2, qty * 0.2]
     tp_side = "Sell" if side == "Buy" else "Buy"
 
     for i, dist in enumerate(tp_distances):
+    # for i, dist in enumerate(tp_levels):
         try:
+            # tp_price = entry_price + dist * atr if side == "Buy" else entry_price - dist * atr
             tp_price = entry_price + dist if side == "Buy" else entry_price - dist
-            # rounded_qty = round_qty(symbol, qty_split[i], entry_price)
-            rounded_qty = round(qty_split[i], 6)
+            rounded_qty = round_qty(symbol, qty_split[i], entry_price)
+            # rounded_qty = round(qty_split[i], 6)
 
             print(f"[{symbol}] TP {i+1}: {tp_side} {rounded_qty} @ {tp_price:.6f}")
             tp_resp = session.place_order(
