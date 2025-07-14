@@ -32,13 +32,8 @@ pd.set_option('future.no_silent_downcasting', True)
 # # ────────────────────────────────────────────────────────────
 
 # API setup
-# Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
-# Bybit Demo API Key and Secret - 8g4j5EW0EehZEbIaRD - ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4
-# Bybit Testnet API Key and Secret - -
-# api_key = "wLqYZxlM27F01smJFS"
-# api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
-api_key = "8g4j5EW0EehZEbIaRD"
-api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
+api_key = ""
+api_secret = ""
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 # SYMBOLS = ["BNBUSDT", "SOLUSDT", "XRPUSDT", "FARTCOINUSDT", "DOGEUSDT"]
 # SYMBOLS = ["BNBUSDT", "XRPUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
