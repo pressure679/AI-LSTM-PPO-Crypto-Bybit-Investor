@@ -851,15 +851,6 @@ def run_bot():
                         trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
                         if trade_info:
                             print(f"[TRADE] Reversed position to {latest['signal']}")
-                            # counters["totals"][this_mode] += 1
-                            # save_counters(counters)                 # persist immediately
-                            # count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
-                            # msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
-                            #        f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
-                            #        f"Totals → {count_str}\n")
-                            # with open(LOG_FILE, "a") as log:
-                            #         log.write(msg)
-                            #         print(msg.strip())
                             current_trade_info = trade_info
                         else:
                             print(f"[WARN] Failed to enter trade for {symbol}, skipping update.")
