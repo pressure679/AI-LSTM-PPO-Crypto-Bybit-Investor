@@ -35,6 +35,8 @@ pd.set_option('future.no_silent_downcasting', True)
 # Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
 # Bybit Demo API Key and Secret - 8g4j5EW0EehZEbIaRD - ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4
 # Bybit Testnet API Key and Secret - -
+# api_key = "wLqYZxlM27F01smJFS"
+# api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
 api_key = "8g4j5EW0EehZEbIaRD"
 api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
@@ -44,7 +46,8 @@ session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 # SYMBOLS = ["FARTCOINUSDT", "DOGEUSDT", "1000PEPEUSDT", "SHIB1000USDT", "BROCCOLIUSDT"]
 # SYMBOLS = ["SHIB1000USDT", "XAUTUSDT", "XAUUSD+", "USDJPY+", "EURUSD+", "GBPUSD+"]
 # SYMBOLS = ["SHIB1000USDT", "XAUTUSDT"]
-SYMBOLS = ["SHIB1000USDT", "XRPUSDT", "DOGEUSDT"]
+SYMBOLS = ["SHIB1000USDT", "XRPUSDT", "DOGEUSDT", "FARTCOINUSDT", "SUIUSDT",
+           "HYPEUSDT", "INITUSDT", "BABYUSDT", "NILUSDT", "XAUTUSDT"]
 # SYMBOLS = ["XRPUSDT", "FARTCOINUSDT", "DOGEUSDT", "SHIB1000USDT"]
 risk_pct = 0.1  # Example risk per trade
 leverage=20
@@ -146,16 +149,33 @@ def Bollinger_Bands(series, period=20, num_std=2):
     lower_band = sma - num_std * std
     return upper_band, lower_band
 def ADX(df, period=14):
-    plus_dm = df['High'].diff()
-    minus_dm = df['Low'].diff().abs()
-    plus_dm[plus_dm < 0] = 0
-    minus_dm[minus_dm < 0] = 0
+    """
+    Returns +DI, -DI and ADX using Wilder's smoothing.
+    Columns required: High, Low, Close
+    """
+    high  = df['High']
+    low   = df['Low']
+    close = df['Close']
 
-    tr = ATR(df, period)
-    plus_di = 100 * (plus_dm.rolling(window=period).mean() / tr)
-    minus_di = 100 * (minus_dm.rolling(window=period).mean() / tr)
-    dx = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di))
-    adx = dx.rolling(window=period).mean()
+    # --- directional movement -----------------------------------------
+    plus_dm  = (high.diff()  > low.diff())  * (high.diff()).clip(lower=0)
+    minus_dm = (low.diff()   > high.diff()) * (low.diff().abs()).clip(lower=0)
+
+    # --- true range ----------------------------------------------------
+    tr = pd.concat([
+        (high - low),
+        (high - close.shift()).abs(),
+        (low  - close.shift()).abs()
+    ], axis=1).max(axis=1)
+
+    # --- Wilder smoothing ---------------------------------------------
+    atr       = tr.ewm(alpha=1/period, adjust=False).mean()
+    plus_di   = 100 * (plus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+    minus_di  = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+
+    dx  = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    adx = dx.ewm(alpha=1/period, adjust=False).mean()
+
     return adx, plus_di, minus_di
 
 def BullsPower(df, period=13):
@@ -260,6 +280,7 @@ def Fractals(df: pd.DataFrame,
     df['Fractal_Low']  = low_mask.shift(-w).fillna(False).infer_objects().astype(bool)
     return df
 def calculate_indicators(df):
+    # df.dropna(inplace=True)
     df['EMA_7'] = df['Close'].ewm(span=7).mean()
     df['EMA_14'] = df['Close'].ewm(span=14).mean()
     df['EMA_28'] = df['Close'].ewm(span=28).mean()
@@ -275,8 +296,11 @@ def calculate_indicators(df):
 
     df['macd_line'], df['macd_signal'], df['macd_histogram'] = MACD(df['Close'])
     # === MACD Crossovers ===
+    # df['macd_cross_up'] = (df['macd_histogram'] > 0) & (df['macd_histogram'].shift(1) <= 0)
+    # df['macd_cross_down'] = (df['macd_histogram'] < 0) & (df['macd_histogram'].shift(1) >= 0)
     df['macd_cross_up'] = (df['macd_line'] > df['macd_signal']) & (df['macd_line'].shift(1) <= df['macd_signal'].shift(1))
     df['macd_cross_down'] = (df['macd_line'] < df['macd_signal']) & (df['macd_line'].shift(1) >= df['macd_signal'].shift(1))
+
     # === MACD Trend Status ===
     df['macd_trending_up'] = df['macd_line'] > df['macd_signal']
     df['macd_trending_down'] = df['macd_line'] < df['macd_signal']
@@ -300,8 +324,7 @@ def calculate_indicators(df):
     df['ADX'] = adx
     df['+DI'] = plus_di
     df['-DI'] = minus_di
-    df['Di_Diff'] = (df['+DI'] - df['-DI']).abs()
-
+    df['DI_Diff'] = (df['+DI'] - df['-DI']).abs()
 
     df['Bulls'] = df['High'] - df['Close'].shift(1)
     df['Bears'] = df['Close'].shift(1) - df['Low']
@@ -309,9 +332,10 @@ def calculate_indicators(df):
     # df['Bullish_DI'] = df['+DI'] - df['-DI']
     # df['Bearish_DI'] = df['-DI'] - df['+DI']
     # df['Bull_Bear_Diff'] = (df['Bulls'] - df['Bears']) / df['ATR']
-    # df['Bull_Bear_Diff'] = (df['Bulls'] - df['Bears'])
+    df['Bull_Bear_Diff'] = (df['Bulls'] - df['Bears'])
 
     df['OSMA'] = df['macd_line'] - df['macd_signal']
+    df['OSMA_Diff'] = df['OSMA'].diff()
 
     df = SAR(df)
 
@@ -319,7 +343,6 @@ def calculate_indicators(df):
 
     # df[]
 
-    df.dropna(inplace=True)
     return df
 def generate_signals(df):
     """
@@ -339,7 +362,7 @@ def generate_signals(df):
             price_range = window["High"].max() - window["Low"].min()
             avg_price = window["Close"].mean()
 
-            if (price_range / avg_price) <= 0.003:
+            if (price_range / avg_price) <= 0.005:
                 signals[i] = ""  # flat → no trade
                 continue
 
@@ -347,17 +370,18 @@ def generate_signals(df):
 
             # ----- MACD Histogram Trend -----
             if latest.macd_cross_up:
+            # if latest.macd_cross_up and latest['+DI'] > latest['-DI'] and latest['Bull_Bear_Diff'] > 0:
+            # if latest.macd_histogram_increasing:
+            # if latest['+DI'] > latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] > 0  and latest.OSMA_Diff > 0:
+            # if latest['EMA_7'] > latest['EMA_14'] > latest['EMA_28'] and latest['+DI'] > latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] > 0 and latest.OSMA_Diff > 0:
                 signal = "Buy"
             elif latest.macd_cross_down:
+            # elif latest.macd_cross_down and latest['+DI'] < latest['-DI'] and latest['Bull_Bear_Diff'] < 0:
+            # elif latest.macd_histogram_decreasing:
+            # elif latest.Bull_Bear_Diff < 0:
+            # elif latest['+DI'] < latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] < 0 and latest.OSMA_Diff < 0:
+            # elif latest['EMA_7'] < latest['EMA_14'] < latest['EMA_28'] and latest['+DI'] < latest['-DI'] and latest['DI_Diff'] > 15 and latest['Bull_Bear_Diff'] < 0 and latest.OSMA_Diff < 0:
                 signal = "Sell"
-
-            # OPTIONAL: add EMA confirmation here
-            # ema_up   = latest.EMA_7 > latest.EMA_14 > latest.EMA_28
-            # ema_down = latest.EMA_7 < latest.EMA_14 < latest.EMA_28
-            # if signal == "Buy" and not ema_up:
-            #     signal = ""
-            # elif signal == "Sell" and not ema_down:
-            #     signal = ""
 
         signals[i] = signal
 
@@ -428,63 +452,45 @@ def calculate_dynamic_qty(symbol, risk_amount, atr):
     stop_distance = atr * 1.5
     qty = risk_amount / stop_distance
     return round(qty, 6)
-def place_sl_and_tp(symbol, side, entry_price, atr, qty, leverage=1):
+def _round_down(qty, step):
+    return math.floor(qty / step) * step
+def place_sl_and_tp(symbol, side, entry_price, atr, qty,
+                    balance, risk_pct=0.10, leverage=50):
     """
-    • SL : 1.5 × ATR (not sent here – call set_trading_stop separately if desired)
-    • TP : 4 Fibonacci legs below 1 × base distance (3 × ATR)
-      Qty split 40 / 20 / 20 / 20 %, rounded to exchange step size.
-      Prints ROI (USDT & %) expected at each leg.
+    Place 1 reduce-only TP order at 10% ROI (with leverage).
     """
-    # ── Bybit precision helpers ──────────────────────────────────────────
-    step, min_qty = get_qty_step(symbol)          # e.g. (68, 68) for XRP
-    def round_down(q):                            # floor to step
-        return math.floor(q / step) * step
 
-    # ── Fibonacci distances (<1) on 3 × ATR base ────────────────────────
-    # fib_levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618]
-    fib     = [0.236, 0.382, 0.5, 0.618]
-    base    = 3.0 * atr
-    tp_dist = [base * r for r in fib]
+    step, min_qty = get_qty_step(symbol)
+    margin = balance * risk_pct
 
-    # ── Split quantities (remainder on last TP) ─────────────────────────
-    raw_frac = [0.4, 0.2, 0.2, 0.2]
-    split, used = [], 0
-    for f in raw_frac[:-1]:
-        q = max(round_down(qty * f), min_qty)
-        split.append(q);  used += q
-    split.append(max(qty - used, min_qty))        # last TP gets remainder
+    roi_target_pct = 10.0  # 10% ROI
+    price_diff = (roi_target_pct / 100) * entry_price / leverage
 
-    # ── Place orders ────────────────────────────────────────────────────
+    # Ensure qty respects exchange step
+    qty = max(_round_down(qty, step), min_qty)
+
     tp_side = "Sell" if side == "Buy" else "Buy"
-    orders  = {'tp': []}
+    tp_price = entry_price + price_diff if side == "Buy" else entry_price - price_diff
 
-    for i, (dist, q) in enumerate(zip(tp_dist, split), start=1):
-        tp_price = entry_price + dist if side == "Buy" else entry_price - dist
+    roi_usdt = price_diff * qty * leverage
 
-        # ROI calculations
-        price_diff = (tp_price - entry_price) if side == "Buy" else (entry_price - tp_price)
-        roi_pct    = price_diff / entry_price * 100 * leverage
-        roi_usdt   = price_diff * q * leverage
+    print(f"[{symbol}] TP1: {tp_side} {qty} @ {tp_price:.6f}  "
+          f"≈ {roi_usdt:.4f} USDT ({roi_target_pct:.2f}% ROI)")
 
-        print(f"[{symbol}] TP {i}: {tp_side} {q} @ {tp_price:.6f} "
-              f"→ ROI ≈ {roi_usdt:.2f} USDT ({roi_pct:.2f} %)")
+    resp = session.place_order(
+        category      ="linear",
+        symbol        =symbol,
+        side          =tp_side,
+        order_type    ="Limit",
+        qty           =qty,
+        price         =round(tp_price, 6),
+        time_in_force ="GTC",
+        reduce_only   =True
+    )
+    if resp.get("retCode") != 0:
+        print(f"[{symbol}] TP1 failed: {resp}")
 
-        resp = session.place_order(
-            category      ="linear",
-            symbol        =symbol,
-            side          =tp_side,
-            order_type    ="Limit",
-            qty           =q,
-            price         =round(tp_price, 6),
-            time_in_force ="GTC",
-            reduce_only   =True
-        )
-        if resp.get("retCode") != 0:
-            print(f"[{symbol}] TP {i} failed: {resp}")
-        orders['tp'].append(resp)
-
-    return orders
-
+    return {'tp': [resp]}
 # def place_sl_and_tp(symbol, side, entry_price, atr, qty):
 #     """
 #     SL at 1.5×ATR.
@@ -545,7 +551,6 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty, leverage=1):
 #             orders['tp'].append(None)
 # 
 #     return orders
-
 def enter_trade(signal, df, symbol, risk_pct):
     global balance
     global leverage
@@ -560,8 +565,8 @@ def enter_trade(signal, df, symbol, risk_pct):
     risk_amount = max(balance * risk_pct, 6)  # minimum risk amount 6
 
     qty_step, min_qty = get_qty_step(symbol)
-    atr = df['ATR'].iloc[-1]
-    adx = df['ADX'].iloc[-1]
+    atr = df['ATR'].iloc[0]
+    # adx = df['ADX'].iloc[0]
 
     total_qty = calc_order_qty(risk_amount, entry_price, min_qty, qty_step)
 
@@ -572,8 +577,8 @@ def enter_trade(signal, df, symbol, risk_pct):
     side = "Buy" if signal == "Buy" else "Sell"
 
     # Calculate SL price before placing order
-    sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
-    sl_price = round(sl_price, 6)  # round to appropriate precision
+    # sl_price = entry_price - 1.5 * atr if side == "Buy" else entry_price + 1.5 * atr
+    # sl_price = round(sl_price, 6)  # round to appropriate precision
 
     try:
         print(f"Placing order for {symbol} side={side} qty={total_qty}")
@@ -585,7 +590,7 @@ def enter_trade(signal, df, symbol, risk_pct):
             qty=total_qty,
             buyLeverage=leverage,
             sellLeverage=leverage,
-            stop_loss=str(sl_price)
+            # stop_loss=str(sl_price)
         )
         # print(f"ORDER RESPONSE: {response}")
 
@@ -606,11 +611,11 @@ def enter_trade(signal, df, symbol, risk_pct):
         return None
 
     # Place SL and TPs separately if needed
-    orders = {}
-    try:
-        orders = place_sl_and_tp(symbol, side, entry_price, atr, total_qty)
-    except Exception as e:
-        print(f"Error placing SL/TP for {symbol}: {e}")
+    # orders = {}
+    # try:
+    #     orders = place_sl_and_tp(symbol, side, entry_price, atr, total_qty, balance)
+    # except Exception as e:
+    #     print(f"Error placing SL/TP for {symbol}: {e}")
 
     trade_info = {
         "symbol": symbol,
@@ -618,7 +623,7 @@ def enter_trade(signal, df, symbol, risk_pct):
         "signal": side,
         "qty": total_qty,
         "remaining_qty": total_qty,
-        "tps": orders.get('tp', []),
+        # "tps": orders.get('tp', []),
         "atr": atr,
         "active_tp_index": 0,
         "order_id": order_id
@@ -660,20 +665,6 @@ def cancel_old_orders(symbol):
 
         # tiny pause to let Bybit settle before we yank orders
         time.sleep(0.3)
-
-    # ── 2) Cancel all open orders ──────────────────────────────
-    # try:
-    #     open_list = session.get_open_orders(
-    #         category="linear", symbol=symbol
-    #     )["result"]["list"]
-
-    #     if open_list:
-    #         session.cancel_all_orders(category="linear", symbol=symbol)
-    #         print(f"[{symbol}] {len(open_list)} open orders cancelled.")
-    #     else:
-    #         print(f"[{symbol}] No open orders to cancel.")
-    # except Exception as e:
-    #     print(f"[{symbol}] Error cancelling orders: {e}")
 
 def manage_trailing_sl(current_price):
     global current_trade_info
@@ -861,15 +852,19 @@ def run_bot():
                 # trade_info = []
                 trade_info = None
                 df = get_klines_df(symbol, "1")
+                df = df.sort_values("Timestamp")      # oldest → newest
+                df.reset_index(drop=True, inplace=True)
                 df = calculate_indicators(df)
                 df['signal'] = generate_signals(df)
+                latest = df.iloc[-1]
+                # print(f"Latest price: {latest_price['Close']}")
                 # total_qty = math.floor(risk_amount / df['Close'].iloc[-1]) * step
                 # total_qty = calc_order_qty(math.floor(risk_amount, df['Close'].iloc[-1], step))
                 # total_qty = calc_order_qty(risk_amount, df['Close'].iloc[-1], min_qty, qty_step)
                 df['symbol'] = symbol
-                latest = df.iloc[-1]
+                # latest = df.iloc[-1]
                 risk_amount = max(get_balance() * risk_pct, 6) 
-                atr = df['ATR'].iloc[-1]
+                atr = latest['ATR']
                 qty_step, min_qty = get_qty_step(symbol)
                 total_qty = calc_order_qty(risk_amount, latest['Close'], min_qty, qty_step)
                 # ── open a fresh trade only if signal present & cool‑down met ──
@@ -896,15 +891,16 @@ def run_bot():
                         # print(f"[{symbol}] Cool‑down active: {wait_left/60:.1f} min left")
                 balance = get_balance()
                 print(f"=== {symbol} Stats ===")
+                # print(f"Open time: {latest['Timestamp']}")
                 print(f"signal: {latest['signal']}")
                 print(f"Close: {latest['Close']:.6f}")
                 print(f"ADX: {latest['ADX']:.2f}")
                 print(f"RSI: {latest['RSI']:.2f}")
                 print(f"ATR: {atr:.6f}")
                 # print(f"ADX over 14: {latest['ADX'] / 14:.2f}")
-                print(f"Balance: {balance:.2f}")
+                # print(f"Balance: {balance:.2f}")
                 # total_qty = calculate_dynamic_qty(symbol, risk_amount, latest['atr_bearish_multiplier'])
-                print(f"position size: {total_qty}")
+                # print(f"position size: {total_qty}")
                 # print(f"EMA7: {latest['EMA_7']:.6f}")
                 # print(f"EMA14: {latest['EMA_14']:.6f}")
                 # print(f"EMA28: {latest['EMA_28']:.6f}")
@@ -914,14 +910,17 @@ def run_bot():
                 # print(f"MacD trend up/down: {latest['macd_trending_up']}/{latest['macd_trending_down']} ({bias_macd_trend})")
                 # print(f"MacdD cross up/down: {latest['macd_cross_up']}/{latest['macd_cross_down']}")
                 bias_macd_hist = "Bullish" if latest['macd_histogram_increasing'] else "Bearish" if latest['macd_histogram_decreasing'] else "Neutral"
-                print(f"MacdD histogram increasing/decreasing: {latest['macd_histogram_increasing']}/{latest['macd_histogram_decreasing']} ({bias_macd_hist})")
-                di_diff = latest['+DI'] - latest['-DI']
-                bias_di_diff = "Bullish" if latest['Di_Diff'] > 0 else "Bearish" if latest['Di_Diff'] < 0 else "Neutral"
-                print(f"+DI/-DI: {latest['+DI']:.2f}/{latest['-DI']:.2f} - Diff: {latest['Di_Diff']:.2f} ({bias_di_diff})")
+                print(f"MacdD zone: {latest['macd_histogram']} - histogram diff: {latest['OSMA_Diff']} ({bias_macd_hist})")
+                # di_diff = latest['+DI'] - latest['-DI']
+                di_diff = latest['DI_Diff']
+                bias_di_diff = "Bullish" if latest['+DI'] > latest['-DI'] else "Bearish" if latest['+DI'] < latest['-DI'] else "Neutral"
+                print(f"+DI/-DI: {latest['+DI']:.2f}/{latest['-DI']:.2f} - Diff: {latest['DI_Diff']:.2f} ({bias_di_diff})")
                 # print(f"Bullish/Bearish DI: {latest['Bullish_DI']}/{latest['Bearish_DI']}")
                 power_diff = latest['Bulls'] - latest['Bears']
                 bias_power_diff = "Bullish" if power_diff > 0 else "Bearish" if power_diff < 0 else "Neutral"
                 print(f"Bulls Power/Bears Power: {latest['Bulls']:.6f}/{latest['Bears']:.6f} - Diff: {power_diff:.6f} ({bias_power_diff})")
+                # bias_osma_diff = "Bullish" if latest['OSMA_Diff'] > 0 else "Bearish" if latest['OSMA_Diff'] < 0 else "Neutral"
+                # print(f"OSMA zone: {latest['OSMA']} - Direction: {latest['OSMA_Diff']} ({bias_osma_diff})")
                 # bullish_diff = latest['Bulls'] - latest['Bears']
                 # bearish_diff = latest['Bears'] - latest['Bulls']
                 # bias_bullish_bearish_diff = "Bullish" if bullish_diff > 0.5 else "Bearish" if bearish_diff < -0.5 else "Neutral"
@@ -972,7 +971,7 @@ def run_bot():
                             print(f"[WARN] Failed to enter trade for {symbol}, skipping update.")
                             # continue
                         # Update last known signal
-                        previous_signals[symbol] = latest['signal']
+                        # previous_signals[symbol] = latest['signal']
                     else:
                         print("[INFO] Holding current position — no reversal needed.")
                         # update_trailing_sl(symbol, df['Close'].iloc[-1], df['ATR'].iloc[-1], latest['signal'], current_trade_info)
@@ -999,7 +998,7 @@ def run_bot():
                         # print(f"current_trade_info: {current_trade_info}")
                         # avg_pnl = calculate_avg_pnl(df, symbol)
                         # print(f"avg_pnl: {avg_pnl}")
-                        previous_signals[symbol] = latest['signal']
+                        # previous_signals[symbol] = latest['signal']
                 time.sleep(2)
             except Exception as e:
                 print(f"Error processing {symbol}: {e}")
