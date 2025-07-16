@@ -14,8 +14,13 @@ import time
 pd.set_option('future.no_silent_downcasting', True)
 
 # API setup
-api_key = ""
-api_secret = ""
+# Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
+# Bybit Demo API Key and Secret - 8g4j5EW0EehZEbIaRD - ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4
+# Bybit Testnet API Key and Secret - -
+# api_key = "wLqYZxlM27F01smJFS"
+# api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
+api_key = "8g4j5EW0EehZEbIaRD"
+api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 SYMBOLS = ["SHIB1000USDT", "XRPUSDT", "DOGEUSDT", "FARTCOINUSDT", "SUIUSDT",
            "HYPEUSDT", "INITUSDT", "BABYUSDT", "NILUSDT", "XAUTUSDT"]
@@ -86,6 +91,7 @@ def Bollinger_Bands(series, period=20, num_std=2):
     upper_band = sma + num_std * std
     lower_band = sma - num_std * std
     return upper_band, lower_band
+
 def ADX(df, period=14):
     """
     Returns +DI, -DI and ADX using Wilder's smoothing.
@@ -96,8 +102,16 @@ def ADX(df, period=14):
     close = df['Close']
 
     # --- directional movement -----------------------------------------
-    plus_dm  = (high.diff()  > low.diff())  * (high.diff()).clip(lower=0)
-    minus_dm = (low.diff()   > high.diff()) * (low.diff().abs()).clip(lower=0)
+    # plus_dm  = (high.diff()  > low.diff())  * (high.diff()).clip(lower=0)
+    # minus_dm = (low.diff()   > high.diff()) * (low.diff().abs()).clip(lower=0)̈́
+    up  =  high.diff()
+    dn  = -low.diff()
+
+    plus_dm_array  = np.where((up  >  dn) & (up  > 0),  up,  0.0)
+    minus_dm_array = np.where((dn  >  up) & (dn  > 0),  dn,  0.0)
+
+    plus_dm = pd.Series(plus_dm_array, index=df.index) # ← wrap
+    minus_dm = pd.Series(minus_dm_array, index=df.index) # ← wrap
 
     # --- true range ----------------------------------------------------
     tr = pd.concat([
@@ -238,7 +252,9 @@ def calculate_indicators(df):
     df['macd_cross_down'] = (df['macd_line'] < df['macd_signal']) & (df['macd_line'].shift(1) >= df['macd_signal'].shift(1))
     df['macd_signal_cross_up'] = (df['macd_signal'] > 0) & (df['macd_signal'].shift(1) <= 0)
     df['macd_signal_cross_down'] = (df['macd_signal'] < 0) & (df['macd_signal'].shift(1) >= 0)
-    df['macd_signal_diff'] = df['macd_line'].diff()
+    df['macd_signal_diff'] = df['macd_signal'].diff()
+    df['OSMA'] = df['macd_line'] - df['macd_signal']
+    df['OSMA_Diff'] = df['OSMA'].diff()
 
     # === MACD Trend Status ===
     df['macd_trending_up'] = df['macd_line'] > df['macd_signal']
@@ -260,21 +276,18 @@ def calculate_indicators(df):
 
     df['RSI'] = RSI(df['Close'], 14)
     adx, plus_di, minus_di = ADX(df)
-    df['ADX'] = adx
-    df['+DI'] = plus_di
-    df['-DI'] = minus_di
+    df['ADX'], df['+DI'], df['-DI'] = ADX(df)
     df['DI_Diff'] = (df['+DI'] - df['-DI']).abs()
 
-    df['Bulls'] = df['High'] - df['Close'].shift(1)
-    df['Bears'] = df['Close'].shift(1) - df['Low']
+    df['Bulls'] = BullsPower(df)     # High – EMA(close, 13)
+    df['Bears'] = BearsPower(df)     # Low  – EMA(close, 13)
+    # df['Bulls'] = df['High'] - df['Close']
+    # df['Bears'] = df['Close'] - df['Low']
     # df['Bullish_DI'] = df['Bulls'] - df['Bears']
     # df['Bullish_DI'] = df['+DI'] - df['-DI']
     # df['Bearish_DI'] = df['-DI'] - df['+DI']
     # df['Bull_Bear_Diff'] = (df['Bulls'] - df['Bears']) / df['ATR']
     df['Bull_Bear_Diff'] = (df['Bulls'] - df['Bears'])
-
-    df['OSMA'] = df['macd_line'] - df['macd_signal']
-    df['OSMA_Diff'] = df['OSMA'].diff()
 
     df = SAR(df)
 
@@ -334,15 +347,13 @@ def generate_signals(df):
         # -------------- directional logic -----------------------------
         if (latest.macd_signal_diff > 0 and
             latest['+DI'] > latest['-DI'] and
-            latest.Bull_Bear_Diff > 0 and
             latest.OSMA_Diff > 0):
-            signals[i] = "Buy"
+            signal = "Buy"
 
         elif (latest.macd_signal_diff < 0 and
-              latest['+DI'] < latest['-DI'] and
-              latest.Bull_Bear_Diff < 0 and
-              latest.OSMA_Diff < 0):
-            signals[i] = "Sell"
+            latest['+DI'] < latest['-DI'] and
+            latest.OSMA_Diff < 0):
+            signal = "Sell"
 
     df["signal"] = signals
     return df["signal"]
@@ -851,6 +862,15 @@ def run_bot():
                         trade_info = enter_trade(latest['signal'], df, symbol, risk_pct)
                         if trade_info:
                             print(f"[TRADE] Reversed position to {latest['signal']}")
+                            # counters["totals"][this_mode] += 1
+                            # save_counters(counters)                 # persist immediately
+                            # count_str = ", ".join(f"{k}:{v}" for k, v in counters["totals"].items())
+                            # msg = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {symbol}  "
+                            #        f"{this_mode.upper()}  #{counters['totals'][this_mode]}/5  "
+                            #        f"Totals → {count_str}\n")
+                            # with open(LOG_FILE, "a") as log:
+                            #         log.write(msg)
+                            #         print(msg.strip())
                             current_trade_info = trade_info
                         else:
                             print(f"[WARN] Failed to enter trade for {symbol}, skipping update.")
