@@ -14,13 +14,8 @@ import time
 pd.set_option('future.no_silent_downcasting', True)
 
 # API setup
-# Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
-# Bybit Demo API Key and Secret - 8g4j5EW0EehZEbIaRD - ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4
-# Bybit Testnet API Key and Secret - -
-# api_key = "wLqYZxlM27F01smJFS"
-# api_secret = "tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7"
-api_key = "8g4j5EW0EehZEbIaRD"
-api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
+api_key = ""
+api_secret = ""
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 SYMBOLS = ["SHIB1000USDT", "XRPUSDT", "DOGEUSDT", "FARTCOINUSDT", "SUIUSDT",
            "HYPEUSDT", "INITUSDT", "BABYUSDT", "NILUSDT", "XAUTUSDT"]
@@ -90,7 +85,7 @@ def Bollinger_Bands(series, period=20, num_std=2):
     std = series.rolling(window=period).std()
     upper_band = sma + num_std * std
     lower_band = sma - num_std * std
-    return upper_band, lower_band
+    return upper_band, lower_band, sma
 
 def ADX(df, period=14):
     """
@@ -138,97 +133,6 @@ def BearsPower(df, period=13):
     ema = EMA(df['Close'], period)
     return df['Low'] - ema
 
-def Momentum(series, period=10):
-    return series - series.shift(period)
-
-def SAR(df: pd.DataFrame,
-        step: float = 0.02,
-        max_step: float = 0.2) -> pd.DataFrame:
-    """
-    Adds column 'sar' (Parabolic SAR) to df and returns df.
-
-    Parameters
-    ----------
-    step : float
-        AF increment (default 0.02)
-    max_step : float
-        Maximum AF (default 0.2)
-    """
-    high, low = df['High'].values, df['Low'].values
-    n = len(df)
-    sar = np.zeros(n)
-
-    # Initialisation
-    trend = 1                    # 1 = up, -1 = down
-    sar[0] = low[0]              # seed with first low
-    ep = high[0]                 # extreme point
-    af = step
-
-    for i in range(1, n):
-        # 1) tentative SAR
-        sar[i] = sar[i-1] + af * (ep - sar[i-1])
-
-        # 2) keep SAR on the correct side of price
-        if trend == 1:
-            sar[i] = min(sar[i], low[i-1], low[i-2] if i > 1 else sar[i])
-        else:
-            sar[i] = max(sar[i], high[i-1], high[i-2] if i > 1 else sar[i])
-
-        # 3) trend‑flip checks
-        if trend == 1:
-            if low[i] < sar[i]:                 # bullish → bearish flip
-                trend = -1
-                sar[i] = ep                     # reset SAR to last EP
-                ep = low[i]
-                af = step
-            else:                               # still bullish
-                if high[i] > ep:
-                    ep = high[i]
-                    af = min(af + step, max_step)
-        else:
-            if high[i] > sar[i]:                # bearish → bullish flip
-                trend = 1
-                sar[i] = ep
-                ep = high[i]
-                af = step
-            else:                               # still bearish
-                if low[i] < ep:
-                    ep = low[i]
-                    af = min(af + step, max_step)
-
-    df['SAR'] = sar
-    return df
-def Fractals(df: pd.DataFrame,
-             window: int = 2) -> pd.DataFrame:
-    """
-    Adds columns 'fractal_high' and 'fractal_low' to df.
-    A 5‑bar fractal uses window=2 (2 bars on each side of the pivot).
-
-    Parameters
-    ----------
-    window : int
-        Half‑window size. 2 → 5‑bar, 3 → 7‑bar, etc.
-    """
-    h, l = df['High'], df['Low']
-    w = window
-
-    high_mask = (
-        (h.shift(w) > h.shift(w+1)) &
-        (h.shift(w) > h.shift(w+2)) &
-        (h.shift(w) > h.shift(w-1)) &
-        (h.shift(w) > h)
-    )
-
-    low_mask = (
-        (l.shift(w) < l.shift(w+1)) &
-        (l.shift(w) < l.shift(w+2)) &
-        (l.shift(w) < l.shift(w-1)) &
-        (l.shift(w) < l)
-    )
-
-    df['Fractal_High'] = high_mask.shift(-w).fillna(False).infer_objects().astype(bool)
-    df['Fractal_Low']  = low_mask.shift(-w).fillna(False).infer_objects().astype(bool)
-    return df
 def calculate_indicators(df):
     # df.dropna(inplace=True)
     df['EMA_7'] = df['Close'].ewm(span=7).mean()
@@ -262,17 +166,14 @@ def calculate_indicators(df):
     df['macd_histogram_increasing'] = df['macd_histogram'].diff() > 0
     df['macd_histogram_decreasing'] = df['macd_histogram'].diff() < 0
 
-    df['bb_upper'], df['bb_lower'] = Bollinger_Bands(df['Close'])
+    df['bb_upper'], df['bb_lower'], df['bb_sma'] = Bollinger_Bands(df['Close'])
+    df['bb_sma_pos'] = (df['Close'] >= df['bb_sma']).astype(int)
 
     # df['Momentum'] = df['Close'] - df['Close'].shift(10)
     # Custom momentum (% of recent high-low range)
     high_14 = df['High'].rolling(window=14).max()
     low_14 = df['Low'].rolling(window=14).min()
     price_range = high_14 - low_14
-    df['Momentum'] = 100 * (df['Close'] - df['Close'].shift(14)) / price_range
-    # Momentum trend signals: compare current Momentum with previous
-    df['Momentum_increasing'] = df['Momentum'] > df['Momentum'].shift(2)
-    df['Momentum_decreasing'] = df['Momentum'] < df['Momentum'].shift(2)
 
     df['RSI'] = RSI(df['Close'], 14)
     adx, plus_di, minus_di = ADX(df)
@@ -281,19 +182,6 @@ def calculate_indicators(df):
 
     df['Bulls'] = BullsPower(df)     # High – EMA(close, 13)
     df['Bears'] = BearsPower(df)     # Low  – EMA(close, 13)
-    # df['Bulls'] = df['High'] - df['Close']
-    # df['Bears'] = df['Close'] - df['Low']
-    # df['Bullish_DI'] = df['Bulls'] - df['Bears']
-    # df['Bullish_DI'] = df['+DI'] - df['-DI']
-    # df['Bearish_DI'] = df['-DI'] - df['+DI']
-    # df['Bull_Bear_Diff'] = (df['Bulls'] - df['Bears']) / df['ATR']
-    df['Bull_Bear_Diff'] = (df['Bulls'] - df['Bears'])
-
-    df = SAR(df)
-
-    df = Fractals(df)
-
-    # df[]
 
     return df
 
@@ -345,15 +233,26 @@ def generate_signals(df):
             continue
 
         # -------------- directional logic -----------------------------
-        if (latest.macd_signal_diff > 0 and
-            latest['+DI'] > latest['-DI'] and
-            latest.OSMA_Diff > 0):
-            signal = "Buy"
+        # if (latest.macd_signal_diff > 0 and
+        #     latest.Close > latest.bb_sma and
+        #     latest['+DI'] > latest['-DI'] and
+        #     latest.Bulls > 0 and
+        #     latest.OSMA_Diff > 0):
+        # if (latest.Close > latest.bb_sma and
+        #     latest["+DI"] > latest["-DI"] and
+        #     latest.OSMA_Diff > 0):
+        # if latest.Close > latest.bb_sma:
+        # if (latest.Bulls > 0 and latest.Bears > 0):
+        if latest.macd_line > latest.macd_signal:
+            signals[i] = "Buy"
 
-        elif (latest.macd_signal_diff < 0 and
-            latest['+DI'] < latest['-DI'] and
-            latest.OSMA_Diff < 0):
-            signal = "Sell"
+        # elif latest.Close < latest.bb_sma:
+        # elif (latest.Close < latest.bb_sma and
+        #     latest["+DI"] < latest["-DI"] and
+        #     latest.OSMA_Diff < 0):
+        # elif (latest.Bulls < 0 and latest.Bears < 0):
+        if latest.macd_line < latest.macd_signal:
+            signals[i] = "Sell"
 
     df["signal"] = signals
     return df["signal"]
@@ -412,7 +311,6 @@ def calc_order_qty(risk_amount: float,
     # 5️⃣  Cast once for the API
     return float(qty)
 
-# ---------------------------------------------------------------------
 def round_qty(symbol, qty, mark_price):
     # Simple static example; ideally fetch from exchange info
     step, min_qty = get_qty_step(symbol)
@@ -428,46 +326,47 @@ def place_sl_and_tp(symbol, side, entry_price, atr, qty):
     """
     SL at 1.5×ATR.
     Four TP limits at Fibonacci ratios < 1 of a 3×ATR base distance.
+    Or four TP limits at [1.5, 2.5, 3.5, 4.5] × ATR
     """
     # fib_levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618]
-    fib = [0.236, 0.382, 0.5, 0.618]      # ratios < 1
-    base = atr_tp_multiplier * atr
-    tp_distances = [base * f for f in fib]
-    # tp_levels = [
-    #     1.5,
-    #     2.5,
-    #     3.5,
-    #     4.5
-    # ]
+    # fib = [0.236, 0.382, 0.5, 0.618]      # ratios < 1
+    # base = atr_tp_multiplier * atr
+    # tp_distances = [base * f for f in fib]
+    tp_levels = [
+        0.5,
+        1.0,
+        1.5,
+        2.0
+    ]
 
     orders = {'sl': None, 'tp': []}
 
     # ───────── Stop‑loss (1.5×ATR) ─────────
-    sl_price = entry_price - atr_sl_multiplier * atr if side == "Buy" else entry_price + atr_sl_multiplier * atr
-    try:
-        orders['sl'] = session.set_trading_stop(
-            category="linear",
-            symbol=symbol,
-            side=side,
-            stop_loss=str(round(sl_price, 6))
-        )
-        if orders['sl'].get('retCode') == 0:
-            print(f"[{symbol}] SL placed @ {sl_price:.6f}")
-        else:
-            print(f"[{symbol}] SL failed: {orders['sl']}")
-    except Exception as e:
-        if "ErrCode: 10001" not in str(e):
-            print(f"[{symbol}] SL exception: {e}")
+    # sl_price = entry_price - atr_sl_multiplier * atr if side == "Buy" else entry_price + atr_sl_multiplier * atr
+    # try:
+    #     orders['sl'] = session.set_trading_stop(
+    #         category="linear",
+    #         symbol=symbol,
+    #         side=side,
+    #         stop_loss=str(round(sl_price, 6))
+    #     )
+    #     if orders['sl'].get('retCode') == 0:
+    #         print(f"[{symbol}] SL placed @ {sl_price:.6f}")
+    #     else:
+    #         print(f"[{symbol}] SL failed: {orders['sl']}")
+    # except Exception as e:
+    #     if "ErrCode: 10001" not in str(e):
+    #         print(f"[{symbol}] SL exception: {e}")
 
     # ───────── Take‑profits ─────────
     qty_split = [qty * 0.4, qty * 0.2, qty * 0.2, qty * 0.2]
     tp_side = "Sell" if side == "Buy" else "Buy"
 
-    for i, dist in enumerate(tp_distances):
-    # for i, dist in enumerate(tp_levels):
+    # for i, dist in enumerate(tp_distances):
+    for i, dist in enumerate(tp_levels):
         try:
             # tp_price = entry_price + dist * atr if side == "Buy" else entry_price - dist * atr
-            tp_price = entry_price + dist if side == "Buy" else entry_price - dist
+            tp_price = entry_price + dist * atr if side == "Buy" else entry_price - dist * atr
             rounded_qty = round_qty(symbol, qty_split[i], entry_price)
             # rounded_qty = round(qty_split[i], 6)
 
@@ -831,9 +730,11 @@ def run_bot():
                 di_diff = latest['DI_Diff']
                 bias_di_diff = "Bullish" if latest['+DI'] > latest['-DI'] else "Bearish" if latest['+DI'] < latest['-DI'] else "Neutral"
                 print(f"+DI/-DI: {latest['+DI']:.2f}/{latest['-DI']:.2f} - Diff: {latest['DI_Diff']:.2f} ({bias_di_diff})")
-                power_diff = latest['Bulls'] - latest['Bears']
-                bias_power_diff = "Bullish" if power_diff > 0 else "Bearish" if power_diff < 0 else "Neutral"
-                print(f"Bulls Power/Bears Power: {latest['Bulls']:.6f}/{latest['Bears']:.6f} - Diff: {power_diff:.6f} ({bias_power_diff})")
+                # power_diff = latest['Bulls'] - latest['Bears']
+                # bias_power_diff = "Bullish" if power_diff > 0 else "Bearish" if power_diff < 0 else "Neutral"
+                # print(f"Bulls Power/Bears Power: {latest['Bulls']:.6f}/{latest['Bears']:.6f} - Diff: {power_diff:.6f} ({bias_power_diff})")
+                bias_price_sma = "Bullish" if latest.Close > latest.bb_sma else "Bearish" if latest.Close < latest.bb_sma else "Neutral"
+                print(f"Price bullish or bearish according to BB SMA and price: {bias_price_sma}")
                 # print(f"Trade Qty (calculated): {total_qty}")
                 # print(f"Balance: {balance:.2f}")
                 position = get_position(symbol)
