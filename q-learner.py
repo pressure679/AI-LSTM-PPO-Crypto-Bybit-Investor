@@ -108,14 +108,6 @@ def ADX(df, period=14):
 
     return adx, plus_di, minus_di
 
-def BullsPower(df, period=13):
-    ema = EMA(df['Close'], period)
-    return df['High'] - ema
-
-def BearsPower(df, period=13):
-    ema = EMA(df['Close'], period)
-    return df['Low'] - ema
-
 def add_indicators(df):
     df['EMA_7'] = df['Close'].ewm(span=7).mean()
     df['EMA_14'] = df['Close'].ewm(span=14).mean()
@@ -147,12 +139,6 @@ def add_indicators(df):
     df['ADX'], df['+DI'], df['-DI'] = ADX(df)
     df['DI_Diff'] = (df['+DI'] - df['-DI']).abs()
 
-    df['Bulls'] = BullsPower(df)     # High – EMA(close, 13)
-    df['Bears'] = BearsPower(df)     # Low  – EMA(close, 13)
-
-    df['OSMA'] = df['macd_line'] - df['macd_signal']
-    df['OSMA_Diff'] = df['OSMA'].diff()
-
     df.dropna(inplace=True)
     return df
 
@@ -178,7 +164,7 @@ def encode_state(row):
     adx_zone = 0 if row['ADX'] < 20 else 2 if row['ADX'] > 40 else 1
 
     # 6) MACD trend (fast > signal?)
-    osma_diff = 0 if row['OSMA_Diff'] < 0 else 1
+    macd_histogram_diff = 0 if row['macd_histogram_diff'] < 0 else 1
 
     # 7) DI_Diff bucket (trend strength)
     di_bucket = 0 if row['DI_Diff'] < 0 else 1
@@ -197,9 +183,8 @@ def encode_state(row):
         bb_zone,              # 0 / 1 / 2
         rsi_zone,             # 0 / 1 / 2
         adx_zone,             # 0 / 1 / 2
-        osma_diff,            # 0 / 1
+        macd_histogram_diff,  # 0 / 1
         di_bucket,            # 0 / 1 / 2
-        bulls_bears,          # 0 / 1
         macd_trend,
         macd_direction
     )
