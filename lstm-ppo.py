@@ -1,29 +1,63 @@
-import os, math, time
-from io import StringIO
-import numpy as np
 import pandas as pd
-from pybit.unified_trading import HTTP
+import numpy as np
+import os
+import pickle
+from io import StringIO
+import random
 from collections import deque
-import torch, torch.nn as nn, torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
-from torch.distributions import Categorical
-from sklearn.neighbors import NearestNeighbors
-from sklearn.preprocessing import StandardScaler
-import yfinance
 from datetime import datetime, timedelta
+import requests
+import threading
+import time
+from decimal import Decimal
+import yfinance as yf
+from pybit.unified_trading import HTTP
 
-# CSV_PATH = "/mnt/chromeos/removable/SD Card/Linux-shared-files/crypto and currency pairs/BTCUSD_1m_Binance.csv"
-yf_symbols = ["BNB-USD", "ETH-USD", "XRP-USD", "BTC-USD", "XAUUSD=X"]
-bybit_symbols = ["BNBUSDT", "ETHUSDT", "XRPUSDT", "BTCUSDT", "XAUUSDT"]
-symbols = ["BNBUSD", "ETHUSD", "XRPUSD", "BTCUSD", "XAUUSD"]
+# Popular crypto: "DOGEUSDT", "HYPEUSDT", "FARTCOINUSDT", "SUIUSDT", "INITUSDT", "BABYUSDT", "NILUSDT"
+yf_symbols = ["BTC-USD", "BNB-USD", "ETH-USD", "XRP-USD", "XAUUSD=X"]
+bybit_symbols = ["BTCUSDT", "BNBUSDT", "ETHUSDT", "XRPUSDT", "XAUTUSDT"]
+symbols = ["BTCUSD", "BNBUSD", "ETHUSD", "XRPUSD", "XAUUSD"]
+# Q_TABLE_PATH = "260625-q-learner-lstm-trading-bot-q_table.pkl"
 
-scaler = StandardScaler()
-knn_memory = []
+ACTIONS = ['hold', 'long', 'short', 'close']
+Q = {}
+alpha = 0.1
+gamma = 0.95
+epsilon = 0.1
 
-# ------------------------------------------------------------------#
-# DATA LOADING & INDICATORS
-# ------------------------------------------------------------------#
-def fetch_recent_data_for_training(symbol, checkpoint_dir="checkpoints"):
+def load_last_mb(filepath, symbol, mb_size=20):
+    # Search for a file containing the symbol in its name
+    matching_files = [f for f in os.listdir(filepath) if symbol.lower() in f.lower()]
+    if not matching_files:
+        raise FileNotFoundError(f"No file containing '{symbol}' found in {filepath}")
+    
+    # Use the first matching file
+    fp = os.path.join(filepath, matching_files[0])
+    bytes_to_read = mb_size * 1024 * 1024
+
+    with open(fp, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        start = max(0, f.tell() - bytes_to_read)
+        f.seek(start)
+        data = f.read().decode("utf-8", errors="ignore")
+
+    lines = data.split("\n")[1:] if start else data.split("\n")
+    df = pd.read_csv(StringIO("\n".join([l for l in lines if l.strip()])), header=None)
+    
+    df.columns = [
+        "Open time", "Open", "High", "Low", "Close", "Volume", "Close time",
+        "Quote asset vol", "Trades", "Taker buy base", "Taker buy quote", "Ignore"
+    ]
+
+    # Convert 'Open time' to datetime and set as index
+    df['Open time'] = pd.to_datetime(df['Open time'])
+    df.set_index('Open time', inplace=True)
+
+    # Keep only OHLC columns
+    df = df[['Open', 'High', 'Low', 'Close']].copy()
+
+    return df
+def yf_get_ohlc_df(symbol, checkpoint_dir="/mnt/chromeos/removable/sd_card/LSTM-DQN-checkpoints"):
     os.makedirs(checkpoint_dir, exist_ok=True)
     results = {}
 
@@ -33,7 +67,6 @@ def fetch_recent_data_for_training(symbol, checkpoint_dir="checkpoints"):
         f for f in os.listdir(checkpoint_dir)
         if f.endswith(".checkpoint.lstm-ppo.pt") and f"-{symbol_safe}." in f
     ]
-
 
     needs_training = True
     for file in checkpoint_files:
@@ -49,7 +82,6 @@ def fetch_recent_data_for_training(symbol, checkpoint_dir="checkpoints"):
     if not needs_training:
         return None
         # continue
-
 
     print(f"⬇️ Fetching new data for {symbol} (no recent checkpoint found)...")
     df = yf.download(symbol, period="3mo", interval="1m")
@@ -96,9 +128,9 @@ def MACD(series, fast=12, slow=26, signal=9):
     histogram = macd_line - signal_line
     return macd_line, signal_line, histogram
 
-def Bollinger_Bands(series, period=20, num_std=2):
-    sma = series.rolling(window=period).mean()
-    std = series.rolling(window=period).std()
+def Bollinger_Bands(df, period=20, num_std=2):
+    sma = df.rolling(window=period).mean()
+    std = df.rolling(window=period).std()
     upper_band = sma + num_std * std
     lower_band = sma - num_std * std
     return sma, upper_band, lower_band
@@ -158,36 +190,43 @@ def get_klines_df(symbol, interval, limit=240):
     df["Low"] = df["Low"].astype(float)
     df["Close"] = df["Close"].astype(float)
     df["Volume"] = df["Volume"].astype(float)
-    df["Timestamp"] = pd.to_datetime(df["Timestamp"].astype(np.int64), unit='ms')
+    # df["Timestamp"] = pd.to_datetime(df["Timestamp"].astype(np.int64), unit='ms')
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"], unit='ms')
 
     return df
 
 def add_indicators(df):
+    df['EMA_7'] = df['Close'].ewm(span=7).mean()
+    df['EMA_14'] = df['Close'].ewm(span=14).mean()
+    df['EMA_28'] = df['Close'].ewm(span=28).mean()
+
+    df['H-L'] = df['High'] - df['Low']
+    df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
+    df['L-PC'] = abs(df['Low'] - df['Close'].shift(1))
+    tr = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+    df['ATR'] = tr.rolling(window=14).mean()
+
     df['macd_line'], df['macd_signal'], df['macd_histogram'] = MACD(df['Close'])
     df['macd_signal_diff'] = df['macd_signal'].diff()
+    # df['macd_signal_angle_deg'] = np.degrees(np.arctan(df['macd_signal_diff']))
     # df['macd_histogram_diff'] = df['macd_histogram'].diff()
-    # df['macd_zone'] = np.where(df['macd_line'] < df['macd_signal'], 0, 1)
-    # df['macd_direction'] = np.where(df['macd_signal_diff'] < 0, 0, 1)
 
     # df['bb_sma'], df['bb_upper'], df['bb_lower'] = Bollinger_Bands(df['Close'])
-    # df['bb_zone'] = np.where(df['Close'] < df['bb_sma'], 0, 1)
+    # df['bb_sma_pos'] = (df['Close'] >= df['bb_sma']).astype(int)
 
-    df['ATR'] = ATR(df)
+    # Custom momentum (% of recent high-low range)
+    high_14 = df['High'].rolling(window=14).max()
+    low_14 = df['Low'].rolling(window=14).min()
+    price_range = high_14 - low_14
 
     df['RSI'] = RSI(df['Close'], 14)
-    # df['RSI_zone'] = np.where(df['RSI'] < 30, 0, np.where(df['RSI'] > 70, 2, 1))
-
     df['ADX'], df['+DI'], df['-DI'] = ADX(df)
-    # df['adx_zone'] = np.where(df['ADX'] < 20, 0, np.where(df['ADX'] > 40, 2, 1))
+    # df['DI_Diff'] = (df['+DI'] - df['-DI']).abs()
 
-    df['DI_Diff'] = (df['+DI'] - df['-DI']).abs()
-    # df['DI_direction'] = np.where(df['+DI'] > df['-DI'], 1, 0)
+    df['Bulls'] = BullsPower(df)
+    df['Bears'] = BearsPower(df)
 
-    # df['Bulls'] = BullsPower(df)
-    # df['Bears'] = BearsPower(df)
-    # df['bulls_bears'] = np.where(df['Bulls'] > df['Bears'], 1, 0)
-
-    df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_histogram", "RSI", "ADX", "+DI", "-DI"]].copy()
+    df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_histogram", "RSI", "ADX", "Bulls", "Bears", "+DI", "-DI"]].copy()
 
     df.dropna(inplace=True)
     return df
@@ -202,7 +241,7 @@ def keep_session_alive(symbol):
             print(f"[WARN] Timeout on attempt {attempt+1}, retrying...")
             time.sleep(2)  # wait before retry
         finally:
-            threading.Timer(1500, keep_session_alive, args(symbol,)).start()  # Schedule next call
+            threading.Timer(1500, keep_session_alive, args=(symbol,)).start()  # Schedule next call
 
 def get_balance():
     """
@@ -231,6 +270,7 @@ def get_qty_step(symbol):
     step = float(data["lotSizeFilter"]["qtyStep"])
     min_qty = float(data["lotSizeFilter"]["minOrderQty"])
     return step, min_qty
+
 def calc_order_qty(risk_amount: float,
                    entry_price: float,
                    min_qty: float,
@@ -259,519 +299,686 @@ def calc_order_qty(risk_amount: float,
     return float(qty)
 
 
-def store_trade_result(obs_vector, pnl, side):
-    global knn_memory
-    side_val = 1 if side == "Buy" else -1
-    outcome = 1 if pnl > 0 else 0
-    input_vector = np.append(obs_vector, side_val)
-    knn_memory.append((input_vector, outcome))
+# === LSTM Implementation (Minimal, NumPy only) ===
+class LSTM:
+    def __init__(self, input_size, hidden_size):
+        self.input_size = input_size
+        self.hidden_size = hidden_size
 
-    # Optional: limit memory to prevent bloat
-    if len(knn_memory) > 10000:
-        knn_memory.pop(0)
+        # Initialize weights
+        self.Wf = np.random.randn(hidden_size, input_size + hidden_size)
+        self.bf = np.zeros((hidden_size,))
 
-def should_take_trade(current_obs, side, k=50, threshold=0.8):
-    global knn_memory
-    if len(knn_memory) < 1000:
-        return True  # not enough data to make a reliable prediction
-    side_val = 1 if side == "Buy" else -1
-    obs_with_side = np.append(current_obs, side_val)
+        self.Wi = np.random.randn(hidden_size, input_size + hidden_size)
+        self.bi = np.zeros((hidden_size,))
 
-    # Load features and labels
-    X = np.array([v for v, _ in memory])
-    y = np.array([o for _, o in memory])
+        self.Wc = np.random.randn(hidden_size, input_size + hidden_size)
+        self.bc = np.zeros((hidden_size,))
 
-    # Scale and fit
-    X_scaled = scaler.fit_transform(X)
-    obs_scaled = scaler.transform([obs_with_side])
+        self.Wo = np.random.randn(hidden_size, input_size + hidden_size)
+        self.bo = np.zeros((hidden_size,))
 
-    knn = NearestNeighbors(n_neighbors=k)
-    knn.fit(X_scaled)
+    def forward(self, inputs):
+        h = np.zeros((self.hidden_size, 1))
+        c = np.zeros((self.hidden_size, 1))
 
-    distances, indices = knn.kneighbors(obs_scaled)
-    neighbor_outcomes = y[indices[0]]
-    win_rate = np.mean(neighbor_outcomes)
+        for x in inputs:
+            x = np.array(x)
+            concat = np.concatenate([h, x])
 
-    return win_rate >= threshold
+            f = self._sigmoid(np.dot(self.Wf, concat) + self.bf)
+            i = self._sigmoid(np.dot(self.Wi, concat) + self.bi)
+            o = self._sigmoid(np.dot(self.Wo, concat) + self.bo)
+            c_tilde = np.tanh(np.dot(self.Wc, concat) + self.bc)
 
-def save_knn_memory(symbol, date_str):
-    global knn_memory
-    filename = f"{symbol}-{date_str}.KNN.pt"
-    torch.save(knn_memory, filename)
+            c = f * c + i * c_tilde
+            h = o * np.tanh(c)
 
-def load_knn_memory(symbol):
-    global knn_memory
-    filename = f"{symbol}-{date_str}.KNN.pt"
-    try:
-        knn_memory = torch.load(filename)
-        print(f"[KNN] Memory loaded: {len(knn_memory)} entries from {filename}")
-    except FileNotFoundError:
-        print(f"[KNN] Memory file not found: {filename}")
-        knn_memory = []
+        return h  # Final hidden state
+
+    def _sigmoid(self, x):
+        x = np.clip(x, -500, 500)  # prevents overflow
+        return 1 / (1 + np.exp(-x))
+        # return 1 / (1 + np.exp(-x))
+        # return np.where(x >= 0,
+        #                 1 / (1 + np.exp(-x)),
+        #                 np.exp(x) / (1 + np.exp(x)))
+
+# === Q-Learner ===
+class QLearner:
+    def __init__(self, n_actions, alpha=0.1, gamma=0.95, epsilon=0.1):
+        self.q_table = defaultdict(lambda: np.zeros(n_actions))
+        self.alpha = alpha
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.n_actions = n_actions
+
+    def get_action(self, state_key):
+        if np.random.rand() < self.epsilon:
+            return np.random.randint(self.n_actions)
+        return np.argmax(self.q_table[state_key])
+
+    def update(self, state_key, action, reward, next_state_key):
+        q_old = self.q_table[state_key][action]
+        q_next = np.max(self.q_table[next_state_key])
+        self.q_table[state_key][action] = q_old + self.alpha * (reward + self.gamma * q_next - q_old)
 
 
-class TradingEnv:
-    FEATURES = [
-        "Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_histogram", "RSI", "ADX", "+DI", "-DI"
-    ]
-
-    def __init__(self, df,
-                 window=30,
-                 start_balance=1000.0,
-                 fee=0.0089,
-                 leverage=50,
-                 pos_fraction=0.05):
-        self.df = df.reset_index(drop=True)
-        self.window = window
-        self.leverage = leverage
-        self.pos_frac = pos_fraction
-        self.fee = fee
-        # self.target_pct = profit_target_pct
-        self.feat_dim = len(self.FEATURES)
-        self.start_bal = start_balance
-        self.reset()
-
-    # ------------------------------------------------------------
-    def reset(self):
-        self.idx = 0
-        self.done = False
-        self.position = 0
-        self.entry_price = 0.0
-        self.qty = 0.0
-        self.balance = self.start_bal
-        self.peak_balance = self.start_bal
-
-        z = np.zeros(self.feat_dim, dtype=np.float32)
-        self.buffer = deque([z.copy() for _ in range(self.window)],
-                            maxlen=self.window)
-        return self._obs()
-
-    def _push_obs(self):
-        row = self.df.iloc[self.idx]
-        if self.position != 0:
-            pct_move = (row['Close'] - self.entry_price) / self.entry_price
-            if self.position == -1:  # if short, invert move
-                pct_move = -pct_move
-            upnl_ratio = (pct_move * self.qty * self.leverage) / self.qty
-        else:
-            upnl_ratio = 0.0
-        # vec = np.append(row[self.FEATURES].values, [self.position, upnl_ratio]).astype(np.float32)
-        vec = row[self.FEATURES].values.astype(np.float32)
-        self.buffer.append(vec)
-
-    def _obs(self):
-        self._push_obs()
-        return torch.tensor(np.stack(self.buffer), dtype=torch.float32)
-
-    def step(self, action:int):
-        price = float(self.df.Close.iloc[self.idx])
-        atr   = float(self.df.ATR  .iloc[self.idx])
-        reward = 0.0
-        current_vec = self.buffer[-1]
-
-        if self.position == 1:  # Long
-            if price <= self.sl_price or price >= self.tp_price:
-                self._close_pos(price)
-
-        elif self.position == -1:  # Short
-            if price >= self.sl_price or price <= self.tp_price:
-                self._close_pos(price)
-
-        if action == 1 and self.position == 0:
-            # side = "Buy" if action == 1 else "Sell" if action == 2
-            if should_take_trade(self.buffer[-1], "Buy"):
-                self._open_pos(+1, price, atr)
-        elif action == 2 and self.position == 0:
-            # side = "Buy" if action == 1 else "Sell" if action == 2
-            if should_take_trade(self.buffer[-1], "Sell"):
-                self._open_pos(-1, price, atr)
-        elif action == 3 and self.position != 0:
-            
-            reward = self._close_pos(price) 
-        # action==0: hold
-
-        self.idx += 1
-        if self.idx >= len(self.df) - 1:
-            self.done = True
-            
-        return self._obs(), reward, self.done, {"balance": self.balance}
-
-    def _open_pos(self, side:int, price:float, atr:float):
-        """
-        side : +1 (long) or -1 (short)
-        price: entry price
-        atr  : current ATR value (must be finite & >0)
-        """
-        # -------- SL / TP distances -------------------------------
-        # sl_dist = atr * 1.5
-        # tp_dist = atr * 3.0
-
-        equity_dd     = (self.peak_balance - self.balance) / self.peak_balance
-        eff_frac      = self.pos_frac * max(1.0, 1.0 + equity_dd)  # risk up in DD
-        risk_dollar   = self.balance * eff_frac
-        self.qty      = max(risk_dollar, 15)               # enforce min size
-
-        self.position    = side
-        self.entry_price = price
-        # if side == 1:
-        #     self.sl_price = price - sl_dist
-        #     self.tp_price = price + tp_dist
-        # else:
-        #     self.sl_price = price + sl_dist
-        #     self.tp_price = price - tp_dist
-        #     self.balance -= self.fee
-        self.balance -= self.fee
+class LSTM_QAgent:
+    def __init__(self, state_size, action_size, symbol, hidden_size=64, lr=0.001, gamma=0.95):
+        self.symbol = symbol
+        self.checkpoint_dir = "/mnt/chromeos/removable/sd_card/LSTM-DQN-checkpoint"
         
-    def _close_pos(self, price:float):
-        pct_move = (price - self.entry_price) / self.entry_price
-        pnl      = pct_move * self.qty * self.leverage * (1 if self.position==1 else -1)
-        self.balance += pnl - self.fee
-        # reward = pnl / self.qty
-        side = "Buy" if self.position == 1 else "Sell"
-        # store_trade_result(obs_vector, pnl, side)
-        store_trade_result(obs_vector, pnl, side)
-        reward = pct_move
+        self.state_size = state_size
+        self.action_size = action_size
+        self.hidden_size = hidden_size
+        self.lr = lr
+        self.gamma = gamma
 
-        self.position = 0
-        self.entry_price = self.qty = 0.0
-        self.sl_price = self.tp_price = np.nan
-        return reward
+        self.memory = []
+        self.batch_size = 64
+        self.max_memory_size = 10000
 
-class LSTMPolicy(nn.Module):
-    def __init__(self, input_dim=8, hidden_dim=64, action_dim=4):
-        super().__init__()
-        self.hidden_dim = hidden_dim
-        self.lstm   = nn.LSTM(input_dim, hidden_dim, batch_first=True)
-        self.actor  = nn.Linear(hidden_dim, action_dim)
-        self.critic = nn.Linear(hidden_dim, 1)
+        self.epsilon = 1.0
+        self.epsilon_decay = 0.995
+        self.epsilon_min = 0.05
 
-    def reset_hidden(self, batch_size=1, device="cpu"):
-        h0 = torch.zeros(1, batch_size, self.hidden_dim, device=device)
-        c0 = torch.zeros(1, batch_size, self.hidden_dim, device=device)
-        return (h0, c0)
+        # Initialize primary and target LSTM networks
+        self.model = self.build_model()
+        self.target_model = self.build_model()
 
-    def forward(self, x, hidden=None):
-        """
-        x shape accepted:
-          • (batch, seq_len, feat)   — normal batched input
-          • (seq_len, feat)          — single trajectory (adds batch dim)
-        """
-        # ---- ensure 3‑D [batch, seq_len, feat] ---------------------
-        if x.dim() == 2:            # (seq_len, feat)
-            x = x.unsqueeze(0)      # -> (1, seq_len, feat)
-        elif x.dim() == 1:          # rare case (feat,)
-            x = x.unsqueeze(0).unsqueeze(0)
+        self.sync_target_model()
 
-        # ---- init hidden state if not provided ---------------------
-        if hidden is None:
-            batch = x.size(0)
-            h0 = x.new_zeros(1, batch, self.hidden_dim)
-            c0 = x.new_zeros(1, batch, self.hidden_dim)
-            hidden = (h0, c0)
+    def build_model(self):
+        # Very simple LSTM model with random weights
+        model = {
+            'Wx': np.random.randn(self.hidden_size, self.state_size) * 0.01,
+            'Wh': np.random.randn(self.hidden_size, self.hidden_size) * 0.01,
+            'b':  np.zeros((self.hidden_size, 1)),
+            'Why': np.random.randn(self.action_size, self.hidden_size) * 0.01,
+            'by': np.zeros((self.action_size, 1))
+        }
+        return model
 
-        # ---- forward through LSTM ---------------------------------
-        out, hidden = self.lstm(x, hidden)         # out: (batch, seq_len, hidden)
-        out = out[:, -1, :]                        # last time step
+    def forward(self, sequence):
+        h = np.zeros((self.hidden_size, 1))
 
-        # ---- actor & critic heads ---------------------------------
-        logits = self.actor(out)                   # (batch, action_dim)
-        value  = self.critic(out).squeeze(-1)      # (batch,)
+        sequence = np.array(sequence)
 
-        return logits, value, hidden
+        # Flatten single vector
 
+        for i, x in enumerate(sequence):
+            if isinstance(x, (float, np.floating)):
+                continue
+            h = np.tanh(np.dot(self.model['Wx'], x) + np.dot(self.model['Wh'], h) + self.model['b'])
 
-CHK_DIR = "checkpoints"
-def save_checkpoint(policy, optimizer, episode, symbol):
-    os.makedirs(CHK_DIR, exist_ok=True)
-    date_str = datetime.now().strftime("%Y%m%d")
-    path = os.path.join(CHK_DIR, f"{symbol}-{date_str}.data.pt")
-    
-    torch.save({
-        "episode": episode,
-        "policy_state": policy.state_dict(),
-        "optim_state" : optimizer.state_dict(),
-    }, path)
+        output = np.dot(self.model['Why'], h) + self.model['by']
+        return output.flatten(), h.flatten()
 
-    print(f"[✔] saved checkpoint → {path} (ep {episode})")
+    def select_action(self, state_seq):
+        q_values, _ = self.forward(state_seq)
+        if np.random.rand() < self.epsilon:
+            return random.randint(0, self.action_size - 1)
+        return np.argmax(q_values)
 
-def load_checkpoint(policy, optimizer, symbol, device="cpu"):
-    # Find the most recent checkpoint for this symbol
-    if not os.path.isdir(CHK_DIR):
-        raise FileNotFoundError(f"Checkpoint directory '{CHK_DIR}' not found.")
+    def remember(self, state_seq, action, reward, next_state_seq, done):
+        if len(self.memory) > self.max_memory_size:
+            self.memory.pop(0)
+        self.memory.append((state_seq, action, reward, next_state_seq, done))
 
-    symbol_ckpts = [
-        f for f in os.listdir(CHK_DIR)
-        if f.startswith(symbol) and f.endswith(".data.pt")
-    ]
+    def train(self):
+        if len(self.memory) < self.batch_size:
+            return
 
-    if not symbol_ckpts:
-        raise FileNotFoundError(f"No checkpoint found for symbol '{symbol}'.")
+        minibatch = random.sample(self.memory, self.batch_size)
 
-    # Sort by date in filename (YYYYMMDD)
-    symbol_ckpts.sort(reverse=True)
-    latest_ckpt = os.path.join(CHK_DIR, symbol_ckpts[0])
+        for state_seq, action, reward, next_state_seq, done in minibatch:
+            q_values, _ = self.forward(state_seq)
+            target_q = q_values.copy()
 
-    ckpt = torch.load(latest_ckpt, map_location=device)
-    policy.load_state_dict(ckpt["policy_state"])
-    optimizer.load_state_dict(ckpt["optim_state"])
-
-    print(f"[✔] loaded checkpoint from → {latest_ckpt} (ep {ckpt['episode']})")
-    return ckpt["episode"] + 1
-
-
-def ppo_loss(old_logp, new_logp, adv, eps=0.2):
-    ratio = torch.exp(new_logp - old_logp)
-    return -(torch.min(ratio*adv, torch.clamp(ratio,1-eps,1+eps)*adv)).mean()
-
-def compute_gae(rew, val, msk, γ=0.99, λ=0.95):
-    val = torch.cat([val, torch.zeros(1, 1, device=val.device)])
-    gae, ret = 0, []
-    for i in reversed(range(len(rew))):
-        delta = rew[i] + γ*val[i+1]*msk[i] - val[i]
-        gae   = delta + γ*λ*msk[i]*gae
-        ret.insert(0, gae + val[i])
-    return torch.stack(ret)
-
-def train_ppo(env, policy, optim, symbol,
-              # episodes      = 20,
-              episodes      = 20,
-              # rollout_steps = 512,   # collect at most this many steps before an update
-              rollout_steps = 512,   # collect at most this many steps before an update
-              gamma         = 0.99,
-              lam           = 0.95,
-              clip_eps      = 0.2,
-              epochs        = 2,
-              # mb_size       = 256,
-              mb_size       = 64,
-              device        = "cpu"):
-
-    policy.to(device)
-
-    total_t = 0
-
-    day_start_bal    = env.balance        # balance after last daily print
-    week_start_bal   = env.balance        # balance after last weekly print
-    month_start_bal  = env.balance        # balance after last monthly print
-    episodes_per_day = 1    # ≈ one trading “day” if you like; tweak
-    episodes_per_week  = 7
-    episodes_per_month = 30
-    
-    for ep in range(1, episodes+1):
-        S,A,LOGP,V,R,M = [],[],[],[],[],[]
-        s   = env.reset()
-        h   = policy.reset_hidden(device=device)
-        done= False
-
-        while len(R) < rollout_steps:
-            logits, v, h  = policy(s.to(device), h)
-            dist          = Categorical(logits=logits)
-            a             = dist.sample()
-            s2, r, done,_ = env.step(a.item())
-            store_trade_result(s.squeeze(0).cpu().numpy(), r, a.item())
-
-            S.append(s.squeeze(0))
-            A.append(a)
-            LOGP.append(dist.log_prob(a))
-            V.append(v.squeeze(0))
-            R.append(torch.tensor(r, device=device, dtype=torch.float32))
-            M.append(torch.tensor(1-done, device=device, dtype=torch.float32))
-
-            s = s2
+            next_q_values, _ = self.forward(next_state_seq)
             if done:
-                s  = env.reset()
-                h  = policy.reset_hidden(device=device)
-                done = False
+                target = reward
+            else:
+                target = reward + self.gamma * np.max(next_q_values)
 
-        total_t += len(R)
-        V.append(torch.zeros(1, device=device))        # bootstrap 0
-        gae, adv, ret = 0, [], []
-        for i in reversed(range(len(R))):
-            delta = R[i] + gamma * V[i+1] * M[i] - V[i]
-            gae   = delta + gamma * lam * M[i] * gae
-            adv.insert(0, gae)
-            ret.insert(0, gae + V[i])
-        ADV  = torch.stack(adv)
-        RET  = torch.stack(ret)
-        LOGP = torch.stack(LOGP).detach()
-        A    = torch.stack(A)
-        S    = torch.stack(S)
+            # Simple gradient update (loss = (target - q)^2)
+            if action > 4:
+                continue
+            error = target - q_values[action]
+            target_q[action] += self.lr * error
 
-        ADV = (ADV-ADV.mean())/(ADV.std()+1e-8)         # normalize
+            # Backprop would normally update weights here
+            # In NumPy-only setting, this is simplified and shallow
 
-        nbatch = len(S)
-        idxs   = np.arange(nbatch)
-        for _ in range(epochs):
-            np.random.shuffle(idxs)
-            for start in range(0, nbatch, mb_size):
-                mb = idxs[start : start + mb_size]
+        # Decay epsilon
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
 
-                batch_states = S[mb].to(device)          # (mb, window, feat)
-                logits_mb, v_mb, _ = policy(batch_states)
+    def sync_target_model(self):
+        for k in self.model:
+            self.target_model[k] = np.copy(self.model[k])
 
-                dist_mb   = Categorical(logits=logits_mb)
-                logp_mb   = dist_mb.log_prob(A[mb].to(device))
+    def save(self):
+        os.makedirs("/mnt/chromeos/removable/sd_card/LSTM-DQN-checkpoint", exist_ok=True)
+        filename = f"/mnt/chromeos/removable/sd_card/LSTM-DQN-checkpoint/{datetime.now().strftime('%Y-%m-%d')}-{self.symbol}.checkpoint.lstm-dqn.pkl"
+        with open(filename, 'wb') as f:
+            pickle.dump(self.model, f)
 
-                adv_mb  = ADV[mb].detach()
-                ret_mb  = RET[mb].squeeze(-1).detach()      # <- size match
+    def load(self):
+        files = sorted(os.listdir(self.checkpoint_dir))
+        files = [f for f in files if f.endswith(".checkpoint.lstm-dqn.pt") and self.symbol in f]
+        if not files:
+            print(f"[!] No checkpoint found for {self.symbol}")
+            return
 
-                ratio   = torch.exp(logp_mb - LOGP[mb])
-                surr1   = ratio * adv_mb
-                surr2   = torch.clamp(ratio, 1-clip_eps, 1+clip_eps) * adv_mb
-                loss_pi = -torch.min(surr1, surr2).mean()
+        latest = os.path.join(self.checkpoint_dir, files[-1])
+        with open(latest, "rb") as f:
+            data = pickle.load(f)
+            self.model = data["model_state"]
+            self.experience_replay_buffer = data["memory"]
+        print(f"[✓] Loaded checkpoint from {latest}")
 
-                loss_v  = F.mse_loss(v_mb.squeeze(-1), ret_mb)
+class PPOAgent:
+    def __init__(self, state_size, hidden_size, action_size, gamma=0.95, clip_ratio=0.2, lr=1e-3):
+        self.state_size = state_size
+        self.hidden_size = hidden_size
+        self.action_size = action_size
+        self.gamma = gamma
+        self.clip_ratio = clip_ratio
+        self.lr = lr
 
-                loss    = loss_pi + 0.5 * loss_v - 0.01 * dist_mb.entropy().mean()
+        self.trajectory = []  # List of (state_seq, action, old_logprob, value, reward)
 
-                optim.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(policy.parameters(), 0.5)
-                optim.step()
+    def forward(self, state_seq):
+        h = np.zeros((self.hidden_size, 1))
+        for x in state_seq:
+            if isinstance(x, float):
+                continue
+            x = x.reshape(self.state_size, 1)
+            h = np.tanh(np.dot(self.model['Wx'], x) + np.dot(self.model['Wh'], h) + self.model['b'])
+        logits = np.dot(self.model['Why_pi'], h) + self.model['by_pi']
+        value = np.dot(self.model['Why_v'], h) + self.model['by_v']
+        probs = self._softmax(logits)
+        return probs.flatten(), value.item()
 
-        if (ep + 1) % 5 == 0:
-            ep_ret = RET.sum().item()
-            print(f"Ep {ep + 1:03d} | rollout {nbatch:4d} steps | episodic return {ep_ret:8.4f}")
-            save_checkpoint(policy, optim, ep + 1)
-        if (ep + 1) % episodes_per_day == 0:
-            roi_day = (env.balance - day_start_bal) / day_start_bal * 100
-            print(f"🗓  Day ROI: {roi_day:+6.2f}%  (Bal {env.balance:.2f})")
-            day_start_bal = env.balance      # reset baseline
+    def select_action(self, state_seq):
+        probs, value = self.forward(state_seq)
+        action = np.random.choice(self.action_size, p=probs)
+        logprob = np.log(probs[action] + 1e-8)
+        self.trajectory.append((state_seq, action, logprob, value))
+        return action
 
-        if (ep + 1) % episodes_per_week == 0:
-            roi_week = (env.balance - week_start_bal) / week_start_bal * 100
-            print(f"🗓  Week ROI: {roi_week:+6.2f}%  (Bal {env.balance:.2f})")
-            week_start_bal = env.balance      # reset baseline
+    def store_reward(self, reward):
+        self.trajectory[-1] = (*self.trajectory[-1], reward)
 
-        if (ep + 1) % episodes_per_month == 0:
-            roi_month = (env.balance - month_start_bal) / month_start_bal * 100
-            print(f"📆  Month ROI: {roi_month:+6.2f}% (Bal {env.balance:.2f})")
-            month_start_bal = env.balance     # reset baseline
-    save_tree_knn_memory(symbol) 
+    def train(self):
+        states, actions, old_logprobs, values, rewards = zip(*self.trajectory)
+        self.trajectory.clear()
+        returns = self._discount_rewards(rewards)
+        advantages = np.array(returns) - np.array(values)
 
-def evaluate_policy_live(
-    session,
-    symbol,
-    device: str = "cpu",
-    verbose: bool = False,
-    risk_pct: float = 0.05,
-    interval_minutes: int = 1,
-):
-    """
-    Evaluates the trained PPO + LSTM policy in live mode on Bybit.
+        for i in range(len(states)):
+            state_seq = states[i]
+            action = actions[i]
+            old_logprob = old_logprobs[i]
+            advantage = advantages[i]
+            probs, value = self.forward(state_seq)
+            logprob = np.log(probs[action] + 1e-8)
+            ratio = np.exp(logprob - old_logprob)
+            clip_low, clip_high = 1.0 - self.clip_ratio, 1.0 + self.clip_ratio
+            clipped = np.clip(ratio, clip_low, clip_high)
+            loss = -min(ratio * advantage, clipped * advantage)
+            for k in self.model:
+                self.model[k] -= self.lr * loss  # Simplified update
 
-    Action mapping:
-    0 - Hold
-    1 - Open Long
-    2 - Open Short
-    3 - Close Position
-    """
+    def _discount_rewards(self, rewards):
+        discounted, r = [], 0
+        for reward in reversed(rewards):
+            r = reward + self.gamma * r
+            discounted.insert(0, r)
+        return discounted
 
-    date_str = datetime.datetime.now().strftime("%Y%m%d")
-    ckpt_path = os.path.join(CHK_DIR, f"{symbol}-{date_str}.data.pt")
-    print(f"\n🚀 Starting LIVE trading on {symbol.upper()} using {ckpt_path}")
+    def _softmax(self, x):
+        e_x = np.exp(x - np.max(x))
+        return e_x / np.sum(e_x)
 
-    # Load policy
-    input_dim = len(TradingEnv.FEATURES)
-    policy = LSTMPolicy(input_dim=input_dim, hidden_dim=64, action_dim=4).to(device)
-    ckpt = torch.load(ckpt_path, map_location=device)
-    policy.load_state_dict(ckpt["policy_state"])
-    policy.eval()
+    def save(self, symbol):
+        os.makedirs("/mnt/chromeos/removable/sd_card/LSTM-PPO-checkpoint", exist_ok=True)
+        filename = f"/mnt/chromeos/removable/sd_card/LSTM-PPO-checkpoint/{datetime.now().strftime('%Y-%m-%d')}-{symbol}.checkpoint.lstm-ppo.pkl"
+        with open(filename, 'wb') as f:
+            pickle.dump(self.model, f)
 
-    load_tree_knn_memory(symbol)
+    def load(self, symbol):
+        files = sorted(os.listdir(self.checkpoint_dir))
+        files = [f for f in files if f.endswith(".checkpoint.lstm-ppo.pt") and self.symbol in f]
+        if not files:
+            print(f"[!] No checkpoint found for {symbol}")
+            return
 
-    hidden = None
-    long_open = False
-    short_open = False
+        latest = os.path.join(self.checkpoint_dir, files[-1])
+        with open(latest, "rb") as f:
+            data = pickle.load(f)
+            self.model = data["model_state"]
+            self.experience_replay_buffer = data["memory"]
+        print(f"[✓] Loaded checkpoint from {latest}")
 
-    while True:
-        wait_until_next_candle(interval_minutes)
 
-        # Fetch and process latest data
-        df = get_klines_df(symbol + "T", interval="1", limit=2880)
-        df = add_indicators(df)
-        env = TradingEnv(df)
-        obs = env.reset()
+def stable_sigmoid(x):
+    return np.where(x >= 0, 1 / (1 + np.exp(-x)), np.exp(x) / (1 + np.exp(x)))
 
-        # Calculate qty based on risk and ATR
-        latest = df.iloc[-1]
-        risk_amount = max(get_balance(session) * risk_pct, 15)
-        atr = latest['ATR']
-        qty_step, min_qty = get_qty_step(symbol)
-        qty = calc_order_qty(risk_amount, latest['Close'], min_qty, qty_step)
 
-        with torch.no_grad():
-            logits, _, hidden = policy(obs.to(device), hidden)
-            action = logits.argmax(-1).item()
+import numpy as np
 
-        obs, _, _, info = env.step(action)
+class LSTMPPOAgent:
+    def __init__(self, state_size, hidden_size, action_size, lr=1e-3, gamma=0.99, clip_ratio=0.2):
+        self.state_size = state_size
+        self.hidden_size = hidden_size
+        self.action_size = action_size
+        self.lr = lr
+        self.gamma = gamma
+        self.clip_ratio = clip_ratio
 
-        # Execute actions
-        if action == 1 and not long_open:
-            print(f"[{datetime.datetime.now()}] 🟢 Opening LONG")
+        # Initialize weights
+        self.model = {
+            # LSTM
+            'Wx': np.random.randn(4 * hidden_size, input_size) * 0.1,
+            'Wh': np.random.randn(4 * hidden_size, hidden_size) * 0.1,
+            'b': np.zeros(4 * hidden_size),
+
+            # Policy head
+            'W_policy': np.random.randn(action_size, hidden_size) * 0.1,
+            'b_policy': np.zeros(action_size),
+
+            # Value head
+            'W_value': np.random.randn(1, hidden_size) * 0.1,
+            'b_value': np.zeros(1),
+        }
+
+        self.reset_state()
+        self.trajectory = []
+
+    def reset_state(self):
+        self.h = np.zeros((self.hidden_size,))
+        self.c = np.zeros((self.hidden_size,))
+
+    def sigmoid(self, x):
+        return 1 / (1 + np.exp(-np.clip(x, -50, 50)))  # prevent overflow
+
+    def tanh(self, x):
+        return np.tanh(x)
+
+    def softmax(self, x):
+        exps = np.exp(x - np.max(x))
+        return exps / np.sum(exps)
+
+    def lstm_forward(self, x_seq):
+        h, c = self.h.copy(), self.c.copy()
+        for x in x_seq:
+            x = np.asarray(x).reshape(-1)  # ensure shape (state_size,)
+            assert x.shape[0] == self.state_size, f"x shape {x.shape} does not match state_size {self.state_size}"
+            z = np.dot(self.model['Wx'], x) + np.dot(self.model['Wh'], h) + self.model['b']
+            i = self.sigmoid(z[0:self.hidden_size])
+            f = self.sigmoid(z[self.hidden_size:2*self.hidden_size])
+            o = self.sigmoid(z[2*self.hidden_size:3*self.hidden_size])
+            g = self.tanh(z[3*self.hidden_size:])
+            c = f * c + i * g
+            h = o * self.tanh(c)
+        self.h, self.c = h, c
+        return h
+
+    def forward(self, x_seq):
+        h = self.lstm_forward(x_seq)
+        logits = np.dot(self.model['W_policy'], h) + self.model['b_policy']
+        value = np.dot(self.model['W_value'], h) + self.model['b_value']
+        probs = self.softmax(logits)
+        return probs, value[0]
+
+    def select_action(self, x_seq):
+        probs, value = self.forward(x_seq)
+        action = np.random.choice(self.action_size, p=probs)
+        logprob = np.log(probs[action] + 1e-8)
+        return action, logprob, value
+
+    def store_transition(self, state_seq, action, logprob, value, reward):
+        self.trajectory.append((state_seq, action, logprob, value, reward))
+
+    def store_reward(self, reward):
+        if self.trajectory:
+            last = self.trajectory[-1]
+            self.trajectory[-1] = (*last, reward)
+
+    def _discount_rewards(self, rewards):
+        discounted = []
+        R = 0
+        for r in reversed(rewards):
+            R = r + self.gamma * R
+            discounted.insert(0, R)
+        return discounted
+
+    def train(self):
+        # Unpack trajectory
+        states, actions, logprobs_old, values, rewards = zip(*self.trajectory)
+        # states, actions, logprobs_old, values = zip(*self.trajectory)
+        self.trajectory.clear()
+
+        # Compute advantages
+        returns = self._discount_rewards(rewards)
+        advantages = np.array(returns) - np.array(values)
+
+        # PPO update (simplified without real gradients)
+        for i in range(len(states)):
+            state_seq = states[i]
+            action = actions[i]
+            old_logprob = logprobs_old[i]
+            advantage = advantages[i]
+
+            probs, _ = self.forward(state_seq)
+            logprob = np.log(probs[action] + 1e-8)
+            ratio = np.exp(logprob - old_logprob)
+            clipped = np.clip(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio)
+            loss = -min(ratio * advantage, clipped * advantage)
+
+            # Simple weight update (pretend gradient descent)
+            for k in self.model:
+                self.model[k] -= self.lr * loss  # This is just placeholder logic
+
+    def save(self, symbol):
+        os.makedirs("/mnt/chromeos/removable/sd_card/LSTM-PPO-checkpoint", exist_ok=True)
+        filename = f"/mnt/chromeos/removable/sd_card/LSTM-PPO-checkpoint/{datetime.now().strftime('%Y-%m-%d')}-{symbol}.checkpoint.lstm-ppo.pkl"
+        with open(filename, 'wb') as f:
+            pickle.dump(self.model, f)
+
+    def load(self, symbol):
+        files = sorted(os.listdir("/mnt/chromeos/removable/sd_card/LSTM-PPO-checkpoint"))
+        files = [f for f in files if f.endswith(".checkpoint.lstm-ppo.pt") and self.symbol in f]
+        if not files:
+            print(f"[!] No checkpoint found for {symbol}")
+            return
+
+        latest = os.path.join(self.checkpoint_dir, files[-1])
+        with open(latest, "rb") as f:
+            data = pickle.load(f)
+            self.model = data["model_state"]
+            self.experience_replay_buffer = data["memory"]
+        print(f"[✓] Loaded checkpoint from {latest}")
+
+def update_policy_and_value(agent, states_seq, actions, old_action_probs, advantages, returns, lr=1e-3, epsilon=0.2):
+    for i in range(len(states_seq)-1):
+        if i >= len(advantages):
+            break
+        state_seq = states_seq[i]
+        action = actions[i]
+        old_prob = old_action_probs[i]
+        advantage = advantages[i]
+        target_value = returns[i]
+
+        # Forward pass
+        h = np.zeros((agent.hidden_size, 1))
+        for x in state_seq:
+            if isinstance(x, float): continue
+            x = x.reshape(agent.state_size, 1)
+            h = np.tanh(np.dot(agent.model['Wx'], x) + np.dot(agent.model['Wh'], h) + agent.model['b'])
+
+        logits = np.dot(agent.model['Why_pi'], h) + agent.model['by_pi']
+        probs = agent._softmax(logits).flatten()
+        new_prob = probs[action]
+
+        value = np.dot(agent.model['Why_v'], h) + agent.model['by_v']
+        value = value.item()
+
+        # Compute gradients for value loss
+        v_error = value - target_value
+        grad_Why_v = v_error * h.T
+        grad_by_v = v_error
+
+        # Compute gradients for policy loss
+        ratio = new_prob / (old_prob + 1e-10)
+        clipped_ratio = np.clip(ratio, 1 - epsilon, 1 + epsilon)
+        policy_grad_coef = -min(ratio * advantage, clipped_ratio * advantage)
+
+        grad_logits = probs.copy()
+        grad_logits[action] -= 1  # dSoftmax cross-entropy
+        grad_logits *= policy_grad_coef
+
+        grad_Why_pi = np.dot(grad_logits.reshape(-1, 1), h.T)
+        grad_by_pi = grad_logits.reshape(-1, 1)
+
+        # Update parameters
+        agent.model['Why_pi'] -= lr * grad_Why_pi
+        agent.model['by_pi'] -= lr * grad_by_pi
+        agent.model['Why_v'] -= lr * grad_Why_v
+        agent.model['by_v'] -= lr * grad_by_v
+
+def compute_gae(rewards, values, gamma=0.99, lam=0.95):
+    advantages = []
+    returns = []
+    gae = 0
+    next_value = 0  # Value after the last step (bootstrap)
+    
+    for t in reversed(range(len(rewards))):
+        delta = rewards[t] + gamma * next_value - values[t]
+        gae = delta + gamma * lam * gae
+        advantages.insert(0, gae)
+        next_value = values[t]
+        returns.insert(0, gae + values[t])
+    
+    # Normalize advantages
+    advantages = np.array(advantages)
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    
+    return np.array(advantages), np.array(returns)
+
+def ppo_policy_loss(old_probs, new_probs, advantages, epsilon=0.2):
+    ratios = new_probs / (old_probs + 1e-10)  # Avoid div by zero
+    clipped = np.clip(ratios, 1 - epsilon, 1 + epsilon)
+    loss = -np.mean(np.minimum(ratios * advantages, clipped * advantages))
+    return loss
+def value_loss(values, returns):
+    return 0.5 * np.mean((returns - values) ** 2)
+
+
+input_size = 16  # OHLC + indicators
+hidden_size = 64
+n_actions = 4   # [Hold, Buy, Sell, Close]
+
+def train_bot(df, agent, symbol, window_size=20):
+    capital = 1000.0
+    position = 0
+    entry_price = 0.0
+    invest = 0.0
+    peak_capital = capital
+    all_pcts = []
+    current_day = None
+    daily_pnl = 0.0
+    save_counter = 0
+    drawdown = 0.0
+
+    for t in range(window_size, len(df) - 1):
+        # Prepare state sequence
+        state_seq = df[t - window_size:t].values.astype(np.float32).reshape(-1, agent.state_size)
+
+        # === Get action ===
+        # action = agent.select_action(state_seq)
+        # probs, value = agent.forward(state_seq)
+        # action = agent.select_action(probs)
+        # logprob = np.log(probs[action] + 1e-8)
+        action, logprob, value = agent.select_action(state_seq)
+
+        # === Market info ===
+        price = df.iloc[t]["Close"]
+        next_price = df.iloc[t + 1]["Close"]
+        day = str(df.index[t]).split(' ')[0]
+
+        reward = 0.0
+        if current_day is None:
+            current_day = day
+        elif day != current_day:
+            print(f"Day {current_day} - PnL: {(daily_pnl / capital) * 100:.2f}% - Balance: {capital:.2f}")
+            current_day = day
+            daily_pnl = 0.0
+
+        # === Action logic ===
+        if action == 1 and position == 0:  # Buy
+            entry_price = price
+            invest = max(capital * 0.05, 15)
+            position = 1
+        elif action == 2 and position == 0:  # Sell
+            entry_price = price
+            invest = max(capital * 0.05, 15)
+            position = -1
+        elif action == 3 and position != 0:  # Close
+            pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
+            pnl = pct * 50 * invest
+            reward = pct
+            capital += pnl
+            daily_pnl += pnl
+            all_pcts.append(pct)
+
+            # Drawdown
+            if capital > peak_capital:
+                peak_capital = capital
+            else:
+                drawdown = (peak_capital - capital) / peak_capital
+
+            position = 0
+            invest = 0
+        else:  # Hold
+            if position != 0:
+                pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
+                reward = pct * 0.01  # smaller reward for unrealized gain
+
+        # === Store reward and update step ===
+        # agent.store_reward(reward)
+        agent.store_transition(state_seq, action, logprob, value, reward)
+        save_counter += 1
+        if save_counter % 10080 == 0:
+            print(f"[INFO] Training PPO on step {save_counter}...")
+            # agent.train(gamma=gamma, lam=lam, lr=lr, epsilon=epsilon)
+            agent.train()
+            agent.save(symbol)
+            print(f"[INFO] Saved checkpoint at step {save_counter}")
+
+    print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {sum(all_pcts):.4f}")
+
+def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
+    agent.load(symbol)
+    capital = get_balance()
+    session_position = session.get_positions(category="linear", symbol=symbol + "T")
+    position = 1 if session_position['side'] == "Buy" else "Sell" if session_position['side'] == "Sell" else 0
+    entry_price = 0.0
+    peak_capital = capital
+    all_pcts = []
+    invest = 0.0
+    total_qty = 0.0
+
+    current_day = None
+    daily_pnl = 0.0
+
+    for t in range(window_size, len(df) - 1):
+        state_seq = df[t - window_size:t].values
+        current_price = df.iloc[t]['Close']
+        next_price = df.iloc[t + 1]['Close']
+        day = str(df.index[t]).split(' ')[0]
+
+        # output, _ = lstm.forward(state_seq)
+        action = agent.select_action(state_seq)
+        # probs, _ = agent.forward(state_seq)
+        # action = np.random.choice(len(probs), p=probs)
+
+        # Execute action
+        reward = 0.0
+
+        if action == 1 and position == 0:  # Buy
+            invest = max(capital * 0.05, 15)
+            step, min_qty = get_qty_step(symbol)
+            total_qty = calc_order_qty(invest, get_mark_price(symbol), min_qty, step)
             session.place_order(
                 category="linear",
-                symbol=symbol,
+                symbol=bybit_symbol,
                 side="Buy",
                 order_type="Market",
-                qty=qty,
+                qty=totalqty,
                 reduce_only=False,
                 time_in_force="IOC"
             )
-            long_open = True
-            short_open = False
+            entry_price = current_price
+            position = 1
 
-        elif action == 2 and not short_open:
-            print(f"[{datetime.datetime.now()}] 🔻 Opening SHORT")
+        elif action == 2 and position == 0:  # Sell
+            invest = max(capital * 0.05, 15)
+            step, min_qty = get_qty_step(symbol)
+            total_qty = calc_order_qty(invest, get_mark_price(symbol), min_qty, step)
             session.place_order(
                 category="linear",
-                symbol=symbol,
-
+                symbol=bybit_symbol,
                 side="Sell",
                 order_type="Market",
-                qty=qty,
+                qty=totalqty,
                 reduce_only=False,
                 time_in_force="IOC"
             )
-            short_open = True
-            long_open = False
-
-        elif action == 3 and (long_open or short_open):
-            close_side = "Sell" if long_open else "Buy"
-            print(f"[{datetime.datetime.now()}] 🔴 Closing {'LONG' if long_open else 'SHORT'}")
+            entry_price = current_price
+            position = -1
+        elif action == 3 and position != 0:  # Close position
+            close_side = "Sell" if position == 1 else "Buy"
             session.place_order(
                 category="linear",
-                symbol=symbol,
+                symbol=bybit_symbol,
                 side=close_side,
                 order_type="Market",
-                qty=qty,
-                reduce_only=True,
+                qty=totalqty,
+                reduce_only=False,
                 time_in_force="IOC"
             )
-            long_open = False
-            short_open = False
+            pct = (current_price - entry_price) / entry_price if position == 1 else (entry_price - current_price) / entry_price
+            pnl = pct * 50 * invest
+            capital += pnl
+            daily_pnl += pnl
 
-        elif action == 0:
-            if verbose:
-                print(f"[{datetime.datetime.now()}] ⏸ HOLD")
-            
+            position = 0
+            invest = 0
+
+        # Optional: Hold logic (for PnL tracking only)
+        elif action == 0 and position != 0:
+            # pct = (current_price - entry_price) / entry_price if position == 1 else (entry_price - current_price) / entry_price
+            pass  # you may log hold stats here if desired
+
+    # Final result
+    total_return = ((capital - 1000.0) / 1000.0) * 100
+
+api_key = "8g4j5EW0EehZEbIaRD"
+api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
+session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
+keep_session_alive("BTCUSDT")
+
 def main():
-    # df = add_indicators(load_last_mb(CSV_PATH))
     counter = 0
     for symbol in symbols:
-        df = fetch_recent_data_for_training(yf_symbols[counter])
-        if df == None:
-            continue
+        print(f"Initialized looping over symbols, currently at #{counter + 1}, {symbols[counter]}")
+        # df = yf_get_ohlc_df(symbol)
+        df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
         df = add_indicators(df)
-        env     = TradingEnv(df)
-        policy  = LSTMPolicy()
-        optim   = torch.optim.Adam(policy.parameters(), lr=3e-4)
-        train_ppo(env, policy, optim, symbol, episodes=10, device="cpu")
+        print("Initializing training")
+        # lstm = LSTM(input_size, hidden_size)
+        # lstm_q_agent = LSTM_QAgent(state_size=16, action_size=4, symbol=symbols[counter])
+        # ppo_agent = PPOAgent(state_size=16, hidden_size=64, action_size=4)
+        lstm_ppo_agent = LSTMPPOAgent(state_size=16, hidden_size=64, action_size=4)
+        train_bot(df, lstm_ppo_agent, symbol)
         counter += 1
-    api_key = "8g4j5EW0EehZEbIaRD"
-    api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
-    session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
-    keep_session_alive("BTCUSDT")
-    # for symbol in bybit_symbols:
-    for symbol in symbols:
-        evaluate_policy(session, symbol)
+    counter = 0
+    for bybit_symbol in bybit_symbols:
+        print("In evalation/test loop")
+        print("Downloading klinies from bybit")
+        df = get_klines_df(bybit_symbol, 1)
+        print("Adding indicators")
+        df = add_indicators(df)
+        print("Testing bot")
+        # lstm = LSTM(input_size, hidden_size)
+        # lstm_q_agent = LSTM_QAgent(state_size=16, action_size=4, symbol=symbol)
+        # ppo_agent = PPOAgent(state_size=16, hidden_size=64, action_size=4)
+        lstm_ppo_agent = LSTMPPOAgent(state_size=16, hidden_size=64, action_size=4)
+        test_bot(df, lstm_ppo_agent, symbols[counter], bybit_symbol)
+        counter += 1
+
 main()
