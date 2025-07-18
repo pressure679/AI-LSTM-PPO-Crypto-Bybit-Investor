@@ -1,52 +1,107 @@
 import os, math, time
 from io import StringIO
-import json
 import numpy as np
 import pandas as pd
-import joblib
+from pybit.unified_trading import HTTP
 from collections import deque
 import torch, torch.nn as nn, torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from torch.distributions import Categorical
 from sklearn.neighbors import NearestNeighbors
-from sklearn.tree import DecisionTreeClassifier
 from sklearn.preprocessing import StandardScaler
+import yfinance
+from datetime import datetime, timedelta
 
-CSV_PATH = "/mnt/chromeos/removable/SD Card/Linux-shared-files/crypto and currency pairs/BTCUSD_1m_Binance.csv"
-memory = []
+# CSV_PATH = "/mnt/chromeos/removable/SD Card/Linux-shared-files/crypto and currency pairs/BTCUSD_1m_Binance.csv"
+yf_symbols = ["BNB-USD", "ETH-USD", "XRP-USD", "BTC-USD", "XAUUSD=X"]
+bybit_symbols = ["BNBUSDT", "ETHUSDT", "XRPUSDT", "BTCUSDT", "XAUUSDT"]
+symbols = ["BNBUSD", "ETHUSD", "XRPUSD", "BTCUSD", "XAUUSD"]
+
+scaler = StandardScaler()
+knn_memory = []
 
 # ------------------------------------------------------------------#
 # DATA LOADING & INDICATORS
 # ------------------------------------------------------------------#
-def load_last_mb(fp, mb_size=100):
-    bytes_to_read = mb_size * 1024 * 1024
-    with open(fp, "rb") as f:
-        f.seek(0, os.SEEK_END)
-        start = max(0, f.tell() - bytes_to_read)
-        f.seek(start)
-        data = f.read().decode("utf-8", errors="ignore")
-    lines = data.split("\n")[1:] if start else data.split("\n")
-    df = pd.read_csv(StringIO("\n".join([l for l in lines if l.strip()])), header=None)
-    df.columns = [
-        "Open time","Open","High","Low","Close","Volume","Close time",
-        "Quote asset vol","Trades","Taker buy base","Taker buy quote","Ignore"
+def fetch_recent_data_for_training(symbol, checkpoint_dir="checkpoints"):
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    results = {}
+
+    today = datetime.now()
+    symbol_safe = symbol.replace("=", "")  # Remove Yahoo special chars like "="
+    checkpoint_files = [
+        f for f in os.listdir(checkpoint_dir)
+        if f.endswith(".checkpoint.lstm-ppo.pt") and f"-{symbol_safe}." in f
     ]
-    return df
 
-EMA  = lambda s,p: s.ewm(span=p,adjust=False).mean()
-RSI  = lambda s,p: 100 - 100/(1 + s.diff().clip(lower=0).rolling(p).mean() /
-                                -s.diff().clip(upper=0).rolling(p).mean())
-def MACD(s,f=12,sl=26,sg=9):
-    fast, slow = EMA(s,f), EMA(s,sl)
-    macd = fast - slow
-    return macd, EMA(macd,sg), macd-EMA(macd,sg)
 
-def ATR(df,p=14):
-    high_low = df.High-df.Low
-    high_close = (df.High-df.Close.shift()).abs()
-    low_close  = (df.Low -df.Close.shift()).abs()
-    tr = pd.concat([high_low,high_close,low_close],axis=1).max(axis=1)
-    return tr.rolling(p).mean()
+    needs_training = True
+    for file in checkpoint_files:
+        try:
+            date_str = file.split("-")[0]
+            checkpoint_date = datetime.strptime(date_str, "%Y%m%d")
+            if today - checkpoint_date < timedelta(days=90):
+                print(f"✅ Checkpoint for {symbol} is recent: {file}")
+                needs_training = False
+                break
+        except Exception as e:
+            print(f"⚠️ Skipping file {file}, error parsing date: {e}")
+    if not needs_training:
+        return None
+        # continue
+
+
+    print(f"⬇️ Fetching new data for {symbol} (no recent checkpoint found)...")
+    df = yf.download(symbol, period="3mo", interval="1m")
+    if df.empty:
+        print(f"❌ No data returned for {symbol}. Skipping.")
+        return None
+        # continue
+
+    df = df[['Open', 'High', 'Low', 'Close']].copy()
+    df.dropna(inplace=True)
+    df.index = pd.to_datetime(df.index)
+    df.sort_index(inplace=True)
+
+    results[symbol] = df
+
+    return results
+
+def EMA(series, period):
+    return series.ewm(span=period, adjust=False).mean()
+
+def ATR(df, period=14):
+    high_low = df['High'] - df['Low']
+    high_close = (df['High'] - df['Close'].shift()).abs()
+    low_close = (df['Low'] - df['Close'].shift()).abs()
+    ranges = pd.concat([high_low, high_close, low_close], axis=1)
+    true_range = ranges.max(axis=1)
+    return true_range.rolling(window=period).mean()
+
+def RSI(series, period):
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def MACD(series, fast=12, slow=26, signal=9):
+    ema_fast = EMA(series, fast)
+    ema_slow = EMA(series, slow)
+    macd_line = ema_fast - ema_slow
+    signal_line = EMA(macd_line, signal)
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+def Bollinger_Bands(series, period=20, num_std=2):
+    sma = series.rolling(window=period).mean()
+    std = series.rolling(window=period).std()
+    upper_band = sma + num_std * std
+    lower_band = sma - num_std * std
+    return sma, upper_band, lower_band
 
 def ADX(df, period=14):
     """
@@ -86,79 +141,193 @@ def ADX(df, period=14):
 
     return adx, plus_di, minus_di
 
-def BullsPower(df, period=13):
+def BullsPower(df, period=14):
     ema = EMA(df['Close'], period)
     return df['High'] - ema
 
-def BearsPower(df, period=13):
+def BearsPower(df, period=14):
     ema = EMA(df['Close'], period)
     return df['Low'] - ema
 
+def get_klines_df(symbol, interval, limit=240):
+    response = session.get_kline(category="linear", symbol=symbol, interval=interval, limit=limit)
+    data = response['result']['list']
+    df = pd.DataFrame(data, columns=["Timestamp", "Open", "High", "Low", "Close", "Volume", "Turnover"])
+    df["Open"] = df["Open"].astype(float)
+    df["High"] = df["High"].astype(float)
+    df["Low"] = df["Low"].astype(float)
+    df["Close"] = df["Close"].astype(float)
+    df["Volume"] = df["Volume"].astype(float)
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"].astype(np.int64), unit='ms')
+
+    return df
+
 def add_indicators(df):
-    df["EMA_7"], df["EMA_14"], df["EMA_28"] = EMA(df.Close,7), EMA(df.Close,14), EMA(df.Close,28)
-    df["macd"], df["macd_signal"], df["OSMA"] = MACD(df.Close)
+    df['macd_line'], df['macd_signal'], df['macd_histogram'] = MACD(df['Close'])
     df['macd_signal_diff'] = df['macd_signal'].diff()
-    df['OSMA_Diff'] = df['OSMA'].diff()
-    df["RSI"] = RSI(df['Close'], 14)
+    # df['macd_histogram_diff'] = df['macd_histogram'].diff()
+    # df['macd_zone'] = np.where(df['macd_line'] < df['macd_signal'], 0, 1)
+    # df['macd_direction'] = np.where(df['macd_signal_diff'] < 0, 0, 1)
+
+    # df['bb_sma'], df['bb_upper'], df['bb_lower'] = Bollinger_Bands(df['Close'])
+    # df['bb_zone'] = np.where(df['Close'] < df['bb_sma'], 0, 1)
+
     df['ATR'] = ATR(df)
+
+    df['RSI'] = RSI(df['Close'], 14)
+    # df['RSI_zone'] = np.where(df['RSI'] < 30, 0, np.where(df['RSI'] > 70, 2, 1))
+
     df['ADX'], df['+DI'], df['-DI'] = ADX(df)
-    df['DI_Diff'] = (df['+DI'] - df['-DI'])
-    df['Bulls'] = BullsPower(df)     # High – EMA(close, 13)
-    df['Bears'] = BearsPower(df)     # Low  – EMA(close, 13)
-    df['Bull_Bear_Diff'] = (df['Bulls'] - df['Bears'])
+    # df['adx_zone'] = np.where(df['ADX'] < 20, 0, np.where(df['ADX'] > 40, 2, 1))
+
+    df['DI_Diff'] = (df['+DI'] - df['-DI']).abs()
+    # df['DI_direction'] = np.where(df['+DI'] > df['-DI'], 1, 0)
+
+    # df['Bulls'] = BullsPower(df)
+    # df['Bears'] = BearsPower(df)
+    # df['bulls_bears'] = np.where(df['Bulls'] > df['Bears'], 1, 0)
+
+    df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_histogram", "RSI", "ADX", "+DI", "-DI"]].copy()
+
     df.dropna(inplace=True)
     return df
 
+def keep_session_alive(symbol):
+    for attempt in range(30):
+        try:
+            # Example: Get latest position
+            result = session.get_positions(category="linear", symbol=symbol)
+            break  # If success, break out of loop
+        except requests.exceptions.ReadTimeout:
+            print(f"[WARN] Timeout on attempt {attempt+1}, retrying...")
+            time.sleep(2)  # wait before retry
+        finally:
+            threading.Timer(1500, keep_session_alive, args(symbol,)).start()  # Schedule next call
+
+def get_balance():
+    """
+    Return total equity in USDT only.
+    """
+    try:
+        resp = session.get_wallet_balance(
+            accountType="UNIFIED",
+            coin="USDT"               # still useful – filters server‑side
+        )
+
+        coins = resp["result"]["list"][0]["coin"]   # ← go into the coin array
+        usdt_row = next(c for c in coins if c["coin"] == "USDT")
+        return float(usdt_row["equity"])            # or "availableToWithdraw"
+    except (KeyError, StopIteration, IndexError) as e:
+        print("[get_balance] parsing error:", e, resp)
+        return 0.0
+
+def get_mark_price(symbol):
+    price_data = session.get_tickers(category="linear", symbol=symbol)["result"]["list"][0]
+    return float(price_data["lastPrice"])
+
+def get_qty_step(symbol):
+    info = session.get_instruments_info(category="linear", symbol=symbol)
+    data = info["result"]["list"][0]
+    step = float(data["lotSizeFilter"]["qtyStep"])
+    min_qty = float(data["lotSizeFilter"]["minOrderQty"])
+    return step, min_qty
+def calc_order_qty(risk_amount: float,
+                   entry_price: float,
+                   min_qty: float,
+                   qty_step: float) -> float:
+    """
+    Return a Bybit‑compliant order quantity, rounded *down* to the nearest
+    step size.  If the rounded amount is below `min_qty`, return 0.0.
+    """
+    # 1️⃣  Convert everything to Decimal
+    risk_amt   = Decimal(str(risk_amount))
+    price      = Decimal(str(entry_price))
+    step       = Decimal(str(qty_step))
+    min_q      = Decimal(str(min_qty))
+
+    # 2️⃣  Raw qty (no rounding yet)
+    raw_qty = risk_amt / price           # still Decimal
+
+    # 3️⃣  Round *down* to the nearest step
+    qty = (raw_qty // step) * step       # floor division works (both Decimal)
+
+    # 4️⃣  Enforce minimum
+    if qty < min_q:
+        return 0.0
+
+    # 5️⃣  Cast once for the API
+    return float(qty)
+
+
 def store_trade_result(obs_vector, pnl, side):
+    global knn_memory
+    side_val = 1 if side == "Buy" else -1
     outcome = 1 if pnl > 0 else 0
-    memory.append((obs_vector, outcome))
+    input_vector = np.append(obs_vector, side_val)
+    knn_memory.append((input_vector, outcome))
 
     # Optional: limit memory to prevent bloat
-    if len(memory) > 1000:
-        memory.pop(0)
+    if len(knn_memory) > 10000:
+        knn_memory.pop(0)
 
-def should_take_trade(current_obs, k=10, threshold=0.7):
-    if len(memory) < 100:
-        return True  # Not enough history yet
-    
-    # Split stored memory into feature matrix and outcomes
+def should_take_trade(current_obs, side, k=50, threshold=0.8):
+    global knn_memory
+    if len(knn_memory) < 1000:
+        return True  # not enough data to make a reliable prediction
+    side_val = 1 if side == "Buy" else -1
+    obs_with_side = np.append(current_obs, side_val)
+
+    # Load features and labels
     X = np.array([v for v, _ in memory])
     y = np.array([o for _, o in memory])
-    
-    # Train KNN model
+
+    # Scale and fit
+    X_scaled = scaler.fit_transform(X)
+    obs_scaled = scaler.transform([obs_with_side])
+
     knn = NearestNeighbors(n_neighbors=k)
-    knn.fit(X)
-    
-    # Find k-nearest neighbors
-    distances, indices = knn.kneighbors([current_obs])
+    knn.fit(X_scaled)
+
+    distances, indices = knn.kneighbors(obs_scaled)
     neighbor_outcomes = y[indices[0]]
-    
-    # Calculate win ratio
     win_rate = np.mean(neighbor_outcomes)
-    
+
     return win_rate >= threshold
+
+def save_knn_memory(symbol, date_str):
+    global knn_memory
+    filename = f"{symbol}-{date_str}.KNN.pt"
+    torch.save(knn_memory, filename)
+
+def load_knn_memory(symbol):
+    global knn_memory
+    filename = f"{symbol}-{date_str}.KNN.pt"
+    try:
+        knn_memory = torch.load(filename)
+        print(f"[KNN] Memory loaded: {len(knn_memory)} entries from {filename}")
+    except FileNotFoundError:
+        print(f"[KNN] Memory file not found: {filename}")
+        knn_memory = []
 
 
 class TradingEnv:
     FEATURES = [
-        "Close", "ATR", "macd_signal", "macd_signal_diff", "OSMA", "OSMA_Diff", "RSI",
-        "ADX", "+DI", "-DI", "DI_Diff", "Bulls", "Bears", "Bull_Bear_Diff", "EMA_7", "EMA_14", "EMA_28"
+        "Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_histogram", "RSI", "ADX", "+DI", "-DI"
     ]
 
     def __init__(self, df,
                  window=30,
-                 start_balance=100.0,
+                 start_balance=1000.0,
                  fee=0.0089,
                  leverage=50,
-                 pos_fraction=0.1,
-                 profit_target_pct=0.10):
+                 pos_fraction=0.05):
         self.df = df.reset_index(drop=True)
         self.window = window
         self.leverage = leverage
         self.pos_frac = pos_fraction
         self.fee = fee
-        self.target_pct = profit_target_pct
-        self.feat_dim = len(self.FEATURES) + 2
+        # self.target_pct = profit_target_pct
+        self.feat_dim = len(self.FEATURES)
         self.start_bal = start_balance
         self.reset()
 
@@ -186,7 +355,8 @@ class TradingEnv:
             upnl_ratio = (pct_move * self.qty * self.leverage) / self.qty
         else:
             upnl_ratio = 0.0
-        vec = np.append(row[self.FEATURES].values, [self.position, upnl_ratio]).astype(np.float32)
+        # vec = np.append(row[self.FEATURES].values, [self.position, upnl_ratio]).astype(np.float32)
+        vec = row[self.FEATURES].values.astype(np.float32)
         self.buffer.append(vec)
 
     def _obs(self):
@@ -208,10 +378,15 @@ class TradingEnv:
                 self._close_pos(price)
 
         if action == 1 and self.position == 0:
-            self._open_pos(+1, price, atr)
+            # side = "Buy" if action == 1 else "Sell" if action == 2
+            if should_take_trade(self.buffer[-1], "Buy"):
+                self._open_pos(+1, price, atr)
         elif action == 2 and self.position == 0:
-            self._open_pos(-1, price, atr)
+            # side = "Buy" if action == 1 else "Sell" if action == 2
+            if should_take_trade(self.buffer[-1], "Sell"):
+                self._open_pos(-1, price, atr)
         elif action == 3 and self.position != 0:
+            
             reward = self._close_pos(price) 
         # action==0: hold
 
@@ -228,29 +403,34 @@ class TradingEnv:
         atr  : current ATR value (must be finite & >0)
         """
         # -------- SL / TP distances -------------------------------
-        sl_dist = atr * 1.5
-        tp_dist = atr * 3.0
+        # sl_dist = atr * 1.5
+        # tp_dist = atr * 3.0
 
         equity_dd     = (self.peak_balance - self.balance) / self.peak_balance
         eff_frac      = self.pos_frac * max(1.0, 1.0 + equity_dd)  # risk up in DD
         risk_dollar   = self.balance * eff_frac
-        self.qty      = max(risk_dollar, 5)               # enforce min size
+        self.qty      = max(risk_dollar, 15)               # enforce min size
 
         self.position    = side
         self.entry_price = price
-        if side == 1:
-            self.sl_price = price - sl_dist
-            self.tp_price = price + tp_dist
-        else:
-            self.sl_price = price + sl_dist
-            self.tp_price = price - tp_dist
-            self.balance -= self.fee
+        # if side == 1:
+        #     self.sl_price = price - sl_dist
+        #     self.tp_price = price + tp_dist
+        # else:
+        #     self.sl_price = price + sl_dist
+        #     self.tp_price = price - tp_dist
+        #     self.balance -= self.fee
+        self.balance -= self.fee
         
     def _close_pos(self, price:float):
         pct_move = (price - self.entry_price) / self.entry_price
         pnl      = pct_move * self.qty * self.leverage * (1 if self.position==1 else -1)
         self.balance += pnl - self.fee
-        reward = pnl / self.qty
+        # reward = pnl / self.qty
+        side = "Buy" if self.position == 1 else "Sell"
+        # store_trade_result(obs_vector, pnl, side)
+        store_trade_result(obs_vector, pnl, side)
+        reward = pct_move
 
         self.position = 0
         self.entry_price = self.qty = 0.0
@@ -258,7 +438,7 @@ class TradingEnv:
         return reward
 
 class LSTMPolicy(nn.Module):
-    def __init__(self, input_dim=19, hidden_dim=64, action_dim=4):
+    def __init__(self, input_dim=8, hidden_dim=64, action_dim=4):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.lstm   = nn.LSTM(input_dim, hidden_dim, batch_first=True)
@@ -301,22 +481,42 @@ class LSTMPolicy(nn.Module):
 
 
 CHK_DIR = "checkpoints"
-os.makedirs(CHK_DIR, exist_ok=True)
-def save_checkpoint(policy, optimizer, episode, path=f"{CHK_DIR}/ppo_lstm.pt"):
+def save_checkpoint(policy, optimizer, episode, symbol):
+    os.makedirs(CHK_DIR, exist_ok=True)
+    date_str = datetime.now().strftime("%Y%m%d")
+    path = os.path.join(CHK_DIR, f"{symbol}-{date_str}.data.pt")
+    
     torch.save({
         "episode": episode,
         "policy_state": policy.state_dict(),
         "optim_state" : optimizer.state_dict(),
     }, path)
-    # joblib.dump((self.scaler, self.tree), "tree.pkl")
-    print(f"[✔] saved checkpoint → {path} (ep {episode})")
 
-def load_checkpoint(policy, optimizer, path=f"{CHK_DIR}/ppo_lstm.pt", device="cpu"):
-    ckpt = torch.load(path, map_location=device)
+    print(f"[✔] saved checkpoint → {path} (ep {episode})")
+
+def load_checkpoint(policy, optimizer, symbol, device="cpu"):
+    # Find the most recent checkpoint for this symbol
+    if not os.path.isdir(CHK_DIR):
+        raise FileNotFoundError(f"Checkpoint directory '{CHK_DIR}' not found.")
+
+    symbol_ckpts = [
+        f for f in os.listdir(CHK_DIR)
+        if f.startswith(symbol) and f.endswith(".data.pt")
+    ]
+
+    if not symbol_ckpts:
+        raise FileNotFoundError(f"No checkpoint found for symbol '{symbol}'.")
+
+    # Sort by date in filename (YYYYMMDD)
+    symbol_ckpts.sort(reverse=True)
+    latest_ckpt = os.path.join(CHK_DIR, symbol_ckpts[0])
+
+    ckpt = torch.load(latest_ckpt, map_location=device)
     policy.load_state_dict(ckpt["policy_state"])
     optimizer.load_state_dict(ckpt["optim_state"])
-    print(f"[✔] loaded checkpoint from ep {ckpt['episode']}")
-    return ckpt["episode"] + 1            # resume from next episode
+
+    print(f"[✔] loaded checkpoint from → {latest_ckpt} (ep {ckpt['episode']})")
+    return ckpt["episode"] + 1
 
 
 def ppo_loss(old_logp, new_logp, adv, eps=0.2):
@@ -332,9 +532,10 @@ def compute_gae(rew, val, msk, γ=0.99, λ=0.95):
         ret.insert(0, gae + val[i])
     return torch.stack(ret)
 
-
-def train_ppo(env, policy, optim,
+def train_ppo(env, policy, optim, symbol,
+              # episodes      = 20,
               episodes      = 20,
+              # rollout_steps = 512,   # collect at most this many steps before an update
               rollout_steps = 512,   # collect at most this many steps before an update
               gamma         = 0.99,
               lam           = 0.95,
@@ -366,6 +567,7 @@ def train_ppo(env, policy, optim,
             dist          = Categorical(logits=logits)
             a             = dist.sample()
             s2, r, done,_ = env.step(a.item())
+            store_trade_result(s.squeeze(0).cpu().numpy(), r, a.item())
 
             S.append(s.squeeze(0))
             A.append(a)
@@ -426,10 +628,9 @@ def train_ppo(env, policy, optim,
                 nn.utils.clip_grad_norm_(policy.parameters(), 0.5)
                 optim.step()
 
-
         if (ep + 1) % 5 == 0:
             ep_ret = RET.sum().item()
-            print(f"Ep {ep + 1:03d} | rollout {nbatch:4d} steps | episodic return {ep_ret:8.4f}")
+            print(f"Ep {ep + 1:03d} | rollout {nbatch:4d} steps | episodic return {ep_ret:8.4f}")
             save_checkpoint(policy, optim, ep + 1)
         if (ep + 1) % episodes_per_day == 0:
             roi_day = (env.balance - day_start_bal) / day_start_bal * 100
@@ -445,89 +646,132 @@ def train_ppo(env, policy, optim,
             roi_month = (env.balance - month_start_bal) / month_start_bal * 100
             print(f"📆  Month ROI: {roi_month:+6.2f}% (Bal {env.balance:.2f})")
             month_start_bal = env.balance     # reset baseline
+    save_tree_knn_memory(symbol) 
 
-def evaluate_policy(df, env,
-        ckpt_path:str = "checkpoints/ppo_lstm.pt",
-        device:str = "cpu",
-        verbose:bool = False):
+def evaluate_policy_live(
+    session,
+    symbol,
+    device: str = "cpu",
+    verbose: bool = False,
+    risk_pct: float = 0.05,
+    interval_minutes: int = 1,
+):
     """
-    Runs the trained PPO + LSTM policy over the CSV data once, no learning.
+    Evaluates the trained PPO + LSTM policy in live mode on Bybit.
 
-    Prints final balance and basic trade stats.
+    Action mapping:
+    0 - Hold
+    1 - Open Long
+    2 - Open Short
+    3 - Close Position
     """
-    # ---------- load data & indicators -------------------------
-    # df = add_indicators(load_last_mb(CSV_PATH))   # or full CSV
-    # env = TradingEnv(df)
 
-    # ---------- load policy ------------------------------------
-    input_dim = len(TradingEnv.FEATURES) + 2
+    date_str = datetime.datetime.now().strftime("%Y%m%d")
+    ckpt_path = os.path.join(CHK_DIR, f"{symbol}-{date_str}.data.pt")
+    print(f"\n🚀 Starting LIVE trading on {symbol.upper()} using {ckpt_path}")
+
+    # Load policy
+    input_dim = len(TradingEnv.FEATURES)
     policy = LSTMPolicy(input_dim=input_dim, hidden_dim=64, action_dim=4).to(device)
-    ckpt   = torch.load(ckpt_path, map_location=device)
+    ckpt = torch.load(ckpt_path, map_location=device)
     policy.load_state_dict(ckpt["policy_state"])
     policy.eval()
 
-    # ---------- bookkeeping ------------------------------------
-    hidden        = None
-    done          = False
-    step_counter  = 0
-    day_steps     = 60 * 24
-    week_steps    = 60 * 24 * 7            # 10080
-    month_steps   = 60 * 24 * 30           # 43200
-    day_steps     = 60 * 24
-    day_start     = env.balance
-    week_start    = env.balance
-    month_start   = env.balance
+    load_tree_knn_memory(symbol)
 
-    obs = env.reset()
     hidden = None
-    done = False
+    long_open = False
+    short_open = False
 
-    # ---------- loop -------------------------------------------
-    while not done:
+    while True:
+        wait_until_next_candle(interval_minutes)
+
+        # Fetch and process latest data
+        df = get_klines_df(symbol + "T", interval="1", limit=2880)
+        df = add_indicators(df)
+        env = TradingEnv(df)
+        obs = env.reset()
+
+        # Calculate qty based on risk and ATR
+        latest = df.iloc[-1]
+        risk_amount = max(get_balance(session) * risk_pct, 15)
+        atr = latest['ATR']
+        qty_step, min_qty = get_qty_step(symbol)
+        qty = calc_order_qty(risk_amount, latest['Close'], min_qty, qty_step)
+
         with torch.no_grad():
             logits, _, hidden = policy(obs.to(device), hidden)
-            action            = logits.argmax(-1).item()
-        obs, _, done, info = env.step(action)
-        step_counter += 1
+            action = logits.argmax(-1).item()
 
-        if step_counter % day_steps == 0 or done:
-            pnl_d = info["balance"] - day_start
-            print(f"📅 Day {step_counter // day_steps:02d}  "
-                  f"Bal {info['balance']:.2f}   PnL {pnl_d:+.2f}")
-            day_start = info["balance"]
+        obs, _, _, info = env.step(action)
 
-        # -------- weekly checkpoint ----------------------------
-        if step_counter % week_steps == 0 or done:
-            pnl_w = info["balance"] - week_start
-            print(f"📅 Week {step_counter // week_steps:02d}  "
-                  f"Bal {info['balance']:.2f}   PnL {pnl_w:+.2f}")
-            week_start = info["balance"]
+        # Execute actions
+        if action == 1 and not long_open:
+            print(f"[{datetime.datetime.now()}] 🟢 Opening LONG")
+            session.place_order(
+                category="linear",
+                symbol=symbol,
+                side="Buy",
+                order_type="Market",
+                qty=qty,
+                reduce_only=False,
+                time_in_force="IOC"
+            )
+            long_open = True
+            short_open = False
 
-        # -------- monthly checkpoint ---------------------------
-        if step_counter % month_steps == 0 or done:
-            pnl_m = info["balance"] - month_start
-            print(f"🗓  Month {step_counter // month_steps:02d} "
-                  f"Bal {info['balance']:.2f}   PnL {pnl_m:+.2f}")
-            month_start = info["balance"]
+        elif action == 2 and not short_open:
+            print(f"[{datetime.datetime.now()}] 🔻 Opening SHORT")
+            session.place_order(
+                category="linear",
+                symbol=symbol,
 
-    # ---------- final summary ----------------------------------
-    final_bal = info["balance"]
-    pnl_total = final_bal - env.start_bal
-    print("===================================================")
-    print(f"Backtest on {csv_path.split('/')[-1]}")
-    print(f"Start balance : {env.start_bal:.2f}")
-    print(f"Final balance : {final_bal:.2f}")
-    print(f"Total  PnL    : {pnl_total:+.2f} "
-          f"({pnl_total/env.start_bal*100:+.2f} %)")
-    print("===================================================")
+                side="Sell",
+                order_type="Market",
+                qty=qty,
+                reduce_only=False,
+                time_in_force="IOC"
+            )
+            short_open = True
+            long_open = False
 
+        elif action == 3 and (long_open or short_open):
+            close_side = "Sell" if long_open else "Buy"
+            print(f"[{datetime.datetime.now()}] 🔴 Closing {'LONG' if long_open else 'SHORT'}")
+            session.place_order(
+                category="linear",
+                symbol=symbol,
+                side=close_side,
+                order_type="Market",
+                qty=qty,
+                reduce_only=True,
+                time_in_force="IOC"
+            )
+            long_open = False
+            short_open = False
 
+        elif action == 0:
+            if verbose:
+                print(f"[{datetime.datetime.now()}] ⏸ HOLD")
+            
 def main():
-    df = add_indicators(load_last_mb(CSV_PATH))
-    env     = TradingEnv(df)
-    policy  = LSTMPolicy()
-    optim   = torch.optim.Adam(policy.parameters(), lr=3e-4)
-    train_ppo(env, policy, optim, episodes=500, device="cpu")
-    env.reset()
-    evaluate_policy(df, env)
+    # df = add_indicators(load_last_mb(CSV_PATH))
+    counter = 0
+    for symbol in symbols:
+        df = fetch_recent_data_for_training(yf_symbols[counter])
+        if df == None:
+            continue
+        df = add_indicators(df)
+        env     = TradingEnv(df)
+        policy  = LSTMPolicy()
+        optim   = torch.optim.Adam(policy.parameters(), lr=3e-4)
+        train_ppo(env, policy, optim, symbol, episodes=10, device="cpu")
+        counter += 1
+    api_key = "8g4j5EW0EehZEbIaRD"
+    api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
+    session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
+    keep_session_alive("BTCUSDT")
+    # for symbol in bybit_symbols:
+    for symbol in symbols:
+        evaluate_policy(session, symbol)
 main()
