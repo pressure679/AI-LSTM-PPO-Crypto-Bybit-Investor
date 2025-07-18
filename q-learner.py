@@ -34,14 +34,6 @@ def load_last_mb(file_path, mb_size=75):
     ]
     return df
 
-def calc_trend(prices):
-    x = np.arange(len(prices))
-    y = prices.values
-    x_mean = np.mean(x)
-    y_mean = np.mean(y)
-    m = np.sum((x - x_mean) * (y - y_mean)) / np.sum((x - x_mean)**2)
-    return m
-
 def EMA(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
@@ -140,6 +132,7 @@ def add_indicators(df):
 
     df['macd_line'], df['macd_signal'], df['macd_histogram'] = MACD(df['Close'])
     df['macd_signal_diff'] = df['macd_signal'].diff()
+    df['macd_signal_angle_deg'] = np.degrees(np.arctan(df['macd_signal_diff']))
     df['macd_histogram_diff'] = df['macd_histogram'].diff()
 
     df['bb_sma'], df['bb_upper'], df['bb_lower'] = Bollinger_Bands(df['Close'])
@@ -169,25 +162,14 @@ def encode_state(row):
     """
 
     # 1) EMA alignment 7 > 14 > 28
-    # ema_cross_7_14_28 = (
-    #     1 if row['EMA_7'] > row['EMA_14'] > row['EMA_28'] 
-    #     else 0 if row['EMA_7'] < row['EMA_14'] < row['EMA_28'] 
-    #     else -1
-    # )
+    ema_cross_7_14_28 = (
+        1 if row['EMA_7'] > row['EMA_14'] > row['EMA_28'] 
+        else 0 if row['EMA_7'] < row['EMA_14'] < row['EMA_28'] 
+        else -1
+    )
 
     # 2) Bollinger position
-    price = row['Close']
-    # if price < row['bb_lower']:
-    #     bb_zone = 0           # below lower band
-    # elif price > row['bb_upper']:
-    #     bb_zone = 2           # above upper band
-    # else:
-    #     bb_zone = 1           # inside the band
-    bb_zone = -1
-    if price < row['bb_sma']:
-        bb_zone = 0           # below lower band
-    elif price > row['bb_sma']:
-        bb_zone = 1           # above upper band
+    bb_zone = 0 if row['Close'] < row['bb_sma'] else 1
 
     # 3) RSI zone
     rsi_zone = 0 if row['RSI'] < 30 else 2 if row['RSI'] > 70 else 1
@@ -201,16 +183,17 @@ def encode_state(row):
     # 7) DI_Diff bucket (trend strength)
     di_bucket = 0 if row['DI_Diff'] < 0 else 1
 
-    bulls_bears = 1 if row['Bulls'] > row['Bears'] else 0
+    bulls_bears = 1 if row['Bulls'] > 0 else 0
 
-    macd_trend = 0 if row['macd_line'] < row['macd_signal'] else 1
+    # macd_trend = 0 if row['macd_line'] < row['macd_signal'] else 1
+    macd_trend = 0 if row['macd_signal'] < 0 else 1
 
     # 13) Macd signal line diff
-    macd_direction = 0 if row['macd_signal_diff'] < 0 else 1
+    macd_direction = 0 if row['macd_signal_angle_deg'] < 0 else 1
 
     # Assemble the final discrete state
     return (
-        # ema_cross_7_14_28,    # 0 / 1
+        ema_cross_7_14_28,    # 0 / 1
         bb_zone,              # 0 / 1 / 2
         rsi_zone,             # 0 / 1 / 2
         adx_zone,             # 0 / 1 / 2
@@ -238,11 +221,12 @@ def train_bot(df):
     """Q‑learning trainer
        • reward = PnL on each closed trade (leveraged)
        • extra boost if a trade’s PnL exceeds running mean PnL
+       • penalty if drawdown occurs (capital falls below peak)
     """
     global Q
 
     capital   = 1000.0
-    position  = 0          # 1 = long, -1 = short, 0 = flat
+    position  = 0
     entry     = 0.0
     invest    = 0.0
     trades    = 0
@@ -251,25 +235,24 @@ def train_bot(df):
     daily_pnl     = 0.0
     reward_scaler = 1.0
 
-    # ── NEW: running PnL stats ─────────────────────────────────────
-    all_trade_pnls = []     # store every trade’s raw PnL
-    mean_pnl       = 0.0    # running mean, updated after each close
-
-    # print("Training (reward = trade‑level PnL + boost for above‑mean trades)…")
+    # ── NEW ──────────────────────────────────────────────────────────
+    peak_capital   = capital     # for drawdown tracking
+    all_trade_pcts = []          # store every trade’s raw PnL
+    mean_pct       = 0.0         # running average
 
     for i in range(len(df) - 1):
         row, nxt = df.iloc[i], df.iloc[i + 1]
         day = str(row['Open time']).split(' ')[0]
 
-        # ── new‑day bookkeeping ────────────────────────────────────
+        # ── New day ────────────────────────────────────────────────
         if current_day is None:
             current_day = day
         elif day != current_day:
-            print(f"Day {current_day}  PnL:{daily_pnl:+.2f}  Balance:{capital:.2f}")
+            print(f"Day {current_day} - PnL: {(daily_pnl/capital)*100:.2f}% - Balance: {capital:.2f}")
             current_day = day
             daily_pnl   = 0.0
 
-        # ── choose & execute action ────────────────────────────────
+        # ── Action logic ───────────────────────────────────────────
         state      = encode_state(row)
         next_state = encode_state(nxt)
         action     = choose_action(state)
@@ -288,24 +271,36 @@ def train_bot(df):
             position = -1
             trades  += 1
 
-        elif action == 'close' and position != 0:
-            pct  = (price - entry) / entry if position == 1 else (entry - price) / entry
-            pnl  = pct * 50 * invest          # 20× leverage
-            capital  += pnl
-            daily_pnl += pnl
-            position   = 0
+        if position != 0:
+            pct = (price - entry) / entry if position == 1 else (entry - price) / entry
             reward = pct * reward_scaler
 
-            # ── NEW: compute reward with mean‑based boost ─────────
-            all_trade_pnls.append(pct)
-            mean_pnl = np.mean(all_trade_pnls)     # running mean
+        if action == "close" and position != 0:
+            pct  = (price - entry) / entry if position == 1 else (entry - price) / entry
+            pnl  = pct * 50 * invest  # leverage
+            reward = pct * reward_scaler
 
-            if pnl > mean_pnl:                     # above‑mean boost
-                reward *= 1.5                      # ↗ boost factor (tune as needed)
-            elif pnl < mean_pnl:
-                reward *= 0.5
+            capital   += pnl
+            daily_pnl += pnl
+            position   = 0
+            all_trade_pcts.append(pct)
+            mean_pct = np.mean(all_trade_pcts)
 
-        # ── Q‑update ────────────────────────────────────────────────
+            # ── Above-average reward boost ────────────────────────
+            if pct > mean_pct:
+                reward *= 1.5
+            if pct < 0:
+                reward *= 2
+
+        # ── Drawdown penalty ─────────────────────────────────
+        if capital > peak_capital:
+            peak_capital = capital
+        else:
+            drawdown = (peak_capital - capital) / peak_capital
+            # Apply penalty proportional to drawdown (scaling optional)
+            reward -= drawdown  # e.g., 5% drawdown → reward -= 0.05
+
+        # ── Q‑update ─────────────────────────────────────────────
         update_q(state, action, reward, next_state)
 
     print(f"Training finished. Trades: {trades}, Final balance: {capital:.2f}")
@@ -333,7 +328,7 @@ def test_bot(qtable_path, df):
             daily_balances[current_day] = balance
         elif day != current_day:
             pnl = balance - daily_balances[current_day]
-            print(f"Day: {current_day} - PnL: {pnl:.2f} - Balance: {balance:.2f}")
+            print(f"Day: {current_day} - PnL: {(pnl/balance)*100:.2f}% - Balance: {balance:.2f}")
             current_day = day
             daily_balances[current_day] = balance
 
@@ -431,8 +426,8 @@ def test_bot(qtable_path, df):
 if __name__ == "__main__":
     df = load_last_mb(CSV_PATH)
     df = add_indicators(df)
-    # train_bot(df)
-    # with open(Q_TABLE_PATH, 'wb') as f:
-    #     pickle.dump(Q, f)
-    # print(f"Q-table saved to {Q_TABLE_PATH}")
+    train_bot(df)
+    with open(Q_TABLE_PATH, 'wb') as f:
+        pickle.dump(Q, f)
+    print(f"Q-table saved to {Q_TABLE_PATH}")
     test_bot(Q_TABLE_PATH, df)
