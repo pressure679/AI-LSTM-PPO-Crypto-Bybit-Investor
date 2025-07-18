@@ -10,6 +10,9 @@ import torch.optim as optim
 import random
 from collections import deque
 
+# Popular crypto: "DOGEUSDT", "HYPEUSDT", "FARTCOINUSDT", "SUIUSDT", "INITUSDT", "BABYUSDT", "NILUSDT"
+# "BNBUSDT", "ETHUSDT", "XRPUSDT", "BTCUSDT", "XAUTUSDT"
+# "BNBUSD", "ETHUSD", "XRPUSD", "BTCUSD", "XAUUSD"
 CSV_PATH = "/mnt/chromeos/removable/SD Card/Linux-shared-files/crypto and currency pairs/BTCUSD_1m_Binance.csv"
 Q_TABLE_PATH = "260625-q-learner-trading-bot-q_table.pkl"
 
@@ -19,33 +22,49 @@ alpha = 0.1
 gamma = 0.95
 epsilon = 0.1
 
-def load_last_mb(file_path, mb_size=75):
-    bytes_to_read = mb_size * 1024 * 1024
-    with open(file_path, 'rb') as f:
-        f.seek(0, os.SEEK_END)
-        file_size = f.tell()
-        start_pos = max(0, file_size - bytes_to_read)
-        f.seek(start_pos, os.SEEK_SET)
-        data = f.read().decode('utf-8', errors='ignore')  # Decode to string
+def fetch_recent_data_for_training(symbol, checkpoint_dir="checkpoints"):
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    results = {}
 
-    lines = data.split('\n')
-    if start_pos != 0:
-        lines = lines[1:]
-    lines = [line for line in lines if line.strip() != '']
-    df = pd.read_csv(StringIO('\n'.join(lines)), header=None)
-    df.columns = [
-        "Open time", "Open", "High", "Low", "Close", "Volume",
-        "Close time", "Quote asset volume", "Number of trades",
-        "Taker buy base asset volume", "Taker buy quote asset volume", "Ignore"
+    today = datetime.now()
+    symbol_safe = symbol.replace("=", "")  # Remove Yahoo special chars like "="
+    checkpoint_files = [
+        f for f in os.listdir(checkpoint_dir)
+        if f.endswith(".checkpoint.lstm-ppo.pt") and f"-{symbol_safe}." in f
     ]
-        # Convert 'Open time' to datetime and set as index
-    df['Open time'] = pd.to_datetime(df['Open time'])
-    df.set_index('Open time', inplace=True)
 
-    # Keep only OHLC columns
+
+    needs_training = True
+    for file in checkpoint_files:
+        try:
+            date_str = file.split("-")[0]
+            checkpoint_date = datetime.strptime(date_str, "%Y%m%d")
+            if today - checkpoint_date < timedelta(days=90):
+                print(f"✅ Checkpoint for {symbol} is recent: {file}")
+                needs_training = False
+                break
+        except Exception as e:
+            print(f"⚠️ Skipping file {file}, error parsing date: {e}")
+    if not needs_training:
+        return None
+        # continue
+
+
+    print(f"⬇️ Fetching new data for {symbol} (no recent checkpoint found)...")
+    df = yf.download(symbol, period="3mo", interval="1m")
+    if df.empty:
+        print(f"❌ No data returned for {symbol}. Skipping.")
+        return None
+        # continue
+
     df = df[['Open', 'High', 'Low', 'Close']].copy()
+    df.dropna(inplace=True)
+    df.index = pd.to_datetime(df.index)
+    df.sort_index(inplace=True)
 
-    return df
+    results[symbol] = df
+
+    return results
 
 def EMA(series, period):
     return series.ewm(span=period, adjust=False).mean()
@@ -76,9 +95,9 @@ def MACD(series, fast=12, slow=26, signal=9):
     histogram = macd_line - signal_line
     return macd_line, signal_line, histogram
 
-def Bollinger_Bands(series, period=20, num_std=2):
-    sma = series.rolling(window=period).mean()
-    std = series.rolling(window=period).std()
+def Bollinger_Bands(df, period=20, num_std=2):
+    sma = df.rolling(window=period).mean()
+    std = df.rolling(window=period).std()
     upper_band = sma + num_std * std
     lower_band = sma - num_std * std
     return sma, upper_band, lower_band
@@ -121,6 +140,27 @@ def ADX(df, period=14):
 
     return adx, plus_di, minus_di
 
+def BullsPower(df, period=13):
+    ema = EMA(df['Close'], period)
+    return df['High'] - ema
+
+def BearsPower(df, period=13):
+    ema = EMA(df['Close'], period)
+    return df['Low'] - ema
+
+def get_klines_df(symbol, interval, limit=240):
+    response = session.get_kline(category="linear", symbol=symbol, interval=interval, limit=limit)
+    data = response['result']['list']
+    df = pd.DataFrame(data, columns=["Timestamp", "Open", "High", "Low", "Close", "Volume", "Turnover"])
+    df["Open"] = df["Open"].astype(float)
+    df["High"] = df["High"].astype(float)
+    df["Low"] = df["Low"].astype(float)
+    df["Close"] = df["Close"].astype(float)
+    df["Volume"] = df["Volume"].astype(float)
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"].astype(np.int64), unit='ms')
+
+    return df
+
 def add_indicators(df):
     df['EMA_7'] = df['Close'].ewm(span=7).mean()
     df['EMA_14'] = df['Close'].ewm(span=14).mean()
@@ -134,11 +174,11 @@ def add_indicators(df):
 
     df['macd_line'], df['macd_signal'], df['macd_histogram'] = MACD(df['Close'])
     df['macd_signal_diff'] = df['macd_signal'].diff()
-    df['macd_signal_angle_deg'] = np.degrees(np.arctan(df['macd_signal_diff']))
+    # df['macd_signal_angle_deg'] = np.degrees(np.arctan(df['macd_signal_diff']))
     # df['macd_histogram_diff'] = df['macd_histogram'].diff()
 
-    df['bb_sma'], df['bb_upper'], df['bb_lower'] = Bollinger_Bands(df['Close'])
-    df['bb_sma_pos'] = (df['Close'] >= df['bb_sma']).astype(int)
+    # df['bb_sma'], df['bb_upper'], df['bb_lower'] = Bollinger_Bands(df['Close'])
+    # df['bb_sma_pos'] = (df['Close'] >= df['bb_sma']).astype(int)
 
     # Custom momentum (% of recent high-low range)
     high_14 = df['High'].rolling(window=14).max()
@@ -149,15 +189,139 @@ def add_indicators(df):
     df['ADX'], df['+DI'], df['-DI'] = ADX(df)
     # df['DI_Diff'] = (df['+DI'] - df['-DI']).abs()
 
-    # df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "ATR", "macd_line", "macd_signal", "macd_histogram", "macd_signal_angle_deg", "bb_sma_pos", "RSI", "ADX"]]
-    df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_histogram", "macd_signal_angle_deg", "bb_sma_pos", "RSI", "ADX"]].copy()
+    df['Bulls'] = BullsPower(df)
+    df['Bears'] = BearsPower(df)
+
+    df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_histogram", "RSI", "ADX", "Bulls", "Bears", "+DI", "-DI"]].copy()
 
     df.dropna(inplace=True)
     return df
 
+def keep_session_alive(symbol):
+    for attempt in range(30):
+        try:
+            # Example: Get latest position
+            result = session.get_positions(category="linear", symbol=symbol)
+            break  # If success, break out of loop
+        except requests.exceptions.ReadTimeout:
+            print(f"[WARN] Timeout on attempt {attempt+1}, retrying...")
+            time.sleep(2)  # wait before retry
+        finally:
+            threading.Timer(1500, keep_session_alive, args(symbol,)).start()  # Schedule next call
+
+def get_balance():
+    """
+    Return total equity in USDT only.
+    """
+    try:
+        resp = session.get_wallet_balance(
+            accountType="UNIFIED",
+            coin="USDT"               # still useful – filters server‑side
+        )
+
+        coins = resp["result"]["list"][0]["coin"]   # ← go into the coin array
+        usdt_row = next(c for c in coins if c["coin"] == "USDT")
+        return float(usdt_row["equity"])            # or "availableToWithdraw"
+    except (KeyError, StopIteration, IndexError) as e:
+        print("[get_balance] parsing error:", e, resp)
+        return 0.0
+
+def get_mark_price(symbol):
+    price_data = session.get_tickers(category="linear", symbol=symbol)["result"]["list"][0]
+    return float(price_data["lastPrice"])
+
+def get_qty_step(symbol):
+    info = session.get_instruments_info(category="linear", symbol=symbol)
+    data = info["result"]["list"][0]
+    step = float(data["lotSizeFilter"]["qtyStep"])
+    min_qty = float(data["lotSizeFilter"]["minOrderQty"])
+    return step, min_qty
+
+def calc_order_qty(risk_amount: float,
+                   entry_price: float,
+                   min_qty: float,
+                   qty_step: float) -> float:
+    """
+    Return a Bybit‑compliant order quantity, rounded *down* to the nearest
+    step size.  If the rounded amount is below `min_qty`, return 0.0.
+    """
+    # 1️⃣  Convert everything to Decimal
+    risk_amt   = Decimal(str(risk_amount))
+    price      = Decimal(str(entry_price))
+    step       = Decimal(str(qty_step))
+    min_q      = Decimal(str(min_qty))
+
+    # 2️⃣  Raw qty (no rounding yet)
+    raw_qty = risk_amt / price           # still Decimal
+
+    # 3️⃣  Round *down* to the nearest step
+    qty = (raw_qty // step) * step       # floor division works (both Decimal)
+
+    # 4️⃣  Enforce minimum
+    if qty < min_q:
+        return 0.0
+
+    # 5️⃣  Cast once for the API
+    return float(qty)
+
+
+
+def store_trade_result(obs_vector, pnl, side):
+    global knn_memory
+    side_val = 1 if side == "Buy" else -1
+    outcome = 1 if pnl > 0 else 0
+    input_vector = np.append(obs_vector, side_val)
+    knn_memory.append((input_vector, outcome))
+
+    # Optional: limit memory to prevent bloat
+    if len(knn_memory) > 10000:
+        knn_memory.pop(0)
+
+def should_take_trade(current_obs, side, k=50, threshold=0.8):
+    global knn_memory
+    if len(knn_memory) < 1000:
+        return True  # not enough data to make a reliable prediction
+    side_val = 1 if side == "Buy" else -1
+    obs_with_side = np.append(current_obs, side_val)
+
+    # Load features and labels
+    X = np.array([v for v, _ in memory])
+    y = np.array([o for _, o in memory])
+
+    # Scale and fit
+    X_scaled = scaler.fit_transform(X)
+    obs_scaled = scaler.transform([obs_with_side])
+
+    knn = NearestNeighbors(n_neighbors=k)
+    knn.fit(X_scaled)
+
+    distances, indices = knn.kneighbors(obs_scaled)
+    neighbor_outcomes = y[indices[0]]
+    win_rate = np.mean(neighbor_outcomes)
+
+    return win_rate >= threshold
+
+def save_knn_memory(symbol, date_str):
+    global knn_memory
+    filename = f"{symbol}-{date_str}.KNN.pt"
+    torch.save(knn_memory, filename)
+
+def load_knn_memory(symbol):
+    global knn_memory
+    filename = f"{symbol}-{date_str}.KNN.pt"
+    try:
+        knn_memory = torch.load(filename)
+        print(f"[KNN] Memory loaded: {len(knn_memory)} entries from {filename}")
+    except FileNotFoundError:
+        print(f"[KNN] Memory file not found: {filename}")
+        knn_memory = []
+
+
+
+
 # ─── Hyperparameters ────────────────────────────────────────────────
 STATE_SIZE   = 10       # Number of past time steps for LSTM
-FEATURES     = 14        # Number of float indicators (adjust as needed)
+FEATURES     = 16       # Number of float indicators (adjust as needed)
 ACTIONS      = ['hold', 'long', 'short', 'close']
 LR           = 0.001
 GAMMA        = 0.99
@@ -276,6 +440,9 @@ def train_bot(df):
     current_day   = None
     daily_pnl     = 0.0
 
+    SAVE_EVERY_N_STEPS = 10080  # 1 week of 1m candles
+    save_counter = 0
+
     for i in range(len(df) - 1):
         state      = get_state_sequence(df, i)
         next_state = get_state_sequence(df, i + 1)
@@ -330,10 +497,17 @@ def train_bot(df):
 
         agent.memory.push(state, action_idx, reward, next_state)
         agent.train()
+        save_counter += 1
+        if save_counter % SAVE_EVERY_N_STEPS == 0:
+            torch.save(agent.model.state_dict(), f"checkpoint.lstm_q-learner.pt")
+            print(f"[INFO] Saved checkpoint at step {save_counter}")
 
     print(f"Training done. Final balance: {capital:.2f}")
 
 def test_bot(df):
+    agent = Agent()
+    agent.model.load_state_dict(torch.load("checkpoint.lstm_q-learner.pt"))
+    agent.model.eval()
     capital       = 1000.0
     peak_capital  = capital
     position      = 0
@@ -383,7 +557,7 @@ def test_bot(df):
             position = 0
             invest = 0
 
-            print(f"Trade closed: PnL = {pnl:.2f}, Capital = {capital:.2f}")
+            # print(f"Trade closed: PnL = {pnl:.2f}, Capital = {capital:.2f}")
 
         # Update peak capital to track max drawdown
         if capital > peak_capital:
@@ -408,4 +582,4 @@ if __name__ == "__main__":
     with open(Q_TABLE_PATH, 'wb') as f:
         pickle.dump(Q, f)
     print(f"Q-table saved to {Q_TABLE_PATH}")
-    test_bot(Q_TABLE_PATH, df)
+    test_bot(df)
