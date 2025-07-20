@@ -97,6 +97,7 @@ A `RewardRateKNN` module is included (commented out by default). It filters acti
 - Training is **thread-safe** and supports multi-symbol backtesting.
 - In training it went from $1000 to $500 the first week, and after training after a week it started getting profitable and went to $2500 in 3 months.
 - You can skip training by setting train = False in the main function if you already trained the bot.
+- I am currently testing it in ByBit demo mode, so if you want to disable that you comment out demo=True in the session call just above the main function.
 
 ---
 
