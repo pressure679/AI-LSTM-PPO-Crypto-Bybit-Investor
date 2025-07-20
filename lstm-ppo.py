@@ -16,12 +16,9 @@ from sklearn.neighbors import KNeighborsRegressor
 import warnings
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
-# Popular crypto: "DOGEUSDT", "HYPEUSDT", "FARTCOINUSDT", "SUIUSDT", "INITUSDT", "BABYUSDT", "NILUSDT"
-yf_symbols = ["BTC-USD", "BNB-USD", "ETH-USD", "XRP-USD", "XAUUSD=X"]
+
 bybit_symbols = ["BTCUSDT", "BNBUSDT", "ETHUSDT", "XRPUSDT", "XAUTUSDT"]
 symbols = ["BTCUSD", "BNBUSD", "ETHUSD", "XRPUSD", "XAUUSD"]
-# symbols = ["BNBUSD", "XRPUSD", "XAUTUSDT"]
-# Q_TABLE_PATH = "260625-q-learner-lstm-trading-bot-q_table.pkl"
 
 ACTIONS = ['hold', 'long', 'short', 'close']
 Q = {}
@@ -29,7 +26,6 @@ alpha = 0.1
 gamma = 0.95
 epsilon = 0.1
 
-# def load_last_mb(filepath, symbol, mb_size=20):
 def load_last_mb(filepath, symbol, mb_size=20):
     # Search for a file containing the symbol in its name
     matching_files = [f for f in os.listdir(filepath) if symbol.lower() in f.lower()]
@@ -39,7 +35,6 @@ def load_last_mb(filepath, symbol, mb_size=20):
     # Use the first matching file
     fp = os.path.join(filepath, matching_files[0])
     bytes_to_read = mb_size * 1024 * 1024
-    # df = pd.read_csv(fp, delimiter=';', header=None)
 
     with open(fp, "rb") as f:
         f.seek(0, os.SEEK_END)
@@ -224,8 +219,6 @@ def add_indicators(df):
 
     df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_signal_diff", "macd_histogram", "RSI", "ADX", "Bulls", "Bears", "+DI", "-DI", "ATR"]].copy()
 
-    # df['RSI'] = (df['RSI'] - 50) / 50           # RSI 0-100 → -1 to 1
-    # df['RSI_zone'] = 25 if df['RSI'] < 25 else 50 if df['RSI'] >= 25 and df['RSI'] < 50 else 75 if df['RSI'] >= 75 else -1
     conditions = [
         df['RSI'] < 30,
         (df['RSI'] >= 30) & (df['RSI'] < 50),
@@ -234,11 +227,7 @@ def add_indicators(df):
     ]
     choices = [1, 2, 3, 4]
     df['RSI_zone'] = np.select(conditions, choices, default=-1)
-    # df['+DI'] = (df['+DI'] - 50) / 50
-    # df['+DI_val'] = 1 if df['+DI'] < 10 else 2 if df['+DI'] >= 10 and df['+DI'] < 20 else 3 if df['+DI'] >= 20 and df['+DI'] < 30 else 4 if df['+DI'] >= 30 else 5
-    # df['-DI'] = (df['-DI'] - 50) / 50
-    # df['-DI_val'] = 1 if df['-DI'] < 10 else 2 if df['-DI'] >= 10 and df['-DI'] < 20 else 3 if df['-DI'] >= 20 and df['-DI'] < 30 else 4 if df['-DI'] >= 30 else 5
-    # +DI_val
+
     conditions_plus = [
         df['+DI'] < 5,
         (df['+DI'] >= 5) & (df['+DI'] < 10),
@@ -259,11 +248,6 @@ def add_indicators(df):
     choices_minus = [1, 2, 3, 4, 5]
     df['-DI_val'] = np.select(conditions_minus, choices_minus, default=-1)
 
-    # df['ADX_zone'] = 0 if df['ADX'] < 20 else 1 if df['ADX'] >= 20 and df['ADX'] < 30 else 2
-    # df['EMA_crossover'] = 1 if df['EMA_7'] > df['EMA_14'] > df['EMA_28'] else -1 if df['EMA_7'] < df['EMA_14'] < df['EMA_28'] else 0
-    # df['macd_direction'] = -1 if df['macd_signal_diff'] < 0 else 1 if df['macd_signal_diff'] > 0 else 0
-    # df['macd_trend'] = -1 if df['macd_histogram'] < 0 else 1 if df['macd_histogram'] > 0 else 0
-    # ADX Zone: 0 (<20), 1 (20–29.99), 2 (≥30)
     adx_conditions = [
         df['ADX'] < 20,
         (df['ADX'] >= 20) & (df['ADX'] < 30),
@@ -292,7 +276,6 @@ def add_indicators(df):
         default=0
     )
 
-    
     # MACD signal direction: -1 if falling, 1 if rising, 0 if flat
     df['macd_direction'] = np.select(
         [
