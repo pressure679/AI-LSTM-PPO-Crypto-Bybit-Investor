@@ -755,27 +755,27 @@ def train_bot(df, agent, symbol, window_size=20):
             position = 1
             sl_price = entry_price - df['ATR'].iloc[t] * 1.5
             tp_price = entry_price + df['ATR'].iloc[t] * 3
-            # elif df['macd_direction'].iloc[t] == -1:
+            # if df['macd_direction'].iloc[t] == -1:
             #     reward -= 1
             # if df['macd_direction'].iloc[t] == 1:
             #     reward += 1
             if df['macd_trend'].iloc[t] == -1:
                 reward -= 1
-            # elif df['macd_trend'].iloc[t] == 1:
+            # if df['macd_trend'].iloc[t] == 1:
             #     reward += 1
+            # if df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
+            #     reward -= 1
             if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
                 reward += 1
-            # elif df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
+            # if df['EMA_crossover'].iloc[t] == -1:
             #     reward -= 1
             if df['EMA_crossover'].iloc[t] == 1:
                 reward += 1
-            # elif df['EMA_crossover'].iloc[t] == -1:
+            # if df['Bears'].iloc[t] < 0:
             #     reward -= 1
             if df['Bulls'].iloc[t] > 0:
                 reward += 1
-            # elif df['Bears'].iloc[t] < 0:
-            #     reward -= 1
-            if df['RSI_zone'].iloc[t] is not 4:
+            if df['RSI_zone'].iloc[t] != 4:
                 reward += 1
             # else:
             #     reward -= 1
@@ -788,27 +788,27 @@ def train_bot(df, agent, symbol, window_size=20):
             position = -1
             sl_price = entry_price + df['ATR'].iloc[t] * 1.5
             tp_price = entry_price - df['ATR'].iloc[t] * 3
-            # elif df['macd_direction'].iloc[t] == -1:
-            #     reward += 1
             # if df['macd_direction'].iloc[t] == 1:
+            #     reward -= 1
+            # if df['macd_direction'].iloc[t] == -1:
+            #     reward += 1
+            # if df['macd_trend'].iloc[t] == 1:
             #     reward -= 1
             if df['macd_trend'].iloc[t] == -1:
                 reward += 1
-            # elif df['macd_trend'].iloc[t] == 1:
-            #     reward -= 1
             # if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
             #     reward -= 1
-            elif df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
+            if df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
                 reward += 1
             # if df['EMA_crossover'].iloc[t] == 1:
             #     reward -= 1
-            elif df['EMA_crossover'].iloc[t] == -1:
+            if df['EMA_crossover'].iloc[t] == -1:
                 reward += 1
             # if df['Bulls'].iloc[t] > 0:
             #     reward -= 1
-            elif df['Bears'].iloc[t] < 0:
+            if df['Bears'].iloc[t] < 0:
                 reward += 1
-            if df['RSI_zone'].iloc[t] is not 1:
+            if df['RSI_zone'].iloc[t] != 1:
                 reward += 1
             # else:
             #     reward -= 1
@@ -854,53 +854,53 @@ def train_bot(df, agent, symbol, window_size=20):
                 if position == 1:
                     # if df['macd_direction'].iloc[t] == 1:
                     #     reward += 1
-                    # elif df['macd_direction'].iloc[t] == -1:
+                    # if df['macd_direction'].iloc[t] == -1:
                     #     reward -= 1
-                    elif df['macd_trend'].iloc[t] == 1:
-                        reward += 1
                     # if df['macd_trend'].iloc[t] == -1:
+                    #     reward -= 1
+                    if df['macd_trend'].iloc[t] == 1:
+                        reward += 1
+                    # if df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
                     #     reward -= 1
                     if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
                         reward += 1
-                    # elif df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
+                    # if df['EMA_crossover'].iloc[t] == -1:
                     #     reward -= 1
                     if df['EMA_crossover'].iloc[t] == 1:
                         reward += 1
-                    # elif df['EMA_crossover'].iloc[t] == -1:
+                    # if df['Bears'].iloc[t] < 0:
                     #     reward -= 1
                     if df['Bulls'].iloc[t] > 0:
                         reward += 1
-                    # elif df['Bears'].iloc[t] < 0:
-                    #     reward -= 1
-                    if df['RSI_zone'].iloc[t] is not 4:
+                    if df['RSI_zone'].iloc[t] != 4:
                         reward += 1
                     # else:
                     #     reward -= 1
                 elif position == -1:
                     # if df['macd_direction'].iloc[t] == 1:
                     #     reward -= 1
-                    # elif df['macd_direction'].iloc[t] == -1:
+                    # if df['macd_direction'].iloc[t] == -1:
                     #     reward += 1
+                    # if df['macd_trend'].iloc[t] == 1:
+                    #     reward -= 1
                     if df['macd_trend'].iloc[t] == -1:
                         reward += 1
-                    # elif df['macd_trend'].iloc[t] == 1:
-                    #     reward -= 1
                     # if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
                     #     reward -= 1
-                    # elif df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
-                    #     reward += 1
+                    if df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
+                        reward += 1
                     # if df['EMA_crossover'].iloc[t] == 1:
                     #     reward -= 1
-                    # elif df['EMA_crossover'].iloc[t] == -1:
-                    #     reward += 1
+                    if df['EMA_crossover'].iloc[t] == -1:
+                        reward += 1
                     # if df['Bulls'].iloc[t] > 0:
                     #     reward -= 1
-                    # elif df['Bears'].iloc[t] < 0:
-                    #     reward += 1
-                    # if df['RSI_zone'].iloc[t] == 1:
-                    #     reward -= 1
+                    if df['Bears'].iloc[t] < 0:
+                        reward += 1
+                    if df['RSI_zone'].iloc[t] != 1:
+                        reward += 1
                     # else:
-                    #     reward += 1
+                    #     reward -= 1
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
