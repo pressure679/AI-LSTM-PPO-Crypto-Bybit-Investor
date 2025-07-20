@@ -923,8 +923,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     # Final result
     # total_return = ((capital - 1000.0) / 1000.0) * 100
 
-api_key = "8g4j5EW0EehZEbIaRD"
-api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
+api_key = ""
+api_secret = ""
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 keep_session_alive()
 def main():
