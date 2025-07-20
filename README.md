@@ -44,7 +44,7 @@ This bot is based on a **custom LSTM-based PPO agent**, making it suitable for s
 
 - **Inputs**: 15 technical indicators + OHLC-derived features
 - **Memory**: LSTM for short/long-term temporal pattern tracking
-- **Actions**: Buy, Sell, or Hold
+- **Actions**: Buy, Sell, Hold, or Close
 - **Rewards**:  
   - Percentage PnL  
   - Profitability of position  
