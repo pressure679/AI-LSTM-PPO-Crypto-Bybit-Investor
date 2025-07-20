@@ -6,6 +6,8 @@ This project is designed to run efficiently on **low-memory machines** (like old
 
 If you want to use this yourself you should edit api_key and api_secret to your bybit api key and secret.
 
+It trains on 3 months and data and should be updated every once in a while with Kaggle data, I aim to update it every 3 months.
+
 ---
 
 ## 🚀 Features
