@@ -931,7 +931,7 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = False
+    train = True
     if train:
         for symbol in symbols:
             df = None
