@@ -10,22 +10,22 @@ import requests
 import threading
 import time
 from decimal import Decimal
-import yfinance as yf
 from pybit.unified_trading import HTTP
 from sklearn.neighbors import KNeighborsRegressor
 import warnings
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
-
+# Popular crypto: "DOGEUSDT", "HYPEUSDT", "FARTCOINUSDT", "SUIUSDT", "INITUSDT", "BABYUSDT", "NILUSDT"
+yf_symbols = ["BTC-USD", "BNB-USD", "ETH-USD", "XRP-USD", "XAUUSD=X"]
 bybit_symbols = ["BTCUSDT", "BNBUSDT", "ETHUSDT", "XRPUSDT", "XAUTUSDT"]
 symbols = ["BTCUSD", "BNBUSD", "ETHUSD", "XRPUSD", "XAUUSD"]
 
 ACTIONS = ['hold', 'long', 'short', 'close']
-Q = {}
-alpha = 0.1
-gamma = 0.95
-epsilon = 0.1
+# alpha = 0.1
+# gamma = 0.95
+# epsilon = 0.1
 
+# def load_last_mb(filepath, symbol, mb_size=20):
 def load_last_mb(filepath, symbol, mb_size=20):
     # Search for a file containing the symbol in its name
     matching_files = [f for f in os.listdir(filepath) if symbol.lower() in f.lower()]
@@ -44,7 +44,6 @@ def load_last_mb(filepath, symbol, mb_size=20):
 
     lines = data.split("\n")[1:] if start else data.split("\n")
     df = pd.read_csv(StringIO("\n".join([l for l in lines if l.strip()])), header=None)
-    # print(lines)
     df.columns = [
         "Open time","Open","High","Low","Close","Volume","Close time",
         "Quote asset vol","Trades","Taker buy base","Taker buy quote","Ignore"
@@ -58,6 +57,7 @@ def load_last_mb(filepath, symbol, mb_size=20):
     df = df[['Open', 'High', 'Low', 'Close']].copy()
 
     return df
+
 def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=7, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
@@ -187,10 +187,6 @@ def get_klines_df(symbol, interval, limit=240):
     return df
 
 def add_indicators(df):
-    df['EMA_7'] = df['Close'].ewm(span=7).mean()
-    df['EMA_14'] = df['Close'].ewm(span=14).mean()
-    df['EMA_28'] = df['Close'].ewm(span=28).mean()
-
     df['H-L'] = df['High'] - df['Low']
     df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
     df['L-PC'] = abs(df['Low'] - df['Close'].shift(1))
@@ -214,9 +210,13 @@ def add_indicators(df):
     df['ADX'], df['+DI'], df['-DI'] = ADX(df)
     # df['DI_Diff'] = (df['+DI'] - df['-DI']).abs()
 
-    df['Bulls'] = BullsPower(df)
-    df['Bears'] = BearsPower(df)
+    df['EMA_7'] = df['Close'].ewm(span=7).mean()
+    df['EMA_14'] = df['Close'].ewm(span=14).mean()
+    df['EMA_28'] = df['Close'].ewm(span=28).mean()
 
+    df["Bulls"] = df["High"] - df['EMA_14']
+    df["Bears"] = df["Low"] - df['EMA_14']
+    
     df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_signal_diff", "macd_histogram", "RSI", "ADX", "Bulls", "Bears", "+DI", "-DI", "ATR"]].copy()
 
     conditions = [
@@ -228,6 +228,7 @@ def add_indicators(df):
     choices = [1, 2, 3, 4]
     df['RSI_zone'] = np.select(conditions, choices, default=-1)
 
+    # +DI_val
     conditions_plus = [
         df['+DI'] < 5,
         (df['+DI'] >= 5) & (df['+DI'] < 10),
@@ -237,6 +238,7 @@ def add_indicators(df):
     ]
     choices_plus = [1, 2, 3, 4, 5]
     df['+DI_val'] = np.select(conditions_plus, choices_plus, default=-1)
+
     # -DI_val
     conditions_minus = [
         df['-DI'] < 5,
@@ -248,6 +250,7 @@ def add_indicators(df):
     choices_minus = [1, 2, 3, 4, 5]
     df['-DI_val'] = np.select(conditions_minus, choices_minus, default=-1)
 
+    # ADX Zone: 0 (<20), 1 (20–29.99), 2 (≥30)
     adx_conditions = [
         df['ADX'] < 20,
         (df['ADX'] >= 20) & (df['ADX'] < 30),
@@ -301,9 +304,48 @@ def add_indicators(df):
     # df["Low"]   = df["Low"] / df["Close"] - 1
     # df["Close"] = df["Close"].pct_change().fillna(0)  # as return
 
-    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_direction", "macd_trend", "RSI", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
+    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_direction", "macd_trend", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
 
     df.dropna(inplace=True)
+    return df
+
+def append_new_candle_and_update(df, new_candle):
+    # new_row = pd.DataFrame([new_candle])
+    # new_row = pd.DataFrame([new_candle])
+    df = pd.concat([df, new_candle], ignore_index=True)
+
+    # Keep only the last N rows
+    if len(df) > self.max_window_size:
+        df = df.iloc[-self.max_window_size:].reset_index(drop=True)
+
+    # Percentage changes
+    for col in ["Open", "High", "Low", "Close"]:
+        df[f"{col}_pct"] = df[col].pct_change().fillna(0)
+
+    # MACD
+    # macd, macd_signal, macd_histogram = MACD(df["close"])
+    df['macd_line'], df['macd_signal'], df['macd_histogram'] = MACD(df['Close'])
+    # df["macd"] = macd
+    # df["macd_signal"] = macd_signal
+    # df['macd_histogram'] = macd_histogram
+
+    # ADX, +DI, -DI
+    # adx, plus_di, minus_di = ADX(df)
+    # df["ADX"] = adx
+    # df["+DI"] = plus_di
+    # df["-DI"] = minus_di
+    df['ADX'], df['+DI'], df['-DI'] = ADX(df)
+
+    # EMA 7, 14, 28
+    df["EMA_7"] = ema(df["Close"], span=7)
+    df['EMA_14'] = ema(df["Close"], span=14)
+    df["EMA_28"] = ema(df["Close"], span=28)
+
+    # Bulls and Bears Power
+    df["Bulls"] = df["High"] - df['EMA_14']
+    df["Bears"] = df["Low"] - df['EMA_14']
+
+    df.fillna(0, inplace=True)
     return df
 
 def keep_session_alive():
@@ -382,7 +424,7 @@ def wait_until_next_candle(interval_minutes):
 
 
 class LSTMPPOAgent:
-    def __init__(self, state_size, hidden_size, action_size, lr=1e-3, gamma=0.99, clip_ratio=0.2):
+    def __init__(self, state_size, hidden_size, action_size, lr=1e-3, gamma=0.95, clip_ratio=0.2):
         self.state_size = state_size
         self.hidden_size = hidden_size
         self.action_size = action_size
@@ -529,10 +571,8 @@ class LSTMPPOAgent:
         latest = os.path.join("LSTM-PPO-saves", files[-1])
         with open(latest, "rb") as f:
             self.model = pickle.load(f)
-            # self.model = data["model_state"]
-        # print(f"[✓] Loaded checkpoint from {latest}")
 
-def update_policy_and_value(agent, states_seq, actions, old_action_probs, advantages, returns, lr=1e-3, epsilon=0.2):
+def update_policy_and_value(agent, states_seq, actions, old_action_probs, advantages, returns, lr=1e-3, epsilon=0.1):
     for i in range(len(states_seq)-1):
         if i >= len(advantages):
             break
@@ -579,7 +619,7 @@ def update_policy_and_value(agent, states_seq, actions, old_action_probs, advant
         agent.model['Why_v'] -= lr * grad_Why_v
         agent.model['by_v'] -= lr * grad_by_v
 
-def compute_gae(rewards, values, gamma=0.99, lam=0.95):
+def compute_gae(rewards, values, gamma=0.95, lam=0.95):
     advantages = []
     returns = []
     gae = 0
@@ -598,13 +638,14 @@ def compute_gae(rewards, values, gamma=0.99, lam=0.95):
     
     return np.array(advantages), np.array(returns)
 
-def ppo_policy_loss(old_probs, new_probs, advantages, epsilon=0.2):
+def ppo_policy_loss(old_probs, new_probs, advantages, epsilon=0.1):
     ratios = new_probs / (old_probs + 1e-10)  # Avoid div by zero
     clipped = np.clip(ratios, 1 - epsilon, 1 + epsilon)
     loss = -np.mean(np.minimum(ratios * advantages, clipped * advantages))
     return loss
 def value_loss(values, returns):
     return 0.5 * np.mean((returns - values) ** 2)
+
 
 class RewardRateKNN:
     def __init__(self, symbol, k=10, reward_threshold=0.003):
@@ -714,10 +755,30 @@ def train_bot(df, agent, symbol, window_size=20):
             position = 1
             sl_price = entry_price - df['ATR'].iloc[t] * 1.5
             tp_price = entry_price + df['ATR'].iloc[t] * 3
-            if df['macd_direction'].iloc[t] == 1:
-                reward += 1
-            elif df['macd_direction'].iloc[t] == -1:
+            # elif df['macd_direction'].iloc[t] == -1:
+            #     reward -= 1
+            # if df['macd_direction'].iloc[t] == 1:
+            #     reward += 1
+            if df['macd_trend'].iloc[t] == -1:
                 reward -= 1
+            # elif df['macd_trend'].iloc[t] == 1:
+            #     reward += 1
+            if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
+                reward += 1
+            # elif df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
+            #     reward -= 1
+            if df['EMA_crossover'].iloc[t] == 1:
+                reward += 1
+            # elif df['EMA_crossover'].iloc[t] == -1:
+            #     reward -= 1
+            if df['Bulls'].iloc[t] > 0:
+                reward += 1
+            # elif df['Bears'].iloc[t] < 0:
+            #     reward -= 1
+            if df['RSI_zone'].iloc[t] is not 4:
+                reward += 1
+            # else:
+            #     reward -= 1
         elif action == 2 and position == 0:  # Sell
             entry_price = price
             invest = max(capital * 0.05, 15)
@@ -727,18 +788,40 @@ def train_bot(df, agent, symbol, window_size=20):
             position = -1
             sl_price = entry_price + df['ATR'].iloc[t] * 1.5
             tp_price = entry_price - df['ATR'].iloc[t] * 3
-            if df['macd_direction'].iloc[t] == -1:
+            # elif df['macd_direction'].iloc[t] == -1:
+            #     reward += 1
+            # if df['macd_direction'].iloc[t] == 1:
+            #     reward -= 1
+            if df['macd_trend'].iloc[t] == -1:
                 reward += 1
-            elif df['macd_direction'].iloc[t] == 1:
-                reward -= 1
+            # elif df['macd_trend'].iloc[t] == 1:
+            #     reward -= 1
+            # if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
+            #     reward -= 1
+            elif df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
+                reward += 1
+            # if df['EMA_crossover'].iloc[t] == 1:
+            #     reward -= 1
+            elif df['EMA_crossover'].iloc[t] == -1:
+                reward += 1
+            # if df['Bulls'].iloc[t] > 0:
+            #     reward -= 1
+            elif df['Bears'].iloc[t] < 0:
+                reward += 1
+            if df['RSI_zone'].iloc[t] is not 1:
+                reward += 1
+            # else:
+            #     reward -= 1
         elif action == 3 and position != 0:  # Close
             pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
-            if pct < 0:
-                reward -= 1
-            else:
-                reward += 1
+            # pct = (price - entry_price) if position == 1 else (entry_price - price)
+            # if pct < 0:
+            #     reward -= pct * 100
+            # else:
+            #     reward += pct * 100
             pnl = pct * 50 * invest
-            reward += pct
+            # reward += pct * 10
+            reward += pnl
             capital -= 0.0089
             with capital_lock:
                 capital += pnl
@@ -750,50 +833,89 @@ def train_bot(df, agent, symbol, window_size=20):
                 reward += 1
             if pct < 0:
                 reward -= 1
-
             if capital > peak_capital:
                 peak_capital = capital
                 reward += 1
             else:
                 drawdown = (peak_capital - capital) / peak_capital
-                reward -= drawdown  # e.g., 5% drawdown → reward -= 0.5
-                invest *= (1 + drawdown)
+                reward -= drawdown * 10  # e.g., 5% drawdown → reward -= 0.5
+                # invest *= (1 + drawdown)
             pct = 0.0
             pnl = 0
             position = 0
             invest = 0
-
             state = df[t - window_size:t].values.flatten().tolist()
             # rrKNN.add_experience(state, reward)
-
         else:  # Hold
             if position != 0:
                 pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
-                reward += pct
+                # pct = (price - entry_price) if position == 1 else (entry_price - price)
+                reward += pct * 10
                 if position == 1:
-                    if df['macd_direction'].iloc[t] == 1:
+                    # if df['macd_direction'].iloc[t] == 1:
+                    #     reward += 1
+                    # elif df['macd_direction'].iloc[t] == -1:
+                    #     reward -= 1
+                    elif df['macd_trend'].iloc[t] == 1:
                         reward += 1
-                    else:
-                        reward -= 1
+                    # if df['macd_trend'].iloc[t] == -1:
+                    #     reward -= 1
+                    if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
+                        reward += 1
+                    # elif df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
+                    #     reward -= 1
+                    if df['EMA_crossover'].iloc[t] == 1:
+                        reward += 1
+                    # elif df['EMA_crossover'].iloc[t] == -1:
+                    #     reward -= 1
+                    if df['Bulls'].iloc[t] > 0:
+                        reward += 1
+                    # elif df['Bears'].iloc[t] < 0:
+                    #     reward -= 1
+                    if df['RSI_zone'].iloc[t] is not 4:
+                        reward += 1
+                    # else:
+                    #     reward -= 1
                 elif position == -1:
-                    if df['macd_direction'].iloc[t] == -1:
+                    # if df['macd_direction'].iloc[t] == 1:
+                    #     reward -= 1
+                    # elif df['macd_direction'].iloc[t] == -1:
+                    #     reward += 1
+                    if df['macd_trend'].iloc[t] == -1:
                         reward += 1
-                    else:
-                        reward -= 1
-
+                    # elif df['macd_trend'].iloc[t] == 1:
+                    #     reward -= 1
+                    # if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
+                    #     reward -= 1
+                    # elif df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
+                    #     reward += 1
+                    # if df['EMA_crossover'].iloc[t] == 1:
+                    #     reward -= 1
+                    # elif df['EMA_crossover'].iloc[t] == -1:
+                    #     reward += 1
+                    # if df['Bulls'].iloc[t] > 0:
+                    #     reward -= 1
+                    # elif df['Bears'].iloc[t] < 0:
+                    #     reward += 1
+                    # if df['RSI_zone'].iloc[t] == 1:
+                    #     reward -= 1
+                    # else:
+                    #     reward += 1
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
         if save_counter % 10080 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
-            agent.savecheckpoint(symbol)
-            print(f"[INFO] Saved checkpoint at step {save_counter}")
+    agent.savecheckpoint(symbol)
+    print(f"[INFO] Saved checkpoint at step {save_counter}")
     # rrKNN.train()
     # rrKNN.save()
-    print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {sum(all_trade_pcts):.4f}")
+    print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
 
 def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
+    max_window_size = 240
+    
     # rrKNN = RewardRateKNN(symbol)
     # rrKNN.load()
     agent.loadcheckpoint(symbol)
@@ -808,7 +930,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     total_qty = 0.0
     sl_price = 0.0
     tp_price = 0.0
-    leverage=50
+    # leverage=50
 
     while True:
         wait_until_next_candle(1)
@@ -839,8 +961,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 qty=totalqty,
                 reduce_only=False,
                 time_in_force="IOC",
-                buyLeverage=leverage,
-                sellLeverage=leverage
+                # buyLeverage=leverage,
+                # sellLeverage=leverage
             )
             print(f"[{bybit_symbol}] Entered buy order")
             entry_price = current_price
@@ -860,8 +982,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 qty=totalqty,
                 reduce_only=False,
                 time_in_force="IOC",
-                buyLeverage=leverage,
-                sellLeverage=leverage
+                # buyLeverage=leverage,
+                # sellLeverage=leverage
             )
             print(f"[{bybit_symbol}] Entered sell order")
             entry_price = current_price
@@ -877,8 +999,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 qty=totalqty,
                 reduce_only=False,
                 time_in_force="IOC",
-                buyLeverage=leverage,
-                sellLeverage=leverage
+                # buyLeverage=leverage,
+                # sellLeverage=leverage
             )
             capital = get_balance()
             print(f"[{bybit_symbol}] Closed order")
@@ -923,8 +1045,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     # Final result
     # total_return = ((capital - 1000.0) / 1000.0) * 100
 
-api_key = ""
-api_secret = ""
+api_key = "8g4j5EW0EehZEbIaRD"
+api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 keep_session_alive()
 def main():
@@ -940,10 +1062,10 @@ def main():
                 df = load_last_mb_xauusd("/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv")
             else:
                 df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
-            df = add_indicators(data)
+            df = add_indicators(df)
             lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
             t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbol))
-            train_bot(df, lstm_ppo_agent, symbol)
+            # train_bot(df, lstm_ppo_agent, symbol)
             t.start()
             test_threads.append(t)
             counter += 1
@@ -955,9 +1077,9 @@ def main():
     # Reset for test phase
     counter = 0
     test_threads = []
-    df = []
 
     for bybit_symbol in bybit_symbols:
+        df = None
         df = get_klines_df(bybit_symbol, 1)
         df = add_indicators(df)
         lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
