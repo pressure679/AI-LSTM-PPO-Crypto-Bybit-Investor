@@ -95,48 +95,6 @@ def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_dat
     
     return df
 
-def yf_get_ohlc_df(symbol, checkpoint_dir="/mnt/chromeos/removable/sd_card/LSTM-DQN-saves"):
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    results = {}
-
-    today = datetime.now()
-    symbol_safe = symbol.replace("=", "")  # Remove Yahoo special chars like "="
-    checkpoint_files = [
-        f for f in os.listdir(checkpoint_dir)
-        if f.endswith(".checkpoint.lstm-ppo.pt") and f"-{symbol_safe}." in f
-    ]
-
-    needs_training = True
-    for file in checkpoint_files:
-        try:
-            date_str = file.split("-")[0]
-            checkpoint_date = datetime.strptime(date_str, "%Y%m%d")
-            if today - checkpoint_date < timedelta(days=90):
-                print(f"✅ Checkpoint for {symbol} is recent: {file}")
-                needs_training = False
-                break
-        except Exception as e:
-            print(f"⚠️ Skipping file {file}, error parsing date: {e}")
-    if not needs_training:
-        return None
-        # continue
-
-    print(f"⬇️ Fetching new data for {symbol} (no recent checkpoint found)...")
-    df = yf.download(symbol, period="3mo", interval="1m")
-    if df.empty:
-        print(f"❌ No data returned for {symbol}. Skipping.")
-        return None
-        # continue
-
-    df = df[['Open', 'High', 'Low', 'Close']].copy()
-    df.dropna(inplace=True)
-    df.index = pd.to_datetime(df.index)
-    df.sort_index(inplace=True)
-
-    results[symbol] = df
-
-    return results
-
 def EMA(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
@@ -365,17 +323,17 @@ def add_indicators(df):
     df.dropna(inplace=True)
     return df
 
-def keep_session_alive(symbol):
+def keep_session_alive():
     for attempt in range(30):
         try:
             # Example: Get latest position
-            result = session.get_positions(category="linear", symbol=symbol)
+            result = session.get_positions(category="linear", symbol="BTCUSDT")
             break  # If success, break out of loop
         except requests.exceptions.ReadTimeout:
             print(f"[WARN] Timeout on attempt {attempt+1}, retrying...")
             time.sleep(2)  # wait before retry
         finally:
-            threading.Timer(1500, keep_session_alive, args=(symbol,)).start()  # Schedule next call
+            threading.Timer(1500, keep_session_alive).start()  # Schedule next call
 
 def get_balance():
     """
@@ -438,271 +396,6 @@ def wait_until_next_candle(interval_minutes):
     sleep_seconds = seconds_per_candle - (now % seconds_per_candle)
     # print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
     time.sleep(sleep_seconds)
-
-
-# === LSTM Implementation (Minimal, NumPy only) ===
-class LSTM:
-    def __init__(self, input_size, hidden_size):
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-
-        # Initialize weights
-        self.Wf = np.random.randn(hidden_size, input_size + hidden_size)
-        self.bf = np.zeros((hidden_size,))
-
-        self.Wi = np.random.randn(hidden_size, input_size + hidden_size)
-        self.bi = np.zeros((hidden_size,))
-
-        self.Wc = np.random.randn(hidden_size, input_size + hidden_size)
-        self.bc = np.zeros((hidden_size,))
-
-        self.Wo = np.random.randn(hidden_size, input_size + hidden_size)
-        self.bo = np.zeros((hidden_size,))
-
-    def forward(self, inputs):
-        h = np.zeros((self.hidden_size, 1))
-        c = np.zeros((self.hidden_size, 1))
-
-        for x in inputs:
-            x = np.array(x)
-            concat = np.concatenate([h, x])
-
-            f = self._sigmoid(np.dot(self.Wf, concat) + self.bf)
-            i = self._sigmoid(np.dot(self.Wi, concat) + self.bi)
-            o = self._sigmoid(np.dot(self.Wo, concat) + self.bo)
-            c_tilde = np.tanh(np.dot(self.Wc, concat) + self.bc)
-
-            c = f * c + i * c_tilde
-            h = o * np.tanh(c)
-
-        return h  # Final hidden state
-
-    def _sigmoid(self, x):
-        x = np.clip(x, -500, 500)  # prevents overflow
-        return 1 / (1 + np.exp(-x))
-        # return 1 / (1 + np.exp(-x))
-        # return np.where(x >= 0,
-        #                 1 / (1 + np.exp(-x)),
-        #                 np.exp(x) / (1 + np.exp(x)))
-
-# === Q-Learner ===
-class QLearner:
-    def __init__(self, n_actions, alpha=0.1, gamma=0.95, epsilon=0.1):
-        self.q_table = defaultdict(lambda: np.zeros(n_actions))
-        self.alpha = alpha
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.n_actions = n_actions
-
-    def get_action(self, state_key):
-        if np.random.rand() < self.epsilon:
-            return np.random.randint(self.n_actions)
-        return np.argmax(self.q_table[state_key])
-
-    def update(self, state_key, action, reward, next_state_key):
-        q_old = self.q_table[state_key][action]
-        q_next = np.max(self.q_table[next_state_key])
-        self.q_table[state_key][action] = q_old + self.alpha * (reward + self.gamma * q_next - q_old)
-
-
-class LSTM_QAgent:
-    def __init__(self, state_size, action_size, symbol, hidden_size=64, lr=0.001, gamma=0.95):
-        self.symbol = symbol
-        self.checkpoint_dir = "/mnt/chromeos/removable/sd_card/LSTM-DQN-saves"
-        
-        self.state_size = state_size
-        self.action_size = action_size
-        self.hidden_size = hidden_size
-        self.lr = lr
-        self.gamma = gamma
-
-        self.memory = []
-        self.batch_size = 64
-        self.max_memory_size = 10000
-
-        self.epsilon = 1.0
-        self.epsilon_decay = 0.995
-        self.epsilon_min = 0.05
-
-        # Initialize primary and target LSTM networks
-        self.model = self.build_model()
-        self.target_model = self.build_model()
-
-        self.sync_target_model()
-
-    def build_model(self):
-        # Very simple LSTM model with random weights
-        model = {
-            'Wx': np.random.randn(self.hidden_size, self.state_size) * 0.01,
-            'Wh': np.random.randn(self.hidden_size, self.hidden_size) * 0.01,
-            'b':  np.zeros((self.hidden_size, 1)),
-            'Why': np.random.randn(self.action_size, self.hidden_size) * 0.01,
-            'by': np.zeros((self.action_size, 1))
-        }
-        return model
-
-    def forward(self, sequence):
-        h = np.zeros((self.hidden_size, 1))
-
-        sequence = np.array(sequence)
-
-        # Flatten single vector
-
-        for i, x in enumerate(sequence):
-            if isinstance(x, (float, np.floating)):
-                continue
-            h = np.tanh(np.dot(self.model['Wx'], x) + np.dot(self.model['Wh'], h) + self.model['b'])
-
-        output = np.dot(self.model['Why'], h) + self.model['by']
-        return output.flatten(), h.flatten()
-
-    def select_action(self, state_seq):
-        q_values, _ = self.forward(state_seq)
-        if np.random.rand() < self.epsilon:
-            return random.randint(0, self.action_size - 1)
-        return np.argmax(q_values)
-
-    def remember(self, state_seq, action, reward, next_state_seq, done):
-        if len(self.memory) > self.max_memory_size:
-            self.memory.pop(0)
-        self.memory.append((state_seq, action, reward, next_state_seq, done))
-
-    def train(self):
-        if len(self.memory) < self.batch_size:
-            return
-
-        minibatch = random.sample(self.memory, self.batch_size)
-
-        for state_seq, action, reward, next_state_seq, done in minibatch:
-            q_values, _ = self.forward(state_seq)
-            target_q = q_values.copy()
-
-            next_q_values, _ = self.forward(next_state_seq)
-            if done:
-                target = reward
-            else:
-                target = reward + self.gamma * np.max(next_q_values)
-
-            # Simple gradient update (loss = (target - q)^2)
-            if action > 4:
-                continue
-            error = target - q_values[action]
-            target_q[action] += self.lr * error
-
-            # Backprop would normally update weights here
-            # In NumPy-only setting, this is simplified and shallow
-
-        # Decay epsilon
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
-
-    def sync_target_model(self):
-        for k in self.model:
-            self.target_model[k] = np.copy(self.model[k])
-
-    def save(self):
-        os.makedirs("/mnt/chromeos/removable/sd_card/LSTM-DQN-saves", exist_ok=True)
-        filename = f"/mnt/chromeos/removable/sd_card/LSTM-DQN-saves/{datetime.now().strftime('%Y-%m-%d')}-{self.symbol}.checkpoint.lstm-dqn.pkl"
-        with open(filename, 'wb') as f:
-            pickle.dump(self.model, f)
-
-    def load(self):
-        files = sorted(os.listdir(self.checkpoint_dir))
-        files = [f for f in files if f.endswith(".checkpoint.lstm-dqn.pt") and self.symbol in f]
-        if not files:
-            print(f"[!] No checkpoint found for {self.symbol}")
-            return
-
-        latest = os.path.join(self.checkpoint_dir, files[-1])
-        with open(latest, "rb") as f:
-            data = pickle.load(f)
-            self.model = data["model_state"]
-            self.experience_replay_buffer = data["memory"]
-        # print(f"[✓] Loaded checkpoint from {latest}")
-
-class PPOAgent:
-    def __init__(self, state_size, hidden_size, action_size, gamma=0.95, clip_ratio=0.2, lr=1e-3):
-        self.state_size = state_size
-        self.hidden_size = hidden_size
-        self.action_size = action_size
-        self.gamma = gamma
-        self.clip_ratio = clip_ratio
-        self.lr = lr
-
-        self.trajectory = []  # List of (state_seq, action, old_logprob, value, reward)
-
-    def forward(self, state_seq):
-        h = np.zeros((self.hidden_size, 1))
-        for x in state_seq:
-            if isinstance(x, float):
-                continue
-            x = x.reshape(self.state_size, 1)
-            h = np.tanh(np.dot(self.model['Wx'], x) + np.dot(self.model['Wh'], h) + self.model['b'])
-        logits = np.dot(self.model['Why_pi'], h) + self.model['by_pi']
-        value = np.dot(self.model['Why_v'], h) + self.model['by_v']
-        probs = self._softmax(logits)
-        return probs.flatten(), value.item()
-
-    def select_action(self, state_seq):
-        probs, value = self.forward(state_seq)
-        action = np.random.choice(self.action_size, p=probs)
-        logprob = np.log(probs[action] + 1e-8)
-        self.trajectory.append((state_seq, action, logprob, value))
-        return action
-
-    def store_reward(self, reward):
-        self.trajectory[-1] = (*self.trajectory[-1], reward)
-
-    def train(self):
-        states, actions, old_logprobs, values, rewards = zip(*self.trajectory)
-        self.trajectory.clear()
-        returns = self._discount_rewards(rewards)
-        advantages = np.array(returns) - np.array(values)
-
-        for i in range(len(states)):
-            state_seq = states[i]
-            action = actions[i]
-            old_logprob = old_logprobs[i]
-            advantage = advantages[i]
-            probs, value = self.forward(state_seq)
-            logprob = np.log(probs[action] + 1e-8)
-            ratio = np.exp(logprob - old_logprob)
-            clip_low, clip_high = 1.0 - self.clip_ratio, 1.0 + self.clip_ratio
-            clipped = np.clip(ratio, clip_low, clip_high)
-            loss = -min(ratio * advantage, clipped * advantage)
-            for k in self.model:
-                self.model[k] -= self.lr * loss  # Simplified update
-
-    def _discount_rewards(self, rewards):
-        discounted, r = [], 0
-        for reward in reversed(rewards):
-            r = reward + self.gamma * r
-            discounted.insert(0, r)
-        return discounted
-
-    def _softmax(self, x):
-        e_x = np.exp(x - np.max(x))
-        return e_x / np.sum(e_x)
-
-    def save(self, symbol):
-        os.makedirs("/mnt/chromeos/removable/sd_card/LSTM-PPO-saves", exist_ok=True)
-        filename = f"/mnt/chromeos/removable/sd_card/LSTM-PPO-saves/{datetime.now().strftime('%Y-%m-%d')}-{symbol}.checkpoint.lstm-ppo.pkl"
-        with open(filename, 'wb') as f:
-            pickle.dump(self.model, f)
-
-    def load(self, symbol):
-        files = sorted(os.listdir(self.checkpoint_dir))
-        files = [f for f in files if f.endswith(".checkpoint.lstm-ppo.pt") and self.symbol in f]
-        if not files:
-            print(f"[!] No checkpoint found for {symbol}")
-            return
-
-        latest = os.path.join(self.checkpoint_dir, files[-1])
-        with open(latest, "rb") as f:
-            data = pickle.load(f)
-            self.model = data["model_state"]
-            self.experience_replay_buffer = data["memory"]
-        print(f"[✓] Loaded checkpoint from {latest}")
 
 
 class LSTMPPOAgent:
@@ -796,24 +489,6 @@ class LSTMPPOAgent:
     def store_transition(self, state_seq, action, logprob, value, reward):
         self.trajectory.append((state_seq, action, logprob, value, reward))
 
-    def savetrajectory(self, symbol):
-        os.makedirs("/mnt/chromeos/removable/sd_card/LSTM-PPO-saves", exist_ok=True)
-        filename = f"/mnt/chromeos/removable/sd_card/LSTM-PPO-saves/{datetime.now().strftime('%Y-%m-%d')}-{symbol}.trajectory.lstm-ppo.pkl"
-        with open(filename, 'wb') as f:
-            pickle.dump(self.trajectory, f)
-
-    def loadtrajectory(self, symbol):
-        files = sorted(os.listdir("/mnt/chromeos/removable/sd_card/LSTM-PPO-saves"))
-        # print(f"files: {files}")
-        files = [f for f in files if f.endswith(".trajectory.lstm-ppo.pkl") and symbol in f]
-        if not files:
-            print(f"[!] No checkpoint found for {symbol}")
-            return
-
-        latest = os.path.join("/mnt/chromeos/removable/sd_card/LSTM-PPO-saves/", files[-1])
-        with open(latest, "rb") as f:
-            self.trajectory = pickle.load(f)
-
     def store_reward(self, reward):
         if self.trajectory:
             last = self.trajectory[-1]
@@ -855,20 +530,20 @@ class LSTMPPOAgent:
                 self.model[k] -= self.lr * loss  # This is just placeholder logic
 
     def savecheckpoint(self, symbol):
-        os.makedirs("/mnt/chromeos/removable/sd_card/LSTM-PPO-saves", exist_ok=True)
-        filename = f"/mnt/chromeos/removable/sd_card/LSTM-PPO-saves/{datetime.now().strftime('%Y-%m-%d')}-{symbol}.checkpoint.lstm-ppo.pkl"
+        os.makedirs("LSTM-PPO-saves", exist_ok=True)
+        filename = f"LSTM-PPO-saves/{datetime.now().strftime('%Y-%m-%d')}-{symbol}.checkpoint.lstm-ppo.pkl"
         with open(filename, 'wb') as f:
             pickle.dump(self.model, f)
 
     def loadcheckpoint(self, symbol):
-        files = sorted(os.listdir("/mnt/chromeos/removable/sd_card/LSTM-PPO-saves"))
+        files = sorted(os.listdir("LSTM-PPO-saves"))
         # print(f"files: {files}")
         files = [f for f in files if f.endswith(".checkpoint.lstm-ppo.pkl") and symbol in f]
         if not files:
             print(f"[!] No checkpoint found for {symbol}")
             return
 
-        latest = os.path.join("/mnt/chromeos/removable/sd_card/LSTM-PPO-saves/", files[-1])
+        latest = os.path.join("LSTM-PPO-saves", files[-1])
         with open(latest, "rb") as f:
             self.model = pickle.load(f)
             # self.model = data["model_state"]
@@ -1010,15 +685,13 @@ def train_bot(df, agent, symbol, window_size=20):
     price = 0.0
     current_day = None
     save_counter = 0
-    rrKNN = RewardRateKNN(symbol)
+    # rrKNN = RewardRateKNN(symbol)
 
     for t in range(window_size, len(df) - 1):
         # Prepare state sequence
-        # state_seq = df[t - window_size:t].values.astype(np.float32).reshape(-1, agent.state_size)
         if df['ADX_zone'].iloc[t] == 0:
             continue
         state_seq = df[t - window_size:t].values.astype(np.float32)
-        # Only do this if the shape is correct
         if state_seq.shape[0] == window_size and state_seq.shape[1] == agent.state_size:
             pass  # you're fine
         else:
@@ -1026,14 +699,8 @@ def train_bot(df, agent, symbol, window_size=20):
             # handle error or skip
 
         # === Get action ===
-        # action = agent.select_action(state_seq)
-        # probs, value = agent.forward(state_seq)
-        # action = agent.select_action(probs)
-        # logprob = np.log(probs[action] + 1e-8)
-        # action, logprob, value = agent.select_action(state_seq)
         result = agent.select_action(state_seq)
         if result is None:
-            # print("⚠️ Skipping step due to select_action failure")
             continue  # or continue if inside a loop
         action, logprob, value = result
 
@@ -1058,13 +725,9 @@ def train_bot(df, agent, symbol, window_size=20):
         if action == 1 and position == 0:  # Buy
             entry_price = price
             invest = max(capital * 0.05, 15)
-            # print(f"invested {invest}")
             capital -= 0.0089
             if drawdown > 0:
-                # print(f"drawdown: {drawdown}")
                 invest *= (1 + drawdown)
-            # with capital_lock:
-            #     capital - invest
             position = 1
             sl_price = entry_price - df['ATR'].iloc[t] * 1.5
             tp_price = entry_price + df['ATR'].iloc[t] * 3
@@ -1075,12 +738,9 @@ def train_bot(df, agent, symbol, window_size=20):
         elif action == 2 and position == 0:  # Sell
             entry_price = price
             invest = max(capital * 0.05, 15)
-            # print(f"invested {invest}")
             capital -= 0.0089
             if drawdown > 0:
                 invest *= (1 + drawdown)
-            # with capital_lock:
-            #      capital -= invest
             position = -1
             sl_price = entry_price + df['ATR'].iloc[t] * 1.5
             tp_price = entry_price - df['ATR'].iloc[t] * 3
@@ -1094,16 +754,11 @@ def train_bot(df, agent, symbol, window_size=20):
                 reward -= 1
             else:
                 reward += 1
-            # if pct < 0.1:
-            #     reward -= 1
             pnl = pct * 50 * invest
             reward += pct
-            # print(f"pnl on close order: {pnl}")
             capital -= 0.0089
             with capital_lock:
-            #     capital += invest
                 capital += pnl
-                # print(f"profit: {pnl}")
             invest = 0
             daily_pnl += pnl
             all_trade_pcts.append(pct)
@@ -1126,10 +781,9 @@ def train_bot(df, agent, symbol, window_size=20):
             invest = 0
 
             state = df[t - window_size:t].values.flatten().tolist()
-            rrKNN.add_experience(state, reward)
+            # rrKNN.add_experience(state, reward)
 
         else:  # Hold
-            # print(f"pct: {pct}, price: {price}, entry price: {entry_price}, position: {position}")
             if position != 0:
                 pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
                 reward += pct
@@ -1143,41 +797,22 @@ def train_bot(df, agent, symbol, window_size=20):
                         reward += 1
                     else:
                         reward -= 1
-                # if sl_price >= price:
-                #     pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
-                #     pnl = pct * 50 * invest
-                #     capital += pnl
-                #     daily_pnl += pnl
-                #     reward += pct * 10
-                #     reward -= 1
-                #     position = 0
-                # elif tp_price <= price:
-                #     pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
-                #     pnl = pct * 50 * invest
-                #     capital += pnl
-                #     daily_pnl += pnl
-                #     reward += pct * 10
-                #     reward += 1
-                #     position = 0
-                # reward = pct * 0.1  # smaller reward for unrealized gain
 
         # === Store reward and update step ===
-        # agent.store_reward(reward)
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
         if save_counter % 10080 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
-            # agent.train(gamma=gamma, lam=lam, lr=lr, epsilon=epsilon)
             agent.train()
             agent.savecheckpoint(symbol)
             print(f"[INFO] Saved checkpoint at step {save_counter}")
-    rrKNN.train()
-    rrKNN.save()
+    # rrKNN.train()
+    # rrKNN.save()
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {sum(all_trade_pcts):.4f}")
 
 def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
-    rrKNN = RewardRateKNN(symbol)
-    rrKNN.load()
+    # rrKNN = RewardRateKNN(symbol)
+    # rrKNN.load()
     agent.loadcheckpoint(symbol)
     capital = get_balance()
     peak_capital = capital
@@ -1209,46 +844,46 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
 
         if action == 1 and position == 0:  # Buy
             state = df[window_size:].values.flatten().tolist()
-            if rrKNN.should_act(state):
-                invest = max(capital * 0.05, 15)
-                step, min_qty = get_qty_step(symbol)
-                total_qty = calc_order_qty(invest, get_mark_price(symbol), min_qty, step)
-                session.place_order(
-                    category="linear",
-                    symbol=bybit_symbol,
-                    side="Buy",
-                    order_type="Market",
-                    qty=totalqty,
-                    reduce_only=False,
-                    time_in_force="IOC",
-                    buyLeverage=leverage,
-                    sellLeverage=leverage
-                )
-                print(f"[{bybit_symbol}] Entered buy order")
-                entry_price = current_price
-                position = 1
+            # if rrKNN.should_act(state):
+            invest = max(capital * 0.05, 15)
+            step, min_qty = get_qty_step(symbol)
+            total_qty = calc_order_qty(invest, get_mark_price(symbol), min_qty, step)
+            session.place_order(
+                category="linear",
+                symbol=bybit_symbol,
+                side="Buy",
+                order_type="Market",
+                qty=totalqty,
+                reduce_only=False,
+                time_in_force="IOC",
+                buyLeverage=leverage,
+                sellLeverage=leverage
+            )
+            print(f"[{bybit_symbol}] Entered buy order")
+            entry_price = current_price
+            position = 1
 
         elif action == 2 and position == 0:  # Sell
             state = df[t - window_size:t].values.flatten().tolist()
-            if rrKNN.should_act(state):
-                invest = max(capital * 0.05, 15)
-                step, min_qty = get_qty_step(symbol)
-                total_qty = calc_order_qty(invest, get_mark_price(symbol), min_qty, step)
-                session.place_order(
-                    category="linear",
-                    symbol=bybit_symbol,
-                    side="Sell",
-                    order_type="Market",
-                    qty=totalqty,
-                    reduce_only=False,
-                    time_in_force="IOC",
-                    buyLeverage=leverage,
-                    sellLeverage=leverage
-                )
-                print(f"[{bybit_symbol}] Entered sell order")
-                entry_price = current_price
+            # if rrKNN.should_act(state):
+            invest = max(capital * 0.05, 15)
+            step, min_qty = get_qty_step(symbol)
+            total_qty = calc_order_qty(invest, get_mark_price(symbol), min_qty, step)
+            session.place_order(
+                category="linear",
+                symbol=bybit_symbol,
+                side="Sell",
+                order_type="Market",
+                qty=totalqty,
+                reduce_only=False,
+                time_in_force="IOC",
+                buyLeverage=leverage,
+                sellLeverage=leverage
+            )
+            print(f"[{bybit_symbol}] Entered sell order")
+            entry_price = current_price
 
-                position = -1
+            position = -1
         elif action == 3 and position != 0:  # Close position
             close_side = "Sell" if position == 1 else "Buy"
             session.place_order(
@@ -1308,7 +943,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
 api_key = "8g4j5EW0EehZEbIaRD"
 api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
-keep_session_alive("BTCUSDT")
+keep_session_alive()
 def main():
     # global lstm_ppo_agent
     counter = 0
@@ -1316,22 +951,18 @@ def main():
     train = False
     if train:
         for symbol in symbols:
+            df = None
             print(f"Initialized looping over symbols, currently at #{counter + 1}, {symbol}")
             if symbol == "XAUUSD":
-                data = load_last_mb_xauusd("/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv")
+                df = load_last_mb_xauusd("/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv")
             else:
-                data = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
-
-            data = add_indicators(data)
-
+                df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
+            df = add_indicators(data)
             lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
-
-            t = threading.Thread(target=train_bot, args=(data, lstm_ppo_agent, symbol))
-            # train_bot(data, lstm_ppo_agent, symbol)
-
+            t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbol))
+            train_bot(df, lstm_ppo_agent, symbol)
             t.start()
             test_threads.append(t)
-
             counter += 1
         if symbol == "XAUUSD":
             train = False
@@ -1344,18 +975,13 @@ def main():
     df = []
 
     for bybit_symbol in bybit_symbols:
-        data = get_klines_df(bybit_symbol, 1)
-        data = add_indicators(data)
-        df.append(data)
-
+        df = get_klines_df(bybit_symbol, 1)
+        df = add_indicators(df)
         lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
-
-        t = threading.Thread(target=test_bot, args=(data, lstm_ppo_agent, symbols[counter], bybit_symbol))
+        t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[counter], bybit_symbol))
         t.start()
         test_threads.append(t)
-
         counter += 1
-
     for t in test_threads:
         t.join()
 
