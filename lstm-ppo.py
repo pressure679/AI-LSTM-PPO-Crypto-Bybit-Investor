@@ -906,10 +906,8 @@ def train_bot(df, agent, symbol, window_size=20):
     # rrKNN.save()
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
 
-# Bybit Demo API Key and Secret - eS2OePPbbpRvE1yHck - XFQB3NCBxpyHWxgYv8tef8l7McVcvCxRLR0X
-# Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
-api_key = "eS2OePPbbpRvE1yHck"
-api_secret = "XFQB3NCBxpyHWxgYv8tef8l7McVcvCxRLR0X"
+api_key = ""
+api_secret = ""
 session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
 keep_session_alive()
 def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
