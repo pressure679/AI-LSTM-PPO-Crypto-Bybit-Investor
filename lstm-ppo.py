@@ -58,7 +58,7 @@ def load_last_mb(filepath, symbol, mb_size=5):
 
     return df
 
-def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=7, delimiter=';', col_names=None):
+def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=3, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
     
