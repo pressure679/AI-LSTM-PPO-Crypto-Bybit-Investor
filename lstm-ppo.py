@@ -972,8 +972,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
 
         # print(f"action: {action}")
 
-        price = df.iloc[t]["Close"]
-        next_price = df.iloc[t + 1]["Close"]
+        price = df.iloc[-1]["Close"]
+        # next_price = df.iloc[t + 1]["Close"]
         day = str(df.index[t]).split(' ')[0]
 
         if current_day is None:
