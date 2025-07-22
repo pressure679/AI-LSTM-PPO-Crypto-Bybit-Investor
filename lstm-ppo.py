@@ -11,9 +11,9 @@ import threading
 import time
 from decimal import Decimal
 from pybit.unified_trading import HTTP
-from sklearn.neighbors import KNeighborsRegressor
+# from sklearn.neighbors import KNeighborsRegressor
 import warnings
-import yfinance
+# import yfinance
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 # Popular crypto: "DOGEUSDT", "HYPEUSDT", "FARTCOINUSDT", "SUIUSDT", "INITUSDT", "BABYUSDT", "NILUSDT"
@@ -660,50 +660,50 @@ def value_loss(values, returns):
     return 0.5 * np.mean((returns - values) ** 2)
 
 
-class RewardRateKNN:
-    def __init__(self, symbol, k=10, reward_threshold=0.003):
-        self.symbol = symbol
-        self.k = k
-        self.threshold = reward_threshold
-        self.model = KNeighborsRegressor(n_neighbors=k)
-        self.X = []
-        self.y = []
+# class RewardRateKNN:
+#     def __init__(self, symbol, k=10, reward_threshold=0.003):
+#         self.symbol = symbol
+#         self.k = k
+#         self.threshold = reward_threshold
+#         self.model = KNeighborsRegressor(n_neighbors=k)
+#         self.X = []
+#         self.y = []
 
-    def add_experience(self, state, reward):
-        self.X.append(state)
-        self.y.append(reward)
+#     def add_experience(self, state, reward):
+#         self.X.append(state)
+#         self.y.append(reward)
 
-    def train(self):
-        if len(self.X) >= self.k:
-            self.model.fit(self.X, self.y)
+#     def train(self):
+#         if len(self.X) >= self.k:
+#             self.model.fit(self.X, self.y)
 
-    def should_act(self, current_state):
-        if len(self.X) < self.k:
-            return True
-        predicted_reward = self.model.predict([current_state])[0]
-        return predicted_reward >= self.threshold
+#     def should_act(self, current_state):
+#         if len(self.X) < self.k:
+#             return True
+#         predicted_reward = self.model.predict([current_state])[0]
+#         return predicted_reward >= self.threshold
 
-    def save(self, path=None):
-        if path is None:
-            path = f"/mnt/chromeos/removable/sd_card/LSTM-PPO-saves/reward_rate_knn-{self.symbol}.pkl"
-        with open(path, "wb") as f:
-            pickle.dump({
-                "X": self.X,
-                "y": self.y,
-                "model": self.model
-            }, f)
+#     def save(self, path=None):
+#         if path is None:
+#             path = f"/mnt/chromeos/removable/sd_card/LSTM-PPO-saves/reward_rate_knn-{self.symbol}.pkl"
+#         with open(path, "wb") as f:
+#             pickle.dump({
+#                 "X": self.X,
+#                 "y": self.y,
+#                 "model": self.model
+#             }, f)
 
-    def load(self, path=None):
-        if path is None:
-            path = f"/mnt/chromeos/removable/sd_card/LSTM-PPO-saves/reward_rate_knn-{self.symbol}.pkl"
-        try:
-            with open(path, "rb") as f:
-                data = pickle.load(f)
-                self.X = data["X"]
-                self.y = data["y"]
-                self.model = data["model"]
-        except FileNotFoundError:
-            print(f"No saved KNN found at {path}. Starting fresh.")
+#     def load(self, path=None):
+#         if path is None:
+#             path = f"/mnt/chromeos/removable/sd_card/LSTM-PPO-saves/reward_rate_knn-{self.symbol}.pkl"
+#         try:
+#             with open(path, "rb") as f:
+#                 data = pickle.load(f)
+#                 self.X = data["X"]
+#                 self.y = data["y"]
+#                 self.model = data["model"]
+#         except FileNotFoundError:
+#             print(f"No saved KNN found at {path}. Starting fresh.")
 
 def sharpe_ratio(returns, risk_free_rate=0.0):
     mean_ret = np.mean(returns)
@@ -757,7 +757,7 @@ def train_bot(df, agent, symbol, window_size=20):
 
         state_seq = df[t - window_size:t].values.astype(np.float32)
         if state_seq.shape != (14, agent.state_size):
-            # print("Shape mismatch:", state_seq.shape)
+            print("Shape mismatch:", state_seq.shape)
             continue
 
         result = agent.select_action(state_seq)
@@ -951,6 +951,9 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     tp_price = 0.0
     # leverage=50
     qty_step, min_qty = get_qty_step(bybit_symbol, session)
+    current_day = None
+    reward = 0.0
+    save_counter = 0
 
     while True:
         wait_until_next_candle(1)
@@ -961,7 +964,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         # state_seq = df[-window_size:].values.astype(np.float32)
         state_seq = df[-14:].values.astype(np.float32)
         if state_seq.shape != (14, agent.state_size):
-            # print("Shape mismatch:", state_seq.shape)
+            print("Shape mismatch:", state_seq.shape)
             continue
 
         result = agent.select_action(state_seq)
@@ -973,8 +976,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         # print(f"action: {action}")
 
         price = df.iloc[-1]["Close"]
-        # next_price = df.iloc[t + 1]["Close"]
-        day = str(df.index[t]).split(' ')[0]
+        # next_price = df.iloc[-1]["Close"]
+        day = str(df.index[-1]).split(' ')[0]
 
         if current_day is None:
             current_day = day
@@ -995,17 +998,17 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             daily_pnl = 0.0
 
         # Force close if ADX zone becomes 0
-        if df["ADX_zone"].iloc[t] == 0 and position != 0:
+        if df["ADX_zone"].iloc[-1] == 0 and position != 0:
             action = 3
-        elif df["ADX_zone"].iloc[t] == 0:
+        elif df["ADX_zone"].iloc[-1] == 0:
             action = 0
 
-        macd_zone = df.iloc[t]['macd_zone']
-        plus_di = df.iloc[t]['+DI_val']
-        minus_di = df.iloc[t]['-DI_val']
-        bulls = df.iloc[t]['Bulls']
-        bears = df.iloc[t]['Bears']
-        atr = df.iloc[t]['ATR']
+        macd_zone = df.iloc[-1]['macd_zone']
+        plus_di = df.iloc[-1]['+DI_val']
+        minus_di = df.iloc[-1]['-DI_val']
+        bulls = df.iloc[-1]['Bulls']
+        bears = df.iloc[-1]['Bears']
+        atr = df.iloc[-1]['ATR']
         
         tp_dist = atr * 3
         sl_dist = atr * 1.5
@@ -1241,17 +1244,15 @@ def main():
         for symbol in symbols:
             df = None
             print(f"Initialized looping over symbols, currently at #{counter + 1}, {symbol}")
-            # if symbol == "XAUUSD":
-            #     df = load_last_mb_xauusd("/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv")
-            # else:
-            #     continue
-            # else:
-            #     df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
-            df = yf.download(yf_symbols[counter], interval="1m", period="7d")
+            if symbol == "XAUUSD":
+                df = load_last_mb_xauusd("/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv")
+            else:
+                df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
+            # df = yf.download(yf_symbols[counter], interval="1m", period="7d")
             df = df[['Open', "High", "Low", "Close"]].values
-            df = df.reshape(20, 4)
+            # df = df.reshape(20, 4)
             df = add_indicators(df)
-            df = df.reshape(20, 14)
+            # df = df.reshape(20, 14)
             lstm_ppo_agent = LSTMPPOAgent(state_size=14, hidden_size=64, action_size=4)
             t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbol))
             # train_bot(df, lstm_ppo_agent, symbol)
