@@ -26,7 +26,7 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 # epsilon = 0.1
 
 # def load_last_mb(filepath, symbol, mb_size=20):
-def load_last_mb(filepath, symbol, mb_size=20):
+def load_last_mb(filepath, symbol, mb_size=10):
     # Search for a file containing the symbol in its name
     matching_files = [f for f in os.listdir(filepath) if symbol.lower() in f.lower()]
     if not matching_files:
@@ -290,10 +290,20 @@ def add_indicators(df):
     )
     
     # MACD trend (histogram): -1 bearish, 1 bullish, 0 neutral
-    df['macd_trend'] = np.select(
+    df['Bears'] = np.select(
         [
-            df['macd_histogram'] < 0,
-            df['macd_histogram'] > 0
+            df['Bears'] < 0,
+            df['Bears'] > 0
+        ],
+        [-1, 1],
+        default=0
+    )
+
+    # MACD trend (histogram): -1 bearish, 1 bullish, 0 neutral
+    df['Bulls'] = np.select(
+        [
+            df['Bulls'] < 0,
+            df['Bulls'] > 0
         ],
         [-1, 1],
         default=0
@@ -304,7 +314,7 @@ def add_indicators(df):
     # df["Low"]   = df["Low"] / df["Close"] - 1
     # df["Close"] = df["Close"].pct_change().fillna(0)  # as return
 
-    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_direction", "macd_trend", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
+    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_direction", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
 
     df.dropna(inplace=True)
     return df
@@ -421,7 +431,6 @@ def wait_until_next_candle(interval_minutes):
     sleep_seconds = seconds_per_candle - (now % seconds_per_candle)
     # print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
     time.sleep(sleep_seconds)
-
 
 class LSTMPPOAgent:
     def __init__(self, state_size, hidden_size, action_size, lr=1e-3, gamma=0.95, clip_ratio=0.2):
@@ -691,7 +700,24 @@ class RewardRateKNN:
                 self.model = data["model"]
         except FileNotFoundError:
             print(f"No saved KNN found at {path}. Starting fresh.")
-capital = 1000
+
+def sharpe_ratio(returns, risk_free_rate=0.0):
+    mean_ret = np.mean(returns)
+    std_ret = np.std(returns)
+    if std_ret == 0:
+        return 0
+    return (mean_ret - risk_free_rate) / std_ret
+
+def sortino_ratio(returns, risk_free_rate=0.0):
+    mean_ret = np.mean(returns)
+    downside_returns = [r for r in returns if r < risk_free_rate]
+    if len(downside_returns) == 0:
+        return 0
+    downside_std = np.std(downside_returns)
+    if downside_std == 0:
+        return 0
+    return (mean_ret - risk_free_rate) / downside_std
+capital = 96
 def train_bot(df, agent, symbol, window_size=20):
     capital_lock = threading.Lock()
     global capital
@@ -702,220 +728,192 @@ def train_bot(df, agent, symbol, window_size=20):
     pct = 0.0
     daily_pnl = 0.0
     drawdown = 0.0
+    reward = 0.0
     position = 0
     sl_price = 0.0
     tp_price = 0.0
     entry_price = 0.0
     price = 0.0
+    leverage = 50
+    position_size = 0.0
+    daily_trades = 0
+    daily_returns = []
+    action = 0
     current_day = None
     save_counter = 0
     # rrKNN = RewardRateKNN(symbol)
-
+    
     for t in range(window_size, len(df) - 1):
-        # Prepare state sequence
-        if df['ADX_zone'].iloc[t] == 0:
-            continue
-        state_seq = df[t - window_size:t].values.astype(np.float32)
-        if state_seq.shape[0] == window_size and state_seq.shape[1] == agent.state_size:
-            pass  # you're fine
-        else:
-            print("Shape mismatch:", state_seq.shape, "Expected:", (window_size, agent.state_size))
-            # handle error or skip
+        # if position != 0:
+        #     action = 3
+        # else:
+        #     action = 0
+        # if df['ADX_zone'].iloc[t] == 0:
+        #     continue
 
-        # === Get action ===
+        state_seq = df[t - window_size:t].values.astype(np.float32)
+        if state_seq.shape != (window_size, agent.state_size):
+            print("Shape mismatch:", state_seq.shape)
+            continue
+
         result = agent.select_action(state_seq)
         if result is None:
-            continue  # or continue if inside a loop
+            continue
+
         action, logprob, value = result
 
-        # === Market info ===
+        # print(f"action: {action}")
+
         price = df.iloc[t]["Close"]
         next_price = df.iloc[t + 1]["Close"]
         day = str(df.index[t]).split(' ')[0]
 
-        reward = 0.0
         if current_day is None:
             current_day = day
         elif day != current_day:
-            print(f"[{symbol}] Day {current_day} - PnL: {(daily_pnl / capital) * 100:.2f}% - Balance: {capital:.2f}")
+            # print(f"[{symbol}] Day {current_day} - PnL: {(daily_pnl / capital) * 100:.2f}% - Balance: {capital:.2f}")
+            daily_return_pct = (daily_pnl / capital) * 100 if capital != 0 else 0
+            daily_returns.append(daily_return_pct)
+
+            avg_profit_per_trade = daily_pnl / daily_trades if daily_trades > 0 else 0
+            sr = sharpe_ratio(daily_returns)
+            sor = sortino_ratio(daily_returns)
+
+            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_return_pct:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
+            
             current_day = day
+            capital += daily_pnl
+
             daily_pnl = 0.0
-        if df["ADX_zone"].iloc[-t] == 0:
-            if position != 0:
+
+        # Force close if ADX zone becomes 0
+        if df["ADX_zone"].iloc[t] == 0 and position != 0:
+            action = 3
+        elif df["ADX_zone"].iloc[t] == 0:
+            action = 0
+
+        macd_zone = df.iloc[t]['macd_zone']
+        plus_di = df.iloc[t]['+DI_val']
+        minus_di = df.iloc[t]['-DI_val']
+        bulls = df.iloc[t]['Bulls']
+        bears = df.iloc[t]['Bears']
+        atr = df.iloc[t]['ATR']
+        
+        tp_dist = atr * 3
+        sl_dist = atr * 1.5
+
+        if position == 0:
+            if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
+                invest = max(capital * 0.05, 15)
+                position_size = invest * leverage
+                entry_price = price
+                capital -= 0.0089
+                position = 1
+                partial_tp_hit = [False, False, False]
+                position_pct_left = 1.0
+                daily_trades += 1
+                
+            elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
+                invest = max(capital * 0.05, 15)
+                position_size = invest * leverage
+                entry_price = price
+                capital -= 0.0089
+                position = -1
+                partial_tp_hit = [False, False, False]
+                position_pct_left = 1.0
+                daily_trades += 1
+
+        elif position == 1:
+            profit_pct = (price - entry_price) / entry_price
+            realized_pnl = profit_pct * position_size  # not margin
+            tp_levels = [
+                entry_price + 0.4 * tp_dist,
+                entry_price + 0.5 * tp_dist,
+                entry_price + 0.6 * tp_dist
+            ]
+            sl_price = entry_price - sl_dist
+            tp_price = entry_price + tp_dist
+            tp_shares = [0.4, 0.2, 0.2]
+
+            for i in range(3):
+                if not partial_tp_hit[i] and price >= tp_levels[i]:
+                    realized = position_size * tp_shares[i]
+                    pnl = realized * profit_pct
+                    # capital += pnl
+                    reward += pnl / capital
+                    daily_pnl += pnl
+                    invest -= realized
+                    position_pct_left -= tp_shares[i]
+                    partial_tp_hit[i] = True
+                    action = 0
+
+            if price >= tp_price or price <= sl_price:
+                final_pct = (price - entry_price) / entry_price
+                pnl = position_size * final_pct
+                # capital += pnl
+                reward += pnl / capital
+                daily_pnl += pnl
+                invest = 0
+                position = 0
+                position_pct_left = 1.0
+                partial_tp_hit = [False, False, False]
                 action = 3
-            else:
-                action = 0
-        # === Action logic ===
-        if action == 1 and position == 0:  # Buy
-            entry_price = price
-            invest = max(capital * 0.05, 15)
-            capital -= 0.0089
-            if drawdown > 0:
-                invest *= (1 + drawdown)
-            position = 1
-            sl_price = entry_price - df['ATR'].iloc[t] * 1.5
-            tp_price = entry_price + df['ATR'].iloc[t] * 3
-            # if df['macd_direction'].iloc[t] == -1:
-            #     reward -= 1
-            # if df['macd_direction'].iloc[t] == 1:
-            #     reward += 1
-            if df['macd_trend'].iloc[t] == -1:
-                reward -= 1
-            # if df['macd_trend'].iloc[t] == 1:
-            #     reward += 1
-            # if df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
-            #     reward -= 1
-            if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
-                reward += 1
-            # if df['EMA_crossover'].iloc[t] == -1:
-            #     reward -= 1
-            if df['EMA_crossover'].iloc[t] == 1:
-                reward += 1
-            # if df['Bears'].iloc[t] < 0:
-            #     reward -= 1
-            if df['Bulls'].iloc[t] > 0:
-                reward += 1
-            if df['RSI_zone'].iloc[t] != 4:
-                reward += 1
-            # else:
-            #     reward -= 1
-        elif action == 2 and position == 0:  # Sell
-            entry_price = price
-            invest = max(capital * 0.05, 15)
-            capital -= 0.0089
-            if drawdown > 0:
-                invest *= (1 + drawdown)
-            position = -1
-            sl_price = entry_price + df['ATR'].iloc[t] * 1.5
-            tp_price = entry_price - df['ATR'].iloc[t] * 3
-            # if df['macd_direction'].iloc[t] == 1:
-            #     reward -= 1
-            # if df['macd_direction'].iloc[t] == -1:
-            #     reward += 1
-            # if df['macd_trend'].iloc[t] == 1:
-            #     reward -= 1
-            if df['macd_trend'].iloc[t] == -1:
-                reward += 1
-            # if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
-            #     reward -= 1
-            if df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
-                reward += 1
-            # if df['EMA_crossover'].iloc[t] == 1:
-            #     reward -= 1
-            if df['EMA_crossover'].iloc[t] == -1:
-                reward += 1
-            # if df['Bulls'].iloc[t] > 0:
-            #     reward -= 1
-            if df['Bears'].iloc[t] < 0:
-                reward += 1
-            if df['RSI_zone'].iloc[t] != 1:
-                reward += 1
-            # else:
-            #     reward -= 1
-        elif action == 3 and position != 0:  # Close
-            pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
-            # pct = (price - entry_price) if position == 1 else (entry_price - price)
-            # if pct < 0:
-            #     reward -= pct * 100
-            # else:
-            #     reward += pct * 100
-            pnl = pct * 50 * invest
-            # reward += pct * 10
-            reward += pnl
-            capital -= 0.0089
-            with capital_lock:
-                capital += pnl
-            invest = 0
-            daily_pnl += pnl
-            all_trade_pcts.append(pct)
-            mean_pct = np.mean(all_trade_pcts)
-            if pct > mean_pct:
-                reward += 1
-            if pct < 0:
-                reward -= 1
-            if capital > peak_capital:
-                peak_capital = capital
-                reward += 1
-            else:
-                drawdown = (peak_capital - capital) / peak_capital
-                reward -= drawdown * 10  # e.g., 5% drawdown → reward -= 0.5
-                # invest *= (1 + drawdown)
-            pct = 0.0
-            pnl = 0
-            position = 0
-            invest = 0
-            state = df[t - window_size:t].values.flatten().tolist()
-            # rrKNN.add_experience(state, reward)
-        else:  # Hold
-            if position != 0:
-                pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
-                # pct = (price - entry_price) if position == 1 else (entry_price - price)
-                reward += pct * 10
-                if position == 1:
-                    # if df['macd_direction'].iloc[t] == 1:
-                    #     reward += 1
-                    # if df['macd_direction'].iloc[t] == -1:
-                    #     reward -= 1
-                    # if df['macd_trend'].iloc[t] == -1:
-                    #     reward -= 1
-                    if df['macd_trend'].iloc[t] == 1:
-                        reward += 1
-                    # if df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
-                    #     reward -= 1
-                    if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
-                        reward += 1
-                    # if df['EMA_crossover'].iloc[t] == -1:
-                    #     reward -= 1
-                    if df['EMA_crossover'].iloc[t] == 1:
-                        reward += 1
-                    # if df['Bears'].iloc[t] < 0:
-                    #     reward -= 1
-                    if df['Bulls'].iloc[t] > 0:
-                        reward += 1
-                    if df['RSI_zone'].iloc[t] != 4:
-                        reward += 1
-                    # else:
-                    #     reward -= 1
-                elif position == -1:
-                    # if df['macd_direction'].iloc[t] == 1:
-                    #     reward -= 1
-                    # if df['macd_direction'].iloc[t] == -1:
-                    #     reward += 1
-                    # if df['macd_trend'].iloc[t] == 1:
-                    #     reward -= 1
-                    if df['macd_trend'].iloc[t] == -1:
-                        reward += 1
-                    # if df['+DI_val'].iloc[t] > df['-DI_val'].iloc[t]:
-                    #     reward -= 1
-                    if df['+DI_val'].iloc[t] < df['-DI_val'].iloc[t]:
-                        reward += 1
-                    # if df['EMA_crossover'].iloc[t] == 1:
-                    #     reward -= 1
-                    if df['EMA_crossover'].iloc[t] == -1:
-                        reward += 1
-                    # if df['Bulls'].iloc[t] > 0:
-                    #     reward -= 1
-                    if df['Bears'].iloc[t] < 0:
-                        reward += 1
-                    if df['RSI_zone'].iloc[t] != 1:
-                        reward += 1
-                    # else:
-                    #     reward -= 1
+                    
+        elif position == -1:
+            profit_pct = (entry_price - price) / entry_price
+            tp_levels = [
+                entry_price - 0.4 * tp_dist,
+                entry_price - 0.5 * tp_dist,
+                entry_price - 0.6 * tp_dist
+            ]
+            sl_price = entry_price + sl_dist
+            tp_price = entry_price - tp_dist
+            tp_shares = [0.4, 0.2, 0.2]
+            
+            for i in range(3):
+                if not partial_tp_hit[i] and price <= tp_levels[i]:
+                    realized = position_size * tp_shares[i]
+                    pnl = realized * profit_pct
+                    # capital += realized + pnl
+                    reward += pnl / capital
+                    daily_pnl += pnl
+                    invest -= realized
+                    position_pct_left -= tp_shares[i]
+                    partial_tp_hit[i] = True
+                    action = 0
+
+            if price <= tp_price or price >= sl_price:
+                final_pct = (entry_price - price) / entry_price
+                pnl = position_size * final_pct
+                # capital += invest + pnl
+                reward += pnl / capital
+                daily_pnl += pnl
+                invest = 0
+                position = 0
+                position_pct_left = 1.0
+                partial_tp_hit = [False, False, False]
+                action = 3
+            
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
         if save_counter % 10080 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
-    agent.savecheckpoint(symbol)
+            agent.savecheckpoint(symbol)
     print(f"[INFO] Saved checkpoint at step {save_counter}")
     # rrKNN.train()
     # rrKNN.save()
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
 
+# Bybit Demo API Key and Secret - eS2OePPbbpRvE1yHck - XFQB3NCBxpyHWxgYv8tef8l7McVcvCxRLR0X
+# Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
+api_key = "eS2OePPbbpRvE1yHck"
+api_secret = "XFQB3NCBxpyHWxgYv8tef8l7McVcvCxRLR0X"
+session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
+keep_session_alive()
 def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
-    max_window_size = 240
-    
+    # max_window_size = 240
     # rrKNN = RewardRateKNN(symbol)
     # rrKNN.load()
     agent.loadcheckpoint(symbol)
@@ -931,6 +929,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     sl_price = 0.0
     tp_price = 0.0
     # leverage=50
+    qty_step, min_qty = get_qty_step(bybit_symbol)
 
     while True:
         wait_until_next_candle(1)
@@ -938,122 +937,279 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         df = add_indicators(df)
         if df['ADX_zone'].iloc[-1] == 0:
             continue
-        state_seq = df[window_size:].values
-        current_price = df.iloc[-1]['Close']
-        day = str(df.index[-1]).split(' ')[0]
+        state_seq = df[-window_size:-t].values.astype(np.float32)
+        if state_seq.shape != (window_size, agent.state_size):
+            print("Shape mismatch:", state_seq.shape)
+            continue
 
-        action = agent.select_action(state_seq)
+        result = agent.select_action(state_seq)
+        if result is None:
+            continue
 
-        # Execute action
-        reward = 0.0
+        action, logprob, value = result
 
-        if action == 1 and position == 0:  # Buy
-            state = df[window_size:].values.flatten().tolist()
-            # if rrKNN.should_act(state):
-            invest = max(capital * 0.05, 15)
-            step, min_qty = get_qty_step(symbol)
-            total_qty = calc_order_qty(invest, get_mark_price(symbol), min_qty, step)
-            session.place_order(
-                category="linear",
-                symbol=bybit_symbol,
-                side="Buy",
-                order_type="Market",
-                qty=totalqty,
-                reduce_only=False,
-                time_in_force="IOC",
-                # buyLeverage=leverage,
-                # sellLeverage=leverage
-            )
-            print(f"[{bybit_symbol}] Entered buy order")
-            entry_price = current_price
-            position = 1
+        # print(f"action: {action}")
 
-        elif action == 2 and position == 0:  # Sell
-            state = df[t - window_size:t].values.flatten().tolist()
-            # if rrKNN.should_act(state):
-            invest = max(capital * 0.05, 15)
-            step, min_qty = get_qty_step(symbol)
-            total_qty = calc_order_qty(invest, get_mark_price(symbol), min_qty, step)
-            session.place_order(
-                category="linear",
-                symbol=bybit_symbol,
-                side="Sell",
-                order_type="Market",
-                qty=totalqty,
-                reduce_only=False,
-                time_in_force="IOC",
-                # buyLeverage=leverage,
-                # sellLeverage=leverage
-            )
-            print(f"[{bybit_symbol}] Entered sell order")
-            entry_price = current_price
+        price = df.iloc[t]["Close"]
+        next_price = df.iloc[t + 1]["Close"]
+        day = str(df.index[t]).split(' ')[0]
 
-            position = -1
-        elif action == 3 and position != 0:  # Close position
-            close_side = "Sell" if position == 1 else "Buy"
-            session.place_order(
-                category="linear",
-                symbol=bybit_symbol,
-                side=close_side,
-                order_type="Market",
-                qty=totalqty,
-                reduce_only=False,
-                time_in_force="IOC",
-                # buyLeverage=leverage,
-                # sellLeverage=leverage
-            )
-            capital = get_balance()
-            print(f"[{bybit_symbol}] Closed order")
-            position = 0
-            invest = 0
+        if current_day is None:
+            current_day = day
+        elif day != current_day:
+            # print(f"[{symbol}] Day {current_day} - PnL: {(daily_pnl / capital) * 100:.2f}% - Balance: {capital:.2f}")
+            daily_return_pct = (daily_pnl / capital) * 100 if capital != 0 else 0
+            daily_returns.append(daily_return_pct)
 
-        # Optional: Hold logic (for PnL tracking only)
-        # elif action == 0 and position != 0:
-            # if sl_price >= price:
+            avg_profit_per_trade = daily_pnl / daily_trades if daily_trades > 0 else 0
+            sr = sharpe_ratio(daily_returns)
+            sor = sortino_ratio(daily_returns)
+
+            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_return_pct:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
+            
+            current_day = day
+            capital += daily_pnl
+
+            daily_pnl = 0.0
+
+        # Force close if ADX zone becomes 0
+        if df["ADX_zone"].iloc[t] == 0 and position != 0:
+            action = 3
+        elif df["ADX_zone"].iloc[t] == 0:
+            action = 0
+
+        macd_zone = df.iloc[t]['macd_zone']
+        plus_di = df.iloc[t]['+DI_val']
+        minus_di = df.iloc[t]['-DI_val']
+        bulls = df.iloc[t]['Bulls']
+        bears = df.iloc[t]['Bears']
+        atr = df.iloc[t]['ATR']
+        
+        tp_dist = atr * 3
+        sl_dist = atr * 1.5
+
+        if position == 0:
+            if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
+                invest = max(capital * 0.05, 15)
+                position_size = calc_order_qty(float(invest) * 50, df['Close'].iloc[-1], min_qty, qty_step)
+                entry_price = price
+                # capital -= 0.0089
+                position = 1
+                print(f"[{bybit_symbol}] Entered Buy order")
+                session.place_order(
+                    category="linear",
+                    symbol=symbol,
+                    side="Buy",
+                    order_type="Market",
+                    qty=position_size,
+                    reduce_only=False,
+                    time_in_force="IOC"
+                )
+                tp_levels = [
+                    entry_price + 0.4 * tp_dist,
+                    entry_price + 0.5 * tp_dist,
+                    entry_price + 0.6 * tp_dist
+                ]
+                for i in range(3):
+                    # if not partial_tp_hit[i] and price >= tp_levels[i]:
+                    realized = position_size * tp_shares[i]
+                    pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                    # capital += pnl
+                    # reward += pnl / capital
+                    # daily_pnl += pnl
+                    # print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
+                    close_side = "Sell" if position == 1 else "Buy"
+                    response = session.place_active_order(
+                        symbol=symbol,
+                        side=close_side,  # opposite side to close position
+                        order_type="Market",
+                        qty=pnl,
+                        reduce_only=True,
+                        time_in_force="ImmediateOrCancel",
+                        leverage=leverage
+                    )
+                # partial_tp_hit = [False, False, False]
+                # position_pct_left = 1.0
+                daily_trades += 1
+                
+            elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
+                invest = max(capital * 0.05, 15)
+                position_size = calc_order_qty(float(invest)) * 50
+                entry_price = price
+                capital -= 0.0089
+                position = -1
+                print(f"[{bybit_symbol}] Entered Sell order")
+                session.place_order(
+                    category="linear",
+                    symbol=symbol,
+
+                    side="Sell",
+                    order_type="Market",
+                    qty=qty,
+                    reduce_only=False,
+                    time_in_force="IOC"
+                )
+                tp_levels = [
+                    entry_price - 0.4 * tp_dist,
+                    entry_price - 0.5 * tp_dist,
+                    entry_price - 0.6 * tp_dist
+                ]
+                for i in range(3):
+                    if not partial_tp_hit[i] and price >= tp_levels[i]:
+                        realized = position_size * tp_shares[i]
+                        pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                        # capital += pnl
+                        reward += pnl / capital
+                        daily_pnl += pnl
+                        print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
+                        close_side = "Sell" if position == 1 else "Buy"
+                        response = session.place_active_order(
+                            symbol=symbol,
+                            side=close_side,  # opposite side to close position
+                            order_type="Market",
+                            qty=pnl,
+                            reduce_only=True,
+                            time_in_force="ImmediateOrCancel",
+                            leverage=leverage
+                        )
+                partial_tp_hit = [False, False, False]
+                position_pct_left = 1.0
+                daily_trades += 1
+
+        elif position == 1:
+            profit_pct = (price - entry_price) / entry_price
+            realized_pnl = profit_pct * position_size  # not margin
+            tp_levels = [
+                entry_price + 0.4 * tp_dist,
+                entry_price + 0.5 * tp_dist,
+                entry_price + 0.6 * tp_dist
+            ]
+            sl_price = entry_price - sl_dist
+            tp_price = entry_price + tp_dist
+            tp_shares = [0.4, 0.2, 0.2]
+
+            # for i in range(3):
+            #     if not partial_tp_hit[i] and price >= tp_levels[i]:
+            #         realized = position_size * tp_shares[i]
+            #         pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+            #         # capital += pnl
+            #         reward += pnl / capital
+            #         daily_pnl += pnl
+            #         print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
+            #         close_side = "Sell" if position == 1 else "Buy"
+            #         response = session.place_active_order(
+            #             symbol=symbol,
+            #             side=close_side,  # opposite side to close position
+            #             order_type="Market",
+            #             qty=pnl,
+            #             reduce_only=True,
+            #             time_in_force="ImmediateOrCancel",
+            #             leverage=leverage
+            #         )
+            #         capital += pnl
+            #         position_pct_left -= tp_shares[i]
+            #         partial_tp_hit[i] = True
+            #         action = 0
+
+            # if price >= tp_price or price <= sl_price:
+            #     final_pct = (price - entry_price) / entry_price
+            #     pnl = position_size * final_pct
+            #         pnl = calc_order_qty(position_size * final_pct, entry_price, min_qty, qty_step)
+            #     # capital += pnl
+            #     reward += pnl / capital
+            #     daily_pnl += pnl
+            #     print(f"[{bybit_symbol}] Hit SL or TP, pnl pct: {price:6f}, realized {realized:.2f}, balance: {get_balance():.2f}")
             #     close_side = "Sell" if position == 1 else "Buy"
-            #     session.place_order(
-            #         category="linear",
-            #         symbol=bybit_symbol,
-            #         side=close_side,
+            #     response = session.place_active_order(
+            #         symbol=symbol,
+            #         side=close_side,  # opposite side to close position
             #         order_type="Market",
-            #         qty=totalqty,
-            #         reduce_only=False,
-            #         time_in_force="IOC",
-            #         buyLeverage=leverage,
-            #         sellLeverage=leverage
+            #         qty=pnl,
+            #         reduce_only=True,
+            #         time_in_force="ImmediateOrCancel",
+            #         leverage=leverage
             #     )
-            #     print("Closed order, sl hit ({bybit_symbol})")
+            #     invest = 0
             #     position = 0
-            # elif tp_price <= price:
+            #     position_pct_left = 1.0
+            #     partial_tp_hit = [False, False, False]
+            #     action = 3
+                    
+        elif position == -1:
+            profit_pct = (entry_price - price) / entry_price
+            tp_levels = [
+                entry_price - 0.4 * tp_dist,
+                entry_price - 0.5 * tp_dist,
+                entry_price - 0.6 * tp_dist
+            ]
+            sl_price = entry_price + sl_dist
+            tp_price = entry_price - tp_dist
+            tp_shares = [0.4, 0.2, 0.2]
+            
+            # for i in range(3):
+            #     if not partial_tp_hit[i] and price <= tp_levels[i]:
+            #         realized = position_size * tp_shares[i]
+            #         pnl = realized * profit_pct
+            #         # capital += realized + pnl
+            #         reward += pnl / capital
+            #         daily_pnl += pnl
+            #         print(f"[{bybit_symbol}] Hit TP {tp_levels[i]}, realized {realized}, balance: {get_balance()}")
+            #         close_side = "Sell" if position == 1 else "Buy"
+            #         response = session.place_active_order(
+            #             symbol=symbol,
+            #             side=close_side,  # opposite side to close position
+            #             order_type="Market",
+            #             qty=pnl,
+            #             reduce_only=True,
+            #             time_in_force="ImmediateOrCancel",
+            #             leverage=leverage
+            #         )
+            #         invest -= realized
+            #         position_pct_left -= tp_shares[i]
+            #         partial_tp_hit[i] = True
+            #         action = 0
+
+            # if price <= tp_price or price >= sl_price:
+            #     final_pct = (entry_price - price) / entry_price
+            #     pnl = position_size * final_pct
+            #     # capital += invest + pnl
+            #     reward += pnl / capital
+            #     daily_pnl += pnl
+            #     print(f"[{bybit_symbol}] Hit SL {price}, realized {pnl}, balance: {get_balance()}")
             #     close_side = "Sell" if position == 1 else "Buy"
-            #     session.place_order(
-            #         category="linear",
-            #         symbol=bybit_symbol,
-            #         side=close_side,
+            #     response = session.place_active_order(
+            #         symbol=symbol,
+            #         side=close_side,  # opposite side to close position
             #         order_type="Market",
-            #         qty=totalqty,
-            #         reduce_only=False,
-            #         time_in_force="IOC",
-            #         buyLeverage=leverage,
-            #         sellLeverage=leverage
+            #         qty=pnl,
+            #         reduce_only=True,
+            #         time_in_force="ImmediateOrCancel",
+            #         leverage=leverage
             #     )
-            #     print("Closed order, tp hit ({bybit_symbol})")
+            #     invest = 0
             #     position = 0
-            # pct = (current_price - entry_price) / entry_price if position == 1 else (entry_price - current_price) / entry_price
-            # pass  # you may log hold stats here if desired
+            #     position_pct_left = 1.0
+            #     partial_tp_hit = [False, False, False]
+            #     action = 3
+            
+        # === Store reward and update step ===
+        agent.store_transition(state_seq, action, logprob, value, reward)
+        save_counter += 1
+        if save_counter % 10080 == 0:
+            print(f"[INFO] Training PPO on step {save_counter}...")
+            agent.train()
+            agent.savecheckpoint(symbol)
+    print(f"[INFO] Saved checkpoint at step {save_counter}")
+    # rrKNN.train()
+    # rrKNN.save()
+    print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
 
-    # Final result
-    # total_return = ((capital - 1000.0) / 1000.0) * 100
-
-api_key = "8g4j5EW0EehZEbIaRD"
-api_secret = "ZocPJZUk8bTgNZUUkPfERCLTg001IY1XCCR4"
-session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
-keep_session_alive()
 def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
     train = True
+    test = True
     if train:
         for symbol in symbols:
             df = None
@@ -1063,30 +1219,28 @@ def main():
             else:
                 df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
             df = add_indicators(df)
-            lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=14, hidden_size=64, action_size=4)
             t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbol))
             # train_bot(df, lstm_ppo_agent, symbol)
             t.start()
             test_threads.append(t)
             counter += 1
-        if symbol == "XAUUSD":
-            train = False
     for t in test_threads:
         t.join()
 
     # Reset for test phase
     counter = 0
     test_threads = []
-
-    for bybit_symbol in bybit_symbols:
-        df = None
-        df = get_klines_df(bybit_symbol, 1)
-        df = add_indicators(df)
-        lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
-        t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[counter], bybit_symbol))
-        t.start()
-        test_threads.append(t)
-        counter += 1
+    if test:
+        for bybit_symbol in bybit_symbols:
+            df = None
+            df = get_klines_df(bybit_symbol, 1)
+            df = add_indicators(df)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
+            t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[counter], bybit_symbol))
+            t.start()
+            test_threads.append(t)
+            counter += 1
     for t in test_threads:
         t.join()
 
