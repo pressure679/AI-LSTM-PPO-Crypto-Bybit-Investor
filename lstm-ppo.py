@@ -1271,7 +1271,7 @@ def main():
             keep_session_alive(session)
             df = get_klines_df(bybit_symbol, 1, session)
             df = add_indicators(df)
-            lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=14, hidden_size=64, action_size=4)
             t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[counter], bybit_symbol, session))
             t.start()
             test_threads.append(t)
