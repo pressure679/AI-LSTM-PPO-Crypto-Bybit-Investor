@@ -26,7 +26,7 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 # epsilon = 0.1
 
 # def load_last_mb(filepath, symbol, mb_size=20):
-def load_last_mb(filepath, symbol, mb_size=10):
+def load_last_mb(filepath, symbol, mb_size=5):
     # Search for a file containing the symbol in its name
     matching_files = [f for f in os.listdir(filepath) if symbol.lower() in f.lower()]
     if not matching_files:
