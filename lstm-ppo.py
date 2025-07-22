@@ -372,7 +372,7 @@ def keep_session_alive(session):
             print(f"[WARN] Timeout on attempt {attempt+1}, retrying...")
             time.sleep(2)  # wait before retry
         finally:
-            threading.Timer(1500, keep_session_alive).start()  # Schedule next call
+            threading.Timer(1500, keep_session_alive, args=[session]).start()
 
 def get_balance(session):
     """
@@ -756,7 +756,7 @@ def train_bot(df, agent, symbol, window_size=20):
         #     continue
 
         state_seq = df[t - window_size:t].values.astype(np.float32)
-        if state_seq.shape != (window_size, agent.state_size):
+        if state_seq.shape != (14, agent.state_size):
             # print("Shape mismatch:", state_seq.shape)
             continue
 
@@ -958,9 +958,10 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         df = add_indicators(df)
         if df['ADX_zone'].iloc[-1] == 0:
             continue
-        state_seq = df[-window_size:].values.astype(np.float32)
-        if state_seq.shape != (window_size, agent.state_size):
-            print("Shape mismatch:", state_seq.shape)
+        # state_seq = df[-window_size:].values.astype(np.float32)
+        state_seq = df[-14:].values.astype(np.float32)
+        if state_seq.shape != (14, agent.state_size):
+            # print("Shape mismatch:", state_seq.shape)
             continue
 
         result = agent.select_action(state_seq)
@@ -1268,12 +1269,9 @@ def main():
             df = None
             session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
             keep_session_alive(session)
-            # df = get_klines_df(bybit_symbol, 1, session)
-            df = yf.download(yf_symbols[counter], interval="1m", period="7d")
-            df = df.reshape(20, 4)
+            df = get_klines_df(bybit_symbol, 1, session)
             df = add_indicators(df)
-            df = df.reshape(20, 14)
-            lstm_ppo_agent = LSTMPPOAgent(state_size=14, hidden_size=64, action_size=4)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
             t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[counter], bybit_symbol, session))
             t.start()
             test_threads.append(t)
