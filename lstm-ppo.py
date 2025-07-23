@@ -524,7 +524,7 @@ class LSTMPPOAgent:
 
             return action, logprob, value
         except Exception as e:
-            print(f"❌ select_action error: {e}")
+            # print(f"❌ select_action error: {e}")
             return None
 
     def store_transition(self, state_seq, action, logprob, value, reward):
@@ -770,7 +770,7 @@ def train_bot(df, agent, symbol, window_size=20):
 
         state_seq = df[t - 14:t].values.astype(np.float32)
         if state_seq.shape != (14, agent.state_size):
-            print("Shape mismatch:", state_seq.shape)
+            # print("Shape mismatch:", state_seq.shape)
             continue
 
         result = agent.select_action(state_seq)
@@ -986,10 +986,14 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         with capital_lock:
             wait_until_next_candle(1)
             print()
-            df_buffer = get_klines_df(bybit_symbol, 1, session, limit=30)
-            df_buffer = add_indicators(df_buffer)
-            df = pd.concat([df, df_buffer.iloc[-1]], ignore_index=True)
-            df = df.iloc[1:].reset_index(drop=True)
+            # df_buffer = get_klines_df(bybit_symbol, 1, session, limit=30)
+            # df_buffer = add_indicators(df_buffer)
+            # df_buffer = df_buffer.reshape(15, 14)
+            # print(f"df_buffer columns: {df_buffer.columns}")
+            # df = pd.concat([df, df_buffer.iloc[-1]], ignore_index=True)
+            # df = df.iloc[1:].reset_index(drop=True)
+            df = get_klines_df(bybit_symbol, 1, session, limit=240)
+            df = add_indicators(df)
             # print(f'price: {df['Close'].iloc[-1]}')
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"=== {bybit_symbol} stats at {now} ===")
@@ -1014,9 +1018,9 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                 continue
             # state_seq = df[-window_size:].values.astype(np.float32)
             state_seq = df[-14:].values.astype(np.float32)
-            # if state_seq.shape != (14, agent.state_size):
-            #     print("Shape mismatch:", state_seq.shape)
-            #     continue
+            if state_seq.shape != (14, agent.state_size):
+                # print("Shape mismatch:", state_seq.shape)
+                continue
 
             result = agent.select_action(state_seq)
             if result is None:
@@ -1319,6 +1323,7 @@ def main():
             if symbol == "XAUUSD":
                 df = load_last_mb_xauusd("/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv")
             else:
+            #     continue
                 df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
             # df = yf.download(yf_symbols[counter], interval="1m", period="7d")
             # df = df[['Open', "High", "Low", "Close"]].values
