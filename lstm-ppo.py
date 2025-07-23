@@ -955,11 +955,11 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     # rrKNN = RewardRateKNN(symbol)
     # rrKNN.load()
     agent.loadcheckpoint(symbol)
-    session = HTTP(
-        api_key=api_key,
-        api_secret=api_secret,
-        demo=False  # or False for mainnet
-    )
+    # session = HTTP(
+    #     api_key=api_key,
+    #     api_secret=api_secret,
+    #     demo=False  # or False for mainnet
+    # )
     capital = get_balance(session)
     peak_capital = capital
     # session_position = session.get_positions(category="linear", symbol=symbol)
@@ -981,6 +981,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     daily_pnl = 0.0
     df = get_klines_df(bybit_symbol, 1, session)
     df = add_indicators(df)
+    begun = False
+    partial_tp_hit = []
 
     while True:
         with capital_lock:
@@ -1152,27 +1154,27 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         entry_price - 0.6 * tp_dist
                     ]
                     for i in range(3):
-                        if not partial_tp_hit[i] and price >= tp_levels[i]:
-                            realized = position_size * tp_shares[i]
-                            pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
-                            # capital += pnl
-                            reward += pnl / capital
-                            daily_pnl += pnl
-                            print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance(session):.2f}")
-                            close_side = "Sell" if position == 1 else "Buy"
-                            response = session.place_active_order(
-                                symbol=bybit_symbol,
-                                side=close_side,  # opposite side to close position
-                                order_type="Limit",
-                                qty=str(round(pnl, 6)),
-                                reduce_only=True,
-                                # time_in_force="ImmediateOrCancel"
-                                # time_in_force="IOC"
-                                # leverage=leverage
-                            )
-                            partial_tp_hit = [False, False, False]
-                            position_pct_left = 1.0
-                            daily_trades += 1
+                        # if not partial_tp_hit[i] and price >= tp_levels[i]:
+                        realized = position_size * tp_shares[i]
+                        pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                        # capital += pnl
+                        reward += pnl / capital
+                        daily_pnl += pnl
+                        # print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance(session):.2f}")
+                        close_side = "Sell" if position == 1 else "Buy"
+                        response = session.place_active_order(
+                            symbol=bybit_symbol,
+                            side=close_side,  # opposite side to close position
+                            order_type="Limit",
+                            qty=str(round(pnl, 6)),
+                            reduce_only=True,
+                            # time_in_force="ImmediateOrCancel"
+                            # time_in_force="IOC"
+                            # leverage=leverage
+                        )
+                        partial_tp_hit = [False, False, False]
+                        position_pct_left = 1.0
+                        daily_trades += 1
 
             elif position == 1:
                 profit_pct = (price - entry_price) / entry_price
@@ -1297,6 +1299,14 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
         # if save_counter % 10080 == 0:
+        # if not begun:
+        #     for t in range(30, len(df)):
+        #         if t % 60 == 0:
+        #             print(f"[INFO] Training PPO on step {save_counter}...")
+        #             agent.train()
+        #             agent.savecheckpoint(symbol)
+        #             # print()
+        #             print(f"[INFO] Saved checkpoint at step {save_counter}")
         if save_counter % 60 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
