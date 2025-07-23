@@ -943,8 +943,10 @@ def train_bot(df, agent, symbol, window_size=20):
     # rrKNN.save()
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
 
-api_key = ""
-api_secret = ""
+# Bybit Demo API Key and Secret - eS2OePPbbpRvE1yHck - XFQB3NCBxpyHWxgYv8tef8l7McVcvCxRLR0X
+# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
+api_key = "PoP1ud3PuWajwecc4S"
+api_secret = "z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU"
 def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     global api_key
     global api_secret
@@ -977,13 +979,17 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     atr = 0.0
     tp_shares = []
     daily_pnl = 0.0
+    df = get_klines_df(bybit_symbol, 1, session)
+    df = add_indicators(df)
 
     while True:
         with capital_lock:
             wait_until_next_candle(1)
             print()
-            df = get_klines_df(bybit_symbol, 1, session)
-            df = add_indicators(df)
+            df_buffer = get_klines_df(bybit_symbol, 1, session, limit=30)
+            df_buffer = add_indicators(df_buffer)
+            df = pd.concat([df, df_buffer.iloc[-1]], ignore_index=True)
+            df = df.iloc[1:].reset_index(drop=True)
             # print(f'price: {df['Close'].iloc[-1]}')
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"=== {bybit_symbol} stats at {now} ===")
@@ -1303,7 +1309,7 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = True
+    train = False
     test = True
     
     if train:
