@@ -277,6 +277,16 @@ def add_indicators(df):
         default=0
     )
 
+    # EMA crossover: 1 if EMA_7 > EMA_14 > EMA_28, -1 if EMA_7 < EMA_14 < EMA_28, else 0
+    df['EMA_7_28_crossover'] = np.select(
+        [
+            (df['EMA_7'] - df['EMA_28']) > 0,
+            (df['EMA_7'] - df['EMA_28']) < 0
+        ],
+        [1, -1],
+        default=0
+    )
+
     df['macd_zone'] = np.select(
         [
             df['macd_signal'] < 0,
@@ -321,7 +331,7 @@ def add_indicators(df):
     # df["Low"]   = df["Low"] / df["Close"] - 1
     # df["Close"] = df["Close"].pct_change().fillna(0)  # as return
 
-    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_direction", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
+    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "EMA_7_28_crossover", "macd_zone", "macd_direction", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
 
     df.dropna(inplace=True)
     return df
@@ -544,10 +554,12 @@ class LSTMPPOAgent:
         return discounted
 
     def train(self):
+            # print("🚨 Trajectory buffer is empty, skipping training step.")
         # Unpack trajectory
+        # if self.trajectory:
         states, actions, logprobs_old, values, rewards = zip(*self.trajectory)
         # states, actions, logprobs_old, values = zip(*self.trajectory)
-        self.trajectory.clear()
+        # self.trajectory.clear()
 
         # Compute advantages
         returns = self._discount_rewards(rewards)
@@ -830,7 +842,32 @@ def train_bot(df, agent, symbol, window_size=20):
         final_pct = 0.0
 
         # qty_step, min_qty = get_qty_step(symbol)
-
+        if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
+            position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.005)
+            session.place_order(
+                category="linear",
+                symbol=bybit_symbol,
+                side="Buy",
+                order_type="Market",
+                qty=position_size,
+                reduce_only=False,
+                # time_in_force="IOC"
+                take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+                stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+            )
+        if df['EMA_7_28_crossover'].iloc[-1] == -1 and df['EMA_7_28_crossover'].iloc[-2] == 1:
+            position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.005)
+            session.place_order(
+                category="linear",
+                symbol=bybit_symbol,
+                side="Sell",
+                order_type="Market",
+                qty=position_size,
+                reduce_only=False,
+                # time_in_force="IOC"
+                take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+                stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+            )
         if position == 0:
             if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
                 invest = max(capital * 0.05, 15)
@@ -983,6 +1020,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     df = add_indicators(df)
     begun = False
     partial_tp_hit = []
+    position_size = 0.0
 
     while True:
         with capital_lock:
@@ -1020,7 +1058,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                 continue
             # state_seq = df[-window_size:].values.astype(np.float32)
             state_seq = df[-14:].values.astype(np.float32)
-            if state_seq.shape != (14, agent.state_size):
+            if state_seq.shape != (15, agent.state_size):
                 # print("Shape mismatch:", state_seq.shape)
                 continue
 
@@ -1080,7 +1118,32 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             # sl_dist = atr * 1.5
             # sl_dist = df.iloc[-1]['Close'] * 0.994
             sl_dist = df.iloc[-1]['Close'] * 0.003
-
+            if df['EMA_7_28_crossover'].iloc[t] == 1 and df['EMA_7_28_crossover'].iloc[t-1] == -1:
+                position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.0005)
+                session.place_order(
+                    category="linear",
+                    symbol=bybit_symbol,
+                    side="Buy",
+                    order_type="Market",
+                    qty=position_size,
+                    reduce_only=False,
+                    # time_in_force="IOC"
+                    take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+                    stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+                )
+            if df['EMMA_7_28_crossover'].iloc[t] == -1 and df['EMMA_7_28_crossover'].iloc[t-1] == 1:
+                position_size = calculate_position_size(capital, 0.35, entry_price, sl_dist)
+                session.place_order(
+                    category="linear",
+                    symbol=bybit_symbol,
+                    side="Sell",
+                    order_type="Market",
+                    qty=position_size,
+                    reduce_only=False,
+                    # time_in_force="IOC"
+                    take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+                    stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+                )
             if position == 0:
                 if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
                     invest = max(capital * 0.05, 15)
@@ -1323,7 +1386,7 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = False
+    train = True
     test = True
     
     if train:
@@ -1342,7 +1405,7 @@ def main():
             df = add_indicators(df)
             # print(f"columns: {df.columns}")
             # df = df.reshape(20, 14)
-            lstm_ppo_agent = LSTMPPOAgent(state_size=14, hidden_size=64, action_size=4)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
             t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbol))
             # train_bot(df, lstm_ppo_agent, symbol)
             t.start()
