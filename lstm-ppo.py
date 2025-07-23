@@ -784,7 +784,7 @@ def train_bot(df, agent, symbol, window_size=20):
             sr = sharpe_ratio(daily_returns)
             sor = sortino_ratio(daily_returns)
 
-            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_return_pct:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
+            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
             
             current_day = day
             with capital_lock:
@@ -800,9 +800,9 @@ def train_bot(df, agent, symbol, window_size=20):
         # price_range = (df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t])
         # if df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t] / df['Close'].iloc[t] < 0.003:
         # if price_range / df['Close'].iloc[t] < 0.003:
-        price_range = df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t]
-        if (price_range / df['Close'].iloc[t]).mean() < 0.003:
-            continue
+        # price_range = df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t]
+        # if (price_range / df['Close'].iloc[t]).mean() < 0.003:
+        #     continue
 
         macd_zone = df.iloc[t]['macd_zone']
         plus_di = df.iloc[t]['+DI_val']
@@ -922,6 +922,7 @@ def train_bot(df, agent, symbol, window_size=20):
             agent.train()
             agent.savecheckpoint(symbol)
             print(f"[INFO] Saved checkpoint at step {save_counter}")
+        print()
     agent.train()
     agent.savecheckpoint(symbol)
     print(f"[INFO] Saved checkpoint at step {save_counter}")
@@ -1012,10 +1013,10 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         elif df["ADX_zone"].iloc[-1] == 0:
             action = 0
 
-        price_range = (df['High'].iloc[-14:].max() - df['Low'].iloc[-14:].min()) / df['Close'].iloc[-1]
+        # price_range = (df['High'].iloc[-14:].max() - df['Low'].iloc[-14:].min()) / df['Close'].iloc[-1]
 
-        if price_range < 0.003:
-            continue
+        # if price_range < 0.003:
+        #     continue
 
         macd_zone = df.iloc[-1]['macd_zone']
         plus_di = df.iloc[-1]['+DI_val']
@@ -1242,6 +1243,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
             agent.savecheckpoint(symbol)
+        print()
     print(f"[INFO] Saved checkpoint at step {save_counter}")
     # rrKNN.train()
     # rrKNN.save()
