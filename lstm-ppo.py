@@ -27,7 +27,7 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 # epsilon = 0.1
 
 # def load_last_mb(filepath, symbol, mb_size=20):
-def load_last_mb(filepath, symbol, mb_size=10):
+def load_last_mb(filepath, symbol, mb_size=5):
     # Search for a file containing the symbol in its name
     matching_files = [f for f in os.listdir(filepath) if symbol.lower() in f.lower()]
     if not matching_files:
@@ -59,7 +59,7 @@ def load_last_mb(filepath, symbol, mb_size=10):
 
     return df
 
-def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=6, delimiter=';', col_names=None):
+def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=3, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
     
@@ -746,6 +746,7 @@ def train_bot(df, agent, symbol, window_size=20):
     action = 0
     current_day = None
     save_counter = 0
+    atr = 0.0
     # rrKNN = RewardRateKNN(symbol)
     
     for t in range(window_size, len(df) - 1):
@@ -922,7 +923,7 @@ def train_bot(df, agent, symbol, window_size=20):
             agent.train()
             agent.savecheckpoint(symbol)
             print(f"[INFO] Saved checkpoint at step {save_counter}")
-        print()
+        # print()
     agent.train()
     agent.savecheckpoint(symbol)
     print(f"[INFO] Saved checkpoint at step {save_counter}")
@@ -962,13 +963,32 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     current_day = None
     reward = 0.0
     save_counter = 0
+    atr = 0.0
 
     while True:
         wait_until_next_candle(1)
+        print()
         df = get_klines_df(bybit_symbol, 1, session)
         df = add_indicators(df)
         # print(f'price: {df['Close'].iloc[-1]}')
+        print(f"=== {bybit_symbol} Stats ===")
         print(f"['{bybit_symbol}'] price: {df['Close'].iloc[-1]}")
+        print(f"Close: {df['Close'].iloc[-1]:.6f}")
+        print(f"ADX: {df['ADX_zone'].iloc[-1]}")
+        print(f"RSI: {df['RSI_zone'].iloc[-1]:.2f}")
+        print(f"ATR: {atr:.6f}")
+        bias_ema_crossover = "Bullish" if df['EMA_crossover'].iloc[-1] > 0  else "Bearish" if df['EMA_crossover'].iloc[-1] < 0 else "Neutral"
+        print(f"EMA7/14/28 crossover above/below: {df['EMA_crossover'].iloc[-1] > 0}/{df['EMA_crossover'].iloc[-1] < 0} ({bias_ema_crossover})")
+        bias_macd_signal_line = "Bullish" if df['macd_direction'].iloc[-1] > 0 else "Bearish" if df["macd_direction"].iloc[-1] < 0 else "Neutral"
+        print(f"MacD zone: {df['macd_zone'].iloc[-1]:.2f} - going up/down: {df['macd_direction'].iloc[-1]} ({bias_macd_signal_line})")
+        # print(f"MacD line: {df['macd_line'].iloc[-1]:.2f} - going up/down: {df['macd_line_diff'].iloc[-1]:.2f} ({bias_macd_signal_line})")
+        # bias_osma_diff = "Bullish" if df['OSMA_Diff'].iloc[-1] > 0 else "Bearish" if df['OSMA_Diff'].iloc[-1] < 0 else "Neutral"
+        # print(f"OSMA zone: {df['OSMA'].iloc[-1]:.2f} - Direction: {df['OSMA_Diff'].iloc[-1]:.2f} ({bias_osma_diff})")
+        # di_diff = df['DI_Diff'].iloc[-1]
+        bias_di_diff = "Bullish" if df['+DI_val'].iloc[-1] > df['-DI_val'].iloc[-1] else "Bearish" if df['+DI_val'].iloc[-1] < df['-DI_val'].iloc[-1] else "Neutral"
+        print(f"+DI_val/-DI_val: {df['+DI_val'].iloc[-1]:.2f}/{df['-DI_val'].iloc[-1]:.2f} ({bias_di_diff})")
+        print()
+    
         if df['ADX_zone'].iloc[-1] == 0:
             continue
         # state_seq = df[-window_size:].values.astype(np.float32)
@@ -1031,14 +1051,14 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         if position == 0:
             if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
                 invest = max(capital * 0.05, 15)
-                position_size = calc_order_qty(float(invest) * 50, df['Close'].iloc[-1], min_qty, qty_step)
+                position_size = calc_order_qty(float(invest), df['Close'].iloc[-1], min_qty, qty_step)
                 entry_price = price
                 # capital -= 0.0089
                 position = 1
                 print(f"[{bybit_symbol}] Entered Buy order")
                 session.place_order(
                     category="linear",
-                    symbol=symbol,
+                    symbol=bybit_symbol,
                     side="Buy",
                     order_type="Market",
                     qty=position_size,
@@ -1060,7 +1080,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                     print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
                     close_side = "Sell" if position == 1 else "Buy"
                     response = session.place_active_order(
-                        symbol=symbol,
+                        symbol=bybit_symbol,
                         side=close_side,  # opposite side to close position
                         order_type="Market",
                         qty=pnl,
@@ -1074,14 +1094,14 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                 
             elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
                 invest = max(capital * 0.05, 15)
-                position_size = calc_order_qty(float(invest) * 50, entry_price, min_qty, qty_step)
+                position_size = calc_order_qty(float(invest), entry_price, min_qty, qty_step)
                 entry_price = price
                 # capital -= 0.0089
                 position = -1
                 print(f"[{bybit_symbol}] Entered Sell order")
                 session.place_order(
                     category="linear",
-                    symbol=symbol,
+                    symbol=bybit_symbol,
 
                     side="Sell",
                     order_type="Market",
@@ -1104,7 +1124,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
                         close_side = "Sell" if position == 1 else "Buy"
                         response = session.place_active_order(
-                            symbol=symbol,
+                            symbol=bybit_symbol,
                             side=close_side,  # opposite side to close position
                             order_type="Market",
                             qty=pnl,
@@ -1243,7 +1263,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
             agent.savecheckpoint(symbol)
-        print()
+        # print()
     print(f"[INFO] Saved checkpoint at step {save_counter}")
     # rrKNN.train()
     # rrKNN.save()
