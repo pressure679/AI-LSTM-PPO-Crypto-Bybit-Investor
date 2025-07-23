@@ -1048,8 +1048,11 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             bears = df.iloc[-1]['Bears']
             atr = df.iloc[-1]['ATR']
                     
-            tp_dist = atr * 3
-            sl_dist = atr * 1.5
+            # tp_dist = atr * 3.0
+            tp_dist = df.iloc[-1]['Close'] * 0.003
+            # sl_dist = atr * 1.5
+            # sl_dist = df.iloc[-1]['Close'] * 0.994
+            sl_dist = df.iloc[-1]['Close'] * 0.0015
 
             if position == 0:
                 if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
@@ -1075,7 +1078,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                     ]
                     for i in range(3):
                         # if not partial_tp_hit[i] and price >= tp_levels[i]:
-                        realized = position_size * tp_shares[i]
+                        realized = position_size * tp_levels[i]
                         pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
                         # capital += pnl
                         reward += pnl / capital
@@ -1107,7 +1110,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         symbol=bybit_symbol,
                         side="Sell",
                         order_type="Market",
-                        qty=qty,
+                        qty=position_size,
                         reduce_only=False,
                         time_in_force="IOC"
                     )
