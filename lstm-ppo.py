@@ -1103,7 +1103,6 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                             session.place_order(
                                 category="linear",
                                 symbol=bybit_symbol,
-
                                 side="Sell",
                                 order_type="Market",
                                 qty=qty,
