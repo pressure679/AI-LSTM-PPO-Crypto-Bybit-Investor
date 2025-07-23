@@ -27,7 +27,7 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 # epsilon = 0.1
 
 # def load_last_mb(filepath, symbol, mb_size=20):
-def load_last_mb(filepath, symbol, mb_size=5):
+def load_last_mb(filepath, symbol, mb_size=10):
     # Search for a file containing the symbol in its name
     matching_files = [f for f in os.listdir(filepath) if symbol.lower() in f.lower()]
     if not matching_files:
@@ -59,7 +59,7 @@ def load_last_mb(filepath, symbol, mb_size=5):
 
     return df
 
-def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=3, delimiter=';', col_names=None):
+def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=6, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
     
@@ -191,11 +191,12 @@ def get_klines_df(symbol, interval, session, limit=240):
     return df
 
 def add_indicators(df):
-    df['H-L'] = df['High'] - df['Low']
-    df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
-    df['L-PC'] = abs(df['Low'] - df['Close'].shift(1))
-    tr = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
-    df['ATR'] = tr.rolling(window=14).mean()
+    # df['H-L'] = df['High'] - df['Low']
+    # df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
+    # df['L-PC'] = abs(df['Low'] - df['Close'].shift(1))
+    # tr = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+    # df['ATR'] = tr.rolling(window=14).mean()
+    df['ATR'] = ATR(df)
 
     df['macd_line'], df['macd_signal'], df['macd_histogram'] = MACD(df['Close'])
     df['macd_signal_diff'] = df['macd_signal'].diff()
@@ -755,7 +756,7 @@ def train_bot(df, agent, symbol, window_size=20):
         # if df['ADX_zone'].iloc[t] == 0:
         #     continue
 
-        state_seq = df[t - window_size:t].values.astype(np.float32)
+        state_seq = df[t - 14:t].values.astype(np.float32)
         if state_seq.shape != (14, agent.state_size):
             print("Shape mismatch:", state_seq.shape)
             continue
@@ -796,7 +797,11 @@ def train_bot(df, agent, symbol, window_size=20):
             action = 3
         elif df["ADX_zone"].iloc[t] == 0:
             action = 0
-        if df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t] / df['Close'].iloc[t] < 0.003:
+        # price_range = (df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t])
+        # if df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t] / df['Close'].iloc[t] < 0.003:
+        # if price_range / df['Close'].iloc[t] < 0.003:
+        price_range = df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t]
+        if (price_range / df['Close'].iloc[t]).mean() < 0.003:
             continue
 
         macd_zone = df.iloc[t]['macd_zone']
@@ -911,8 +916,8 @@ def train_bot(df, agent, symbol, window_size=20):
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
-        # if save_counter % 10080 == 0:
-        if save_counter % 24 * 60 == 0:
+        if save_counter % 10080 == 0:
+        # if save_counter % 24 * 60 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
             agent.savecheckpoint(symbol)
@@ -925,9 +930,9 @@ def train_bot(df, agent, symbol, window_size=20):
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
 
 # Bybit Demo API Key and Secret - eS2OePPbbpRvE1yHck - XFQB3NCBxpyHWxgYv8tef8l7McVcvCxRLR0X
-# Bybit API Key and Secret - wLqYZxlM27F01smJFS - tuu38d7Z37cvuoYWJBNiRkmpqTU6KGv9uKv7
-api_key = "eS2OePPbbpRvE1yHck"
-api_secret = "XFQB3NCBxpyHWxgYv8tef8l7McVcvCxRLR0X"
+# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
+api_key = "PoP1ud3PuWajwecc4S"
+api_secret = "z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU"
 def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     global api_key
     global api_secret
@@ -938,7 +943,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     session = HTTP(
         api_key=api_key,
         api_secret=api_secret,
-        demo=True  # or False for mainnet
+        demo=False  # or False for mainnet
     )
     capital = get_balance(session)
     peak_capital = capital
@@ -994,7 +999,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             sr = sharpe_ratio(daily_returns)
             sor = sortino_ratio(daily_returns)
 
-            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_return_pct:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
+            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
             
             current_day = day
             # capital += daily_pnl
@@ -1050,7 +1055,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                     pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
                     # capital += pnl
                     reward += pnl / capital
-                    # daily_pnl += pnl
+                    daily_pnl += pnl
                     print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
                     close_side = "Sell" if position == 1 else "Buy"
                     response = session.place_active_order(
@@ -1232,8 +1237,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
-        # if save_counter % 10080 == 0:
-        if save_counter % 24 * 60 == 0:
+        if save_counter % 10080 == 0:
+        # if save_counter % 24 * 60 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
             agent.savecheckpoint(symbol)
@@ -1258,9 +1263,11 @@ def main():
             else:
                 df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
             # df = yf.download(yf_symbols[counter], interval="1m", period="7d")
-            df = df[['Open', "High", "Low", "Close"]].values
+            # df = df[['Open', "High", "Low", "Close"]].values
+            df = df[['Open', "High", "Low", "Close"]]
             # df = df.reshape(20, 4)
             df = add_indicators(df)
+            # print(f"columns: {df.columns}")
             # df = df.reshape(20, 14)
             lstm_ppo_agent = LSTMPPOAgent(state_size=14, hidden_size=64, action_size=4)
             t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbol))
@@ -1277,10 +1284,11 @@ def main():
     if test:
         for bybit_symbol in bybit_symbols:
             df = None
-            session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
+            session = HTTP(demo=False, api_key=api_key, api_secret=api_secret)
             keep_session_alive(session)
             df = get_klines_df(bybit_symbol, 1, session)
             df = add_indicators(df)
+            # print(f"columns: {df.columns}")
             lstm_ppo_agent = LSTMPPOAgent(state_size=14, hidden_size=64, action_size=4)
             t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[counter], bybit_symbol, session))
             t.start()
