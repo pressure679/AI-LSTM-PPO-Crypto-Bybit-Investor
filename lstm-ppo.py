@@ -796,6 +796,8 @@ def train_bot(df, agent, symbol, window_size=20):
             action = 3
         elif df["ADX_zone"].iloc[t] == 0:
             action = 0
+        if df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t] / df['Close'].iloc[t] < 0.003:
+            continue
 
         macd_zone = df.iloc[t]['macd_zone']
         plus_di = df.iloc[t]['+DI_val']
@@ -1002,6 +1004,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             action = 3
         elif df["ADX_zone"].iloc[-1] == 0:
             action = 0
+        if df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t] / df['Close'].iloc[t] < 0.003:
+            continue
 
         macd_zone = df.iloc[-1]['macd_zone']
         plus_di = df.iloc[-1]['+DI_val']
@@ -1224,7 +1228,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
         # if save_counter % 10080 == 0:
-        if save_counter % 24 * 60:
+        if save_counter % 24 * 60 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
             agent.savecheckpoint(symbol)
