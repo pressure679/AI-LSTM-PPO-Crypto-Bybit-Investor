@@ -722,6 +722,15 @@ def sortino_ratio(returns, risk_free_rate=0.0):
     if downside_std == 0:
         return 0
     return (mean_ret - risk_free_rate) / downside_std
+def calculate_position_size(balance, risk_pct, entry_price, stop_loss, min_qty=0.001):
+    risk_amount = balance * risk_pct
+    position_size = risk_amount / abs(entry_price - stop_loss)
+    position_size = round(position_size, 3)
+
+    if position_size < min_qty:
+        position_size = min_qty
+
+    return position_size
 capital = 96
 def train_bot(df, agent, symbol, window_size=20):
     capital_lock = threading.Lock()
@@ -811,8 +820,10 @@ def train_bot(df, agent, symbol, window_size=20):
         bears = df.iloc[t]['Bears']
         atr = df.iloc[t]['ATR']
         
-        tp_dist = atr * 3
-        sl_dist = atr * 1.5
+        # tp_dist = atr * 3
+        # sl_dist = atr * 1.5
+        tp_dist = df.iloc[-1]['Close'] * 0.004
+        sl_dist = df.iloc[-1]['Close'] * 0.002
 
         final_pct = 0.0
 
@@ -916,8 +927,8 @@ def train_bot(df, agent, symbol, window_size=20):
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
-        # if save_counter % 10080 == 0:
-        if save_counter % 24 * 60 == 0:
+        if save_counter % 10080 == 0:
+        # if save_counter % 24 * 60 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
             agent.savecheckpoint(symbol)
@@ -930,8 +941,10 @@ def train_bot(df, agent, symbol, window_size=20):
     # rrKNN.save()
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
 
-api_key = ""
-api_secret = ""
+# Bybit Demo API Key and Secret - eS2OePPbbpRvE1yHck - XFQB3NCBxpyHWxgYv8tef8l7McVcvCxRLR0X
+# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
+api_key = "PoP1ud3PuWajwecc4S"
+api_secret = "z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU"
 def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     global api_key
     global api_secret
@@ -1046,18 +1059,20 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             bulls = df.iloc[-1]['Bulls']
             bears = df.iloc[-1]['Bears']
             atr = df.iloc[-1]['ATR']
+            capital = get_balance(session)
                     
-            tp_dist = atr * 3.0
-            # tp_dist = df.iloc[-1]['Close'] * 0.006
-            sl_dist = atr * 1.5
+            # tp_dist = atr * 3.0
+            tp_dist = df.iloc[-1]['Close'] * 0.006
+            # sl_dist = atr * 1.5
             # sl_dist = df.iloc[-1]['Close'] * 0.994
-            # sl_dist = df.iloc[-1]['Close'] * 0.003
+            sl_dist = df.iloc[-1]['Close'] * 0.003
 
             if position == 0:
                 if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
                     invest = max(capital * 0.05, 15)
-                    position_size = calc_order_qty(float(invest), df['Close'].iloc[-1], min_qty, qty_step)
+                    # position_size = calc_order_qty(float(invest), df['Close'].iloc[-1], min_qty, qty_step)
                     entry_price = price
+                    position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist)
                     # capital -= 0.0089
                     position = 1
                     print(f"[{bybit_symbol}] Entered Buy order")
@@ -1102,8 +1117,9 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                                 
                 elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
                     invest = max(capital * 0.05, 15)
-                    position_size = calc_order_qty(float(invest), entry_price, min_qty, qty_step)
+                    # position_size = calc_order_qty(float(invest), entry_price, min_qty, qty_step)
                     entry_price = price
+                    position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist)
                     # capital -= 0.0089
                     position = -1
                     print(f"[{bybit_symbol}] Entered Sell order")
