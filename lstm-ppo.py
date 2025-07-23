@@ -27,7 +27,7 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 # epsilon = 0.1
 
 # def load_last_mb(filepath, symbol, mb_size=20):
-def load_last_mb(filepath, symbol, mb_size=5):
+def load_last_mb(filepath, symbol, mb_size=10):
     # Search for a file containing the symbol in its name
     matching_files = [f for f in os.listdir(filepath) if symbol.lower() in f.lower()]
     if not matching_files:
@@ -59,7 +59,7 @@ def load_last_mb(filepath, symbol, mb_size=5):
 
     return df
 
-def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=3, delimiter=';', col_names=None):
+def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=6, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
     
@@ -784,244 +784,240 @@ def train_bot(df, agent, symbol, window_size=15):
     atr = 0.0
     # rrKNN = RewardRateKNN(symbol)
     # print(f"length of df: {len(df)}")
-    t = window_size - 1
-    # for t in range(window_size, len(df) - 1):
-    while t < len(df) - 1:
-        try: 
-            t += 1
-            # print(f"t: {t}")
-            # if position != 0:
-            #     action = 3
-            # else:
-            #     action = 0
-            # if df['ADX_zone'].iloc[t] == 0:
-            #     continue
+    # t = window_size - 1
+    for t in range(window_size, len(df) - 1):
+    # while t < len(df) - 1:
+        # print(f"t: {t}")
+        # if position != 0:
+        #     action = 3
+        # else:
+        #     action = 0
+        # if df['ADX_zone'].iloc[t] == 0:
+        #     continue
 
-            state_seq = df[t - window_size:t].values.astype(np.float32)
-            if state_seq.shape != (15, agent.state_size):
-                print("Shape mismatch:", state_seq.shape)
-                continue
-            # print(f"state_seq: {state_seq}")
-            result = agent.select_action(state_seq)
-            if result is None:
-                continue
-            # print(f"result: {result}")
-            action, logprob, value = result
+        state_seq = df[t - window_size:t].values.astype(np.float32)
+        if state_seq.shape != (15, agent.state_size):
+            print("Shape mismatch:", state_seq.shape)
+            continue
+        # print(f"state_seq: {state_seq}")
+        result = agent.select_action(state_seq)
+        if result is None:
+            continue
+        # print(f"result: {result}")
+        action, logprob, value = result
 
-            # print(f"action: {action}")
+        # print(f"action: {action}")
 
-            price = df.iloc[t]["Close"]
-            next_price = df.iloc[t + 1]["Close"]
-            day = str(df.index[t]).split(' ')[0]
+        price = df.iloc[t]["Close"]
+        next_price = df.iloc[t + 1]["Close"]
+        day = str(df.index[t]).split(' ')[0]
 
-            if current_day is None:
-                current_day = day
-            elif day != current_day:
-                # print(f"[{symbol}] Day {current_day} - PnL: {(daily_pnl / capital) * 100:.2f}% - Balance: {capital:.2f}")
-                daily_return_pct = (daily_pnl / capital) * 100 if capital != 0 else 0
-                daily_returns.append(daily_return_pct)
+        if current_day is None:
+            current_day = day
+        elif day != current_day:
+            # print(f"[{symbol}] Day {current_day} - PnL: {(daily_pnl / capital) * 100:.2f}% - Balance: {capital:.2f}")
+            daily_return_pct = (daily_pnl / capital) * 100 if capital != 0 else 0
+            daily_returns.append(daily_return_pct)
 
-                avg_profit_per_trade = daily_pnl / daily_trades if daily_trades > 0 else 0
-                sr = sharpe_ratio(daily_returns)
-                sor = sortino_ratio(daily_returns)
+            avg_profit_per_trade = daily_pnl / daily_trades if daily_trades > 0 else 0
+            sr = sharpe_ratio(daily_returns)
+            sor = sortino_ratio(daily_returns)
 
-                capital += daily_pnl
-                # df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
-                # print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f} - HL rolling mean: {df['HL_rolling_mean'].iloc[-1]}")
-                print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
+            capital += daily_pnl
+            # df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
+            # print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f} - HL rolling mean: {df['HL_rolling_mean'].iloc[-1]}")
+            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
+            
+            current_day = day
+
+            daily_pnl = 0.0
+
+        # Force close if ADX zone becomes 0
+        if df["ADX_zone"].iloc[t] == 0 and position != 0:
+            action = 3
+        elif df["ADX_zone"].iloc[t] == 0:
+            action = 0
+        # price_range = (df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t])
+        # if df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t] / df['Close'].iloc[t] < 0.003:
+        # if price_range / df['Close'].iloc[t] < 0.003:
+        # price_range = df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t]
+        # if (price_range / df['Close'].iloc[t]).mean() < 0.003:
+        #     continue
+
+        macd_zone = df.iloc[t]['macd_zone']
+        plus_di = df.iloc[t]['+DI_val']
+        minus_di = df.iloc[t]['-DI_val']
+        bulls = df.iloc[t]['Bulls']
+        bears = df.iloc[t]['Bears']
+        atr = df.iloc[t]['ATR']
                 
-                current_day = day
+        # tp_dist = atr * 3
+        # sl_dist = atr * 1.5
+        tp_dist = df.iloc[-1]['Close'] * 0.006
+        sl_dist = df.iloc[-1]['Close'] * 0.003
 
-                daily_pnl = 0.0
+        final_pct = 0.0
 
-            # Force close if ADX zone becomes 0
-            if df["ADX_zone"].iloc[t] == 0 and position != 0:
-                action = 3
-            elif df["ADX_zone"].iloc[t] == 0:
-                action = 0
-            # price_range = (df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t])
-            # if df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t] / df['Close'].iloc[t] < 0.003:
-            # if price_range / df['Close'].iloc[t] < 0.003:
-            # price_range = df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t]
-            # if (price_range / df['Close'].iloc[t]).mean() < 0.003:
-            #     continue
+        # ema_7_28_crossover_idx = 0
+        # ema_7_28_crossover = False
+        # ema_7_28_crossback = False
 
-            macd_zone = df.iloc[t]['macd_zone']
-            plus_di = df.iloc[t]['+DI_val']
-            minus_di = df.iloc[t]['-DI_val']
-            bulls = df.iloc[t]['Bulls']
-            bears = df.iloc[t]['Bears']
-            atr = df.iloc[t]['ATR']
-                    
-            # tp_dist = atr * 3
-            # sl_dist = atr * 1.5
-            tp_dist = df.iloc[-1]['Close'] * 0.006
-            sl_dist = df.iloc[-1]['Close'] * 0.003
+        # HL = []
 
-            final_pct = 0.0
-
-            # ema_7_28_crossover_idx = 0
+        # qty_step, min_qty = get_qty_step(symbol)
+        if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
+            # ema_7_28_crossover = True
+            # ema_7_28_crossover += 1
+            position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.005)
+            df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
+            session.place_order(
+                category="linear",
+                symbol=bybit_symbol,
+                side="Buy",
+                order_type="Market",
+                qty=position_size,
+                reduce_only=False,
+                # time_in_force="IOC"
+                # take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+                take_profit=str(round(entry_price + df.iloc[-1]['Close'] * df['HL_rolling_mean'], 6)),
+                stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+            )
+        if df['EMA_7_28_crossover'].iloc[-1] == -1 and df['EMA_7_28_crossover'].iloc[-2] == 1:
+            position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.005)
             # ema_7_28_crossover = False
-            # ema_7_28_crossback = False
+            # print(f"ema_7_28_crossover_idx: {ema_7_28_crossover_idx}")
+            # HL = (df['High'].iloc[-ema_7_28_crossover_idx:] - df['Low'].iloc[-ema_7_28_crossover_idx:]) / df['Close'].iloc[-ema_7_28_crossover_idx:]
+            # HL = HL.dropna()
+            # ema_7_28_crossover_idx = 0
+            # HL = append((df['High'].iloc[-ema_7_28_crossover_idx:] - df['Low'].iloc[-ema_7_28_crossover_idx:])/df['Close'].iloc[-ema_7_28_crossover_idx:])
+            session.place_order(
+                category="linear",
+                symbol=bybit_symbol,
+                side="Sell",
+                order_type="Market",
+                qty=position_size,
+                reduce_only=False,
+                # time_in_force="IOC"
+                take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+                stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+            )
+        if position == 0:
+            # print(f"Open Buy or Sell order")
+            if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
+                invest = max(capital * 0.05, 15)
+                position_size = invest * leverage
+                entry_price = price
+                capital -= 0.0089
+                position = 1
+                partial_tp_hit = [False, False, False, False]
+                position_pct_left = 1.0
+                daily_trades += 1
+                        
+            elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
+                invest = max(capital * 0.05, 15)
+                position_size = invest * leverage
+                entry_price = price
+                capital -= 0.0089
+                position = -1
+                partial_tp_hit = [False, False, False, False]
+                position_pct_left = 1.0
+                daily_trades += 1
 
-            # HL = []
+        # print(f"Manage open position")
+        if position == 1:
+            profit_pct = (price - entry_price) / entry_price
+            # if df['BB_SMA'] != 0:
+            #     invest = max(capital * 0.1, 15)
+            #     position_size = invest * leverage
+            pnl = profit_pct * position_size  # not margin
+            tp_levels = [
+                entry_price + 0.2 * tp_dist,
+                entry_price + 0.4 * tp_dist,
+                entry_price + 0.6 * tp_dist,
+                entry_price + 0.8 * tp_dist
+            ]
+            # tp_levels = [
+            #     entry_price + 0.2 * tp_dist,
+            #     entry_price + 0.4 * tp_dist,
+            #     entry_price + 0.6 * tp_dist,
+            #     entry_price + 0.8 * tp_dist
+            # ]
+            sl_price = entry_price - sl_dist
+            tp_price = entry_price + tp_dist
+            # tp_shares = [0.4, 0.2, 0.2]
+            tp_shares = [0.2, 0.2, 0.2, 0.2]
 
-            # qty_step, min_qty = get_qty_step(symbol)
-            if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
-                # ema_7_28_crossover = True
-                # ema_7_28_crossover += 1
-                position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.005)
-                df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
-                session.place_order(
-                    category="linear",
-                    symbol=bybit_symbol,
-                    side="Buy",
-                    order_type="Market",
-                    qty=position_size,
-                    reduce_only=False,
-                    # time_in_force="IOC"
-                    # take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-                    take_profit=str(round(entry_price + df.iloc[-1]['Close'] * df['HL_rolling_mean'], 6)),
-                    stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-                )
-            if df['EMA_7_28_crossover'].iloc[-1] == -1 and df['EMA_7_28_crossover'].iloc[-2] == 1:
-                position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.005)
-                # ema_7_28_crossover = False
-                # print(f"ema_7_28_crossover_idx: {ema_7_28_crossover_idx}")
-                # HL = (df['High'].iloc[-ema_7_28_crossover_idx:] - df['Low'].iloc[-ema_7_28_crossover_idx:]) / df['Close'].iloc[-ema_7_28_crossover_idx:]
-                # HL = HL.dropna()
-                # ema_7_28_crossover_idx = 0
-                # HL = append((df['High'].iloc[-ema_7_28_crossover_idx:] - df['Low'].iloc[-ema_7_28_crossover_idx:])/df['Close'].iloc[-ema_7_28_crossover_idx:])
-                session.place_order(
-                    category="linear",
-                    symbol=bybit_symbol,
-                    side="Sell",
-                    order_type="Market",
-                    qty=position_size,
-                    reduce_only=False,
-                    # time_in_force="IOC"
-                    take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-                    stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-                )
-            if position == 0:
-                # print(f"Open Buy or Sell order")
-                if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
-                    invest = max(capital * 0.05, 15)
-                    position_size = invest * leverage
-                    entry_price = price
-                    capital -= 0.0089
-                    position = 1
-                    partial_tp_hit = [False, False, False, False]
-                    position_pct_left = 1.0
-                    daily_trades += 1
-                            
-                elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
-                    invest = max(capital * 0.05, 15)
-                    position_size = invest * leverage
-                    entry_price = price
-                    capital -= 0.0089
-                    position = -1
-                    partial_tp_hit = [False, False, False, False]
-                    position_pct_left = 1.0
-                    daily_trades += 1
-
-            # print(f"Manage open position")
-            if position == 1:
-                profit_pct = (price - entry_price) / entry_price
-                # if df['BB_SMA'] != 0:
-                #     invest = max(capital * 0.1, 15)
-                #     position_size = invest * leverage
-                pnl = profit_pct * position_size  # not margin
-                tp_levels = [
-                    entry_price + 0.2 * tp_dist,
-                    entry_price + 0.4 * tp_dist,
-                    entry_price + 0.6 * tp_dist,
-                    entry_price + 0.8 * tp_dist
-                ]
-                # tp_levels = [
-                #     entry_price + 0.2 * tp_dist,
-                #     entry_price + 0.4 * tp_dist,
-                #     entry_price + 0.6 * tp_dist,
-                #     entry_price + 0.8 * tp_dist
-                # ]
-                sl_price = entry_price - sl_dist
-                tp_price = entry_price + tp_dist
-                # tp_shares = [0.4, 0.2, 0.2]
-                tp_shares = [0.2, 0.2, 0.2, 0.2]
-
-                for i in range(4):
-                    if not partial_tp_hit[i] and price >= tp_levels[i]:
-                        realized = position_size * tp_shares[i]
-                        pnl = realized * profit_pct
-                        capital += pnl
-                        reward += pnl / capital
-                        daily_pnl += pnl
-                        invest -= realized
-                        position_pct_left -= tp_shares[i]
-                        partial_tp_hit[i] = True
-                        action = 0
-
-                if price >= tp_price or price <= sl_price:
-                    final_pct = (price - entry_price) / entry_price
-                    pnl = position_size * final_pct
+            for i in range(4):
+                if not partial_tp_hit[i] and price >= tp_levels[i]:
+                    realized = position_size * tp_shares[i]
+                    pnl = realized * profit_pct
                     capital += pnl
                     reward += pnl / capital
                     daily_pnl += pnl
-                    invest = 0
-                    position = 0
-                    position_pct_left = 1.0
-                    action = 3
-                                            
-            elif position == -1:
-                profit_pct = (entry_price - price) / entry_price
+                    invest -= realized
+                    position_pct_left -= tp_shares[i]
+                    partial_tp_hit[i] = True
+                    action = 0
+
+            if price >= tp_price or price <= sl_price:
+                final_pct = (price - entry_price) / entry_price
                 pnl = position_size * final_pct
-                reward += pnl
-                tp_levels = [
-                    entry_price - 0.2 * tp_dist,
-                    entry_price - 0.4 * tp_dist,
-                    entry_price - 0.6 * tp_dist,
-                    entry_price - 0.8 * tp_dist
-                ]
-                sl_price = entry_price + sl_dist
-                tp_price = entry_price - tp_dist
-                tp_shares = [0.2, 0.2, 0.2, 0.2]
+                capital += pnl
+                reward += pnl / capital
+                daily_pnl += pnl
+                invest = 0
+                position = 0
+                position_pct_left = 1.0
+                action = 3
+                                        
+        elif position == -1:
+            profit_pct = (entry_price - price) / entry_price
+            pnl = position_size * final_pct
+            reward += pnl
+            tp_levels = [
+                entry_price - 0.2 * tp_dist,
+                entry_price - 0.4 * tp_dist,
+                entry_price - 0.6 * tp_dist,
+                entry_price - 0.8 * tp_dist
+            ]
+            sl_price = entry_price + sl_dist
+            tp_price = entry_price - tp_dist
+            tp_shares = [0.2, 0.2, 0.2, 0.2]
 
-                for i in range(4):
-                    if not partial_tp_hit[i] and price <= tp_levels[i]:
-                        realized = position_size * tp_shares[i]
-                        pnl = realized * profit_pct
-                        capital += pnl
-                        reward += pnl / capital
-                        daily_pnl += pnl
-                        invest -= realized
-                        position_pct_left -= tp_shares[i]
-                        partial_tp_hit[i] = True
-                        action = 0
-
-                if price <= tp_price or price >= sl_price:
-                    final_pct = (entry_price - price) / entry_price
-                    pnl = position_size * final_pct
+            for i in range(4):
+                if not partial_tp_hit[i] and price <= tp_levels[i]:
+                    realized = position_size * tp_shares[i]
+                    pnl = realized * profit_pct
                     capital += pnl
                     reward += pnl / capital
                     daily_pnl += pnl
-                    invest = 0
-                    position = 0
-                    position_pct_left = 1.0
-                    # partial_tp_hit = [False, False, False, False]
-                    action = 3
-            # === Store reward and update step ===
-            agent.store_transition(state_seq, action, logprob, value, reward)
-            save_counter += 1
-            # print(f"save_counter: {save_counter}")
-            if save_counter % 10080 == 0:
-                # if save_counter % 24 * 60 == 0:
-                print(f"[INFO] Training PPO on step {save_counter}...")
-                agent.train()
-                agent.savecheckpoint(symbol)
-                print(f"[INFO] Saved checkpoint at step {save_counter}")
-                # print()
-        except Exception as e:
-            print(f"[ERROR] train_bot crashed: {e}")
+                    invest -= realized
+                    position_pct_left -= tp_shares[i]
+                    partial_tp_hit[i] = True
+                    action = 0
+
+            if price <= tp_price or price >= sl_price:
+                final_pct = (entry_price - price) / entry_price
+                pnl = position_size * final_pct
+                capital += pnl
+                reward += pnl / capital
+                daily_pnl += pnl
+                invest = 0
+                position = 0
+                position_pct_left = 1.0
+                # partial_tp_hit = [False, False, False, False]
+                action = 3
+        # === Store reward and update step ===
+        agent.store_transition(state_seq, action, logprob, value, reward)
+        save_counter += 1
+        # print(f"save_counter: {save_counter}")
+        if save_counter % 10080 == 0:
+            # if save_counter % 24 * 60 == 0:
+            print(f"[INFO] Training PPO on step {save_counter}...")
+            agent.train()
+            agent.savecheckpoint(symbol)
+            print(f"[INFO] Saved checkpoint at step {save_counter}")
+            # print()
     agent.train()
     agent.savecheckpoint(symbol)
     print(f"[INFO] Saved checkpoint at step {save_counter}")
@@ -1106,7 +1102,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             if df['ADX_zone'].iloc[-1] == 0:
                 continue
             # state_seq = df[-window_size:].values.astype(np.float32)
-            state_seq = df[-14:].values.astype(np.float32)
+            state_seq = df[-15:].values.astype(np.float32)
             if state_seq.shape != (15, agent.state_size):
                 print("Shape mismatch:", state_seq.shape)
                 continue
@@ -1303,7 +1299,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                     response = session.set_trading_stop(
                         category="linear",  # or "inverse", depending on your market
                         symbol=bybit_symbol,
-                        trailing_stop=df['Close'].iloc[-t] * 0.0001,  # Trailing stop in USD or quote currency
+                        trailing_stop=df['Close'].iloc[-t] * 0.0008,  # Trailing stop in USD or quote currency
                     )
                 # tp_levels = [
                 #     entry_price + 0.4 * tp_dist,
@@ -1469,14 +1465,13 @@ def main():
             # df = df.reshape(20, 14)
             # print(f"length of df: {len(df)}")
             lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
-            train_bot(df, lstm_ppo_agent, symbol)
-            # t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbol))
             # train_bot(df, lstm_ppo_agent, symbol)
-            # t.start()
-            # test_threads.append(t)
+            t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbol))
+            t.start()
+            test_threads.append(t)
             counter += 1
-    # for t in test_threads:
-    #     t.join()
+    for t in test_threads:
+        t.join()
 
     # Reset for test phase
     counter = 0
