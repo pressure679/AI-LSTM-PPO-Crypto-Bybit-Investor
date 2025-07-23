@@ -1071,8 +1071,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         qty=position_size,
                         reduce_only=False,
                         time_in_force="IOC",
-                        # take_profit=str(round(entry_price + tp_dist, 6)),
-                        # stop_loss=str(round(entry_price - sl_dist, 6))
+                        take_profit=str(round(entry_price + tp_dist, 6)),
+                        stop_loss=str(round(entry_price - sl_dist, 6))
                     )
                     tp_levels = [
                         entry_price + 0.4 * tp_dist,
@@ -1094,7 +1094,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                             order_type="Limit",
                             qty=str(round(pnl, 6)),
                             reduce_only=True,
-                            time_in_force="ImmediateOrCancel",
+                            # time_in_force="ImmediateOrCancel"
+                            time_in_force="IOC"
                             # leverage=leverage
                         )
                         # partial_tp_hit = [False, False, False]
@@ -1139,7 +1140,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                                 order_type="Limit",
                                 qty=str(round(pnl, 6)),
                                 reduce_only=True,
-                                time_in_force="ImmediateOrCancel",
+                                # time_in_force="ImmediateOrCancel"
+                                time_in_force="IOC"
                                 # leverage=leverage
                             )
                             partial_tp_hit = [False, False, False]
