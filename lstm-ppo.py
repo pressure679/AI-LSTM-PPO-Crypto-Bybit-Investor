@@ -1084,9 +1084,9 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         realized = position_size * tp_levels[i]
                         pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
                         # capital += pnl
-                        reward += pnl / capital
-                        daily_pnl += pnl
-                        print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance(session):.2f}")
+                        # reward += pnl / capital
+                        # daily_pnl += pnl
+                        # print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance(session):.2f}")
                         close_side = "Sell" if position == 1 else "Buy"
                         response = session.place_order(
                             symbol=bybit_symbol,
@@ -1129,14 +1129,14 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                             realized = position_size * tp_shares[i]
                             pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
                             # capital += pnl
-                            reward += pnl / capital
-                            daily_pnl += pnl
-                            print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance(session):.2f}")
+                            # reward += pnl / capital
+                            # daily_pnl += pnl
+                            # print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance(session):.2f}")
                             close_side = "Sell" if position == 1 else "Buy"
                             response = session.place_active_order(
                                 symbol=bybit_symbol,
                                 side=close_side,  # opposite side to close position
-                                order_type="Market",
+                                order_type="Limit",
                                 qty=pnl,
                                 reduce_only=True,
                                 time_in_force="ImmediateOrCancel",
