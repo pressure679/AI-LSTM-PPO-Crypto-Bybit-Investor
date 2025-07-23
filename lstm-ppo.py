@@ -975,7 +975,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         with capital_lock:
             print(f"=== {bybit_symbol} stats ===")
             print(f"['{bybit_symbol}'] price: {df['close'].iloc[-1]}")
-            print(f"close: {df['close'].iloc[-1]:.6f}")
+            # print(f"close: {df['close'].iloc[-1]:.6f}")
             print(f"adx: {df['adx_zone'].iloc[-1]}")
             print(f"rsi: {df['rsi_zone'].iloc[-1]:.2f}")
             print(f"atr: {atr:.6f}")
