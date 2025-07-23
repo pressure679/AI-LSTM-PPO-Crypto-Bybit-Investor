@@ -755,9 +755,9 @@ def calculate_position_size(balance, risk_pct, entry_price, stop_loss, min_qty=0
         position_size = min_qty
 
     return position_size
-capital = 276
+capital = 274
 def train_bot(df, agent, symbol, window_size=20):
-    agent.loadcheckpoint(symbol)
+    # agent.loadcheckpoint(symbol)
     capital_lock = threading.Lock()
     global capital
     peak_capital = capital
@@ -821,7 +821,8 @@ def train_bot(df, agent, symbol, window_size=20):
 
             capital += daily_pnl
             df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
-            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f} - HL rolling mean: {df['HL_rolling_mean'].iloc[-1]}")
+            # print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f} - HL rolling mean: {df['HL_rolling_mean'].iloc[-1]}")
+            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
             
             current_day = day
 
@@ -903,7 +904,7 @@ def train_bot(df, agent, symbol, window_size=20):
                 entry_price = price
                 capital -= 0.0089
                 position = 1
-                partial_tp_hit = [False, False, False]
+                partial_tp_hit = [False, False, False, False]
                 position_pct_left = 1.0
                 daily_trades += 1
                 
@@ -913,7 +914,7 @@ def train_bot(df, agent, symbol, window_size=20):
                 entry_price = price
                 capital -= 0.0089
                 position = -1
-                partial_tp_hit = [False, False, False]
+                partial_tp_hit = [False, False, False, False]
                 position_pct_left = 1.0
                 daily_trades += 1
 
@@ -930,12 +931,18 @@ def train_bot(df, agent, symbol, window_size=20):
                 entry_price + 0.6 * tp_dist,
                 entry_price + 0.8 * tp_dist
             ]
+            # tp_levels = [
+            #     entry_price + 0.2 * tp_dist,
+            #     entry_price + 0.4 * tp_dist,
+            #     entry_price + 0.6 * tp_dist,
+            #     entry_price + 0.8 * tp_dist
+            # ]
             sl_price = entry_price - sl_dist
             tp_price = entry_price + tp_dist
-            tp_shares = [0.4, 0.2, 0.2]
+            # tp_shares = [0.4, 0.2, 0.2]
             tp_shares = [0.2, 0.2, 0.2, 0.2]
 
-            for i in range(3):
+            for i in range(4):
                 if not partial_tp_hit[i] and price >= tp_levels[i]:
                     realized = position_size * tp_shares[i]
                     pnl = realized * profit_pct
@@ -956,7 +963,7 @@ def train_bot(df, agent, symbol, window_size=20):
                 invest = 0
                 position = 0
                 position_pct_left = 1.0
-                partial_tp_hit = [False, False, False]
+                partial_tp_hit = [False, False, False, False]
                 action = 3
                     
         elif position == -1:
@@ -973,7 +980,7 @@ def train_bot(df, agent, symbol, window_size=20):
             tp_price = entry_price - tp_dist
             tp_shares = [0.2, 0.2, 0.2, 0.2]
 
-            for i in range(3):
+            for i in range(4):
                 if not partial_tp_hit[i] and price <= tp_levels[i]:
                     realized = position_size * tp_shares[i]
                     pnl = realized * profit_pct
@@ -994,7 +1001,7 @@ def train_bot(df, agent, symbol, window_size=20):
                     invest = 0
                     position = 0
                     position_pct_left = 1.0
-                    partial_tp_hit = [False, False, False]
+                    partial_tp_hit = [False, False, False, False]
                     action = 3
         # if ema_7_28_crossover:
             # ema_7_28_crossover_idx += 1
@@ -1007,14 +1014,14 @@ def train_bot(df, agent, symbol, window_size=20):
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
             agent.savecheckpoint(symbol)
-            # print(f"[INFO] Saved checkpoint at step {save_counter}")
+            print(f"[INFO] Saved checkpoint at step {save_counter}")
         # print()
     agent.train()
     agent.savecheckpoint(symbol)
     print(f"[INFO] Saved checkpoint at step {save_counter}")
     # rrKNN.train()
     # rrKNN.save()
-    print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
+    print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/274:.2f}")
 
 # Bybit Demo API Key and Secret - eS2OePPbbpRvE1yHck - XFQB3NCBxpyHWxgYv8tef8l7McVcvCxRLR0X
 # Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
@@ -1123,8 +1130,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
 
                 capital = get_balance(session)
 
+                # print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f} - HL rolling mean: {df['HL_rolling_mean'].iloc[-1]}")
                 print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f} - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
-                
                 current_day = day
                 # capital += daily_pnl
 
@@ -1207,9 +1214,10 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         entry_price + 0.6 * tp_dist,
                         entry_price + 0.8 * tp_dist
                     ]
-                    for i in range(3):
+                    tp_shares = [0.2, 0.2, 0.2, 0.2]
+                    for i in range(4):
                         # if not partial_tp_hit[i] and price >= tp_levels[i]:
-                        realized = position_size * tp_levels[i]
+                        realized = position_size * tp_shares[i]
                         pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
                         # capital += pnl
                         # reward += pnl / capital
@@ -1221,7 +1229,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                             side=close_side,  # opposite side to close position
                             order_type="Limit",
                             qty=str(round(pnl, 6)),
-                            reduce_only=True,
+                            price=str(tp_levels[i]),
+                            reduce_only=True
                             # time_in_force="ImmediateOrCancel"
                             # time_in_force="IOC"
                             # leverage=leverage
@@ -1255,7 +1264,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         entry_price - 0.6 * tp_dist,
                         entry_price - 0.8 * tp_dist
                     ]
-                    for i in range(3):
+                    tp_shares = [0.2, 0.2, 0.2, 0.2]
+                    for i in range(4):
                         # if not partial_tp_hit[i] and price >= tp_levels[i]:
                         realized = position_size * tp_shares[i]
                         pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
@@ -1269,7 +1279,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                             side=close_side,  # opposite side to close position
                             order_type="Limit",
                             qty=str(round(pnl, 6)),
-                            reduce_only=True,
+                            price=str(tp_levels[i]),
+                            reduce_only=True
                             # time_in_force="ImmediateOrCancel"
                             # time_in_force="IOC"
                             # leverage=leverage
@@ -1406,7 +1417,6 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
-        # if save_counter % 10080 == 0:
         # if not begun:
         #     for t in range(30, len(df)):
         #         if t % 60 == 0:
@@ -1415,7 +1425,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         #             agent.savecheckpoint(symbol)
         #             # print()
         #             print(f"[INFO] Saved checkpoint at step {save_counter}")
-        if save_counter % 60 == 0:
+        if save_counter % 10080 == 0:
+        # if save_counter % 60 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
             agent.savecheckpoint(symbol)
