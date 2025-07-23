@@ -1004,7 +1004,10 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             action = 3
         elif df["ADX_zone"].iloc[-1] == 0:
             action = 0
-        if df['High'].iloc[t-14:t] - df['Low'].iloc[t-14:t] / df['Close'].iloc[t] < 0.003:
+
+        price_range = (df['High'].iloc[-14:].max() - df['Low'].iloc[-14:].min()) / df['Close'].iloc[-1]
+
+        if price_range < 0.003:
             continue
 
         macd_zone = df.iloc[-1]['macd_zone']
