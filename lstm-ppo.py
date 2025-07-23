@@ -185,6 +185,8 @@ def get_klines_df(symbol, interval, session, limit=240):
     # df["Timestamp"] = pd.to_datetime(df["Timestamp"].astype(np.int64), unit='ms')
     df["Timestamp"] = pd.to_datetime(df["Timestamp"].astype(np.int64), unit='ms')
 
+    df = df.sort_values("Timestamp").reset_index(drop=True)
+
     # Select only OHLC
     df = df[["Open", "High", "Low", "Close"]].astype(float)
 
@@ -227,7 +229,7 @@ def add_indicators(df):
     conditions = [
         df['RSI'] < 30,
         (df['RSI'] >= 30) & (df['RSI'] < 50),
-        (df['RSI'] <= 50) & (df['RSI'] < 70),
+        (df['RSI'] >= 50) & (df['RSI'] < 70),
         df['RSI'] >= 70
     ]
     choices = [1, 2, 3, 4]
@@ -794,10 +796,10 @@ def train_bot(df, agent, symbol, window_size=20):
             sr = sharpe_ratio(daily_returns)
             sor = sortino_ratio(daily_returns)
 
-            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
+            capital += daily_pnl
+            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f} - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
             
             current_day = day
-            capital += daily_pnl
 
             daily_pnl = 0.0
 
@@ -822,8 +824,8 @@ def train_bot(df, agent, symbol, window_size=20):
         
         # tp_dist = atr * 3
         # sl_dist = atr * 1.5
-        tp_dist = df.iloc[-1]['Close'] * 0.004
-        sl_dist = df.iloc[-1]['Close'] * 0.002
+        tp_dist = df.iloc[-1]['Close'] * 0.006
+        sl_dist = df.iloc[-1]['Close'] * 0.003
 
         final_pct = 0.0
 
@@ -1035,7 +1037,9 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                 sr = sharpe_ratio(daily_returns)
                 sor = sortino_ratio(daily_returns)
 
-                print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
+                capital = get_balance(session)
+
+                print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f} - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
                 
                 current_day = day
                 # capital += daily_pnl
@@ -1301,7 +1305,7 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = False
+    train = True
     test = True
     
     if train:
