@@ -961,13 +961,15 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         wait_until_next_candle(1)
         df = get_klines_df(bybit_symbol, 1, session)
         df = add_indicators(df)
+        # print(f'price: {df['Close'].iloc[-1]}')
+        print(f"['{bybit_symbol}'] price: {df['Close'].iloc[-1]}")
         if df['ADX_zone'].iloc[-1] == 0:
             continue
         # state_seq = df[-window_size:].values.astype(np.float32)
         state_seq = df[-14:].values.astype(np.float32)
-        if state_seq.shape != (14, agent.state_size):
-            print("Shape mismatch:", state_seq.shape)
-            continue
+        # if state_seq.shape != (14, agent.state_size):
+        #     print("Shape mismatch:", state_seq.shape)
+        #     continue
 
         result = agent.select_action(state_seq)
         if result is None:
