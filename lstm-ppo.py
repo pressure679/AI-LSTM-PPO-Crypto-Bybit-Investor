@@ -214,6 +214,7 @@ def add_indicators(df):
     # price_range = high_14 - low_14
 
     df['RSI'] = RSI(df['Close'], 14)
+    # df['BB_SMA'], df['BB_Upper_Band'], df['BB_Lower_Band'] = Bollinger_Bands(df)
     df['ADX'], df['+DI'], df['-DI'] = ADX(df)
     # df['DI_Diff'] = (df['+DI'] - df['-DI']).abs()
 
@@ -224,7 +225,15 @@ def add_indicators(df):
     df["Bulls"] = df["High"] - df['EMA_14']
     df["Bears"] = df["Low"] - df['EMA_14']
     
+    # df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_signal_diff", "macd_histogram", "BB_SMA", "RSI", "ADX", "Bulls", "Bears", "+DI", "-DI", "ATR"]].copy()
     df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_signal_diff", "macd_histogram", "RSI", "ADX", "Bulls", "Bears", "+DI", "-DI", "ATR"]].copy()
+
+    # conditions_sma = [
+    #     df['BB_SMA'] < df['Close'],
+    #     df['BB_SMA'] > df['Close']
+    # ]
+    # choices_sma = [-1, 1]
+    # df['BB_SMA'] = np.select(conditions_sma, choices_sma, default=0)
 
     conditions = [
         df['RSI'] < 30,
@@ -331,6 +340,7 @@ def add_indicators(df):
     # df["Low"]   = df["Low"] / df["Close"] - 1
     # df["Close"] = df["Close"].pct_change().fillna(0)  # as return
 
+    # df = df[["Open", "High", "Low", "Close", "EMA_crossover", "EMA_7_28_crossover", "macd_zone", "macd_direction", "BB_SMA", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
     df = df[["Open", "High", "Low", "Close", "EMA_crossover", "EMA_7_28_crossover", "macd_zone", "macd_direction", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
 
     df.dropna(inplace=True)
@@ -842,32 +852,32 @@ def train_bot(df, agent, symbol, window_size=20):
         final_pct = 0.0
 
         # qty_step, min_qty = get_qty_step(symbol)
-        if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
-            position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.005)
-            session.place_order(
-                category="linear",
-                symbol=bybit_symbol,
-                side="Buy",
-                order_type="Market",
-                qty=position_size,
-                reduce_only=False,
-                # time_in_force="IOC"
-                take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-                stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-            )
-        if df['EMA_7_28_crossover'].iloc[-1] == -1 and df['EMA_7_28_crossover'].iloc[-2] == 1:
-            position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.005)
-            session.place_order(
-                category="linear",
-                symbol=bybit_symbol,
-                side="Sell",
-                order_type="Market",
-                qty=position_size,
-                reduce_only=False,
-                # time_in_force="IOC"
-                take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-                stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-            )
+        # if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
+        #     position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.005)
+            # session.place_order(
+            #     category="linear",
+            #     symbol=bybit_symbol,
+            #     side="Buy",
+            #     order_type="Market",
+            #     qty=position_size,
+            #     reduce_only=False,
+            #     # time_in_force="IOC"
+            #     take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+            #     stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+            # )
+        # if df['EMA_7_28_crossover'].iloc[-1] == -1 and df['EMA_7_28_crossover'].iloc[-2] == 1:
+        #     position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.005)
+            # session.place_order(
+            #     category="linear",
+            #     symbol=bybit_symbol,
+            #     side="Sell",
+            #     order_type="Market",
+            #     qty=position_size,
+            #     reduce_only=False,
+            #     # time_in_force="IOC"
+            #     take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+            #     stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+            # )
         if position == 0:
             if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
                 invest = max(capital * 0.05, 15)
@@ -891,6 +901,9 @@ def train_bot(df, agent, symbol, window_size=20):
 
         elif position == 1:
             profit_pct = (price - entry_price) / entry_price
+            # if df['BB_SMA'] != 0:
+            #     invest = max(capital * 0.1, 15)
+            #     position_size = invest * leverage
             pnl = profit_pct * position_size  # not margin
             reward += pnl
             tp_levels = [
@@ -1386,7 +1399,7 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = True
+    train = False
     test = True
     
     if train:
