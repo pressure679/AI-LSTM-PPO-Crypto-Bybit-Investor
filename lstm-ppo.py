@@ -1047,10 +1047,10 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             atr = df.iloc[-1]['ATR']
                     
             # tp_dist = atr * 3.0
-            tp_dist = df.iloc[-1]['Close'] * 0.003
+            tp_dist = df.iloc[-1]['Close'] * 0.006
             # sl_dist = atr * 1.5
             # sl_dist = df.iloc[-1]['Close'] * 0.994
-            sl_dist = df.iloc[-1]['Close'] * 0.0015
+            sl_dist = df.iloc[-1]['Close'] * 0.003
 
             if position == 0:
                 if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
