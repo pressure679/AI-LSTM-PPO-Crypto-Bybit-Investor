@@ -755,8 +755,9 @@ def calculate_position_size(balance, risk_pct, entry_price, stop_loss, min_qty=0
         position_size = min_qty
 
     return position_size
-capital = 400
+capital = 276
 def train_bot(df, agent, symbol, window_size=20):
+    agent.loadcheckpoint(symbol)
     capital_lock = threading.Lock()
     global capital
     peak_capital = capital
@@ -819,7 +820,8 @@ def train_bot(df, agent, symbol, window_size=20):
             sor = sortino_ratio(daily_returns)
 
             capital += daily_pnl
-            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f} - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
+            df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
+            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f} - HL rolling mean: {df['HL_rolling_mean'].iloc[-1]}")
             
             current_day = day
 
@@ -851,33 +853,49 @@ def train_bot(df, agent, symbol, window_size=20):
 
         final_pct = 0.0
 
+        # ema_7_28_crossover_idx = 0
+        # ema_7_28_crossover = False
+        # ema_7_28_crossback = False
+
+        # HL = []
+
         # qty_step, min_qty = get_qty_step(symbol)
-        # if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
-        #     position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.005)
-            # session.place_order(
-            #     category="linear",
-            #     symbol=bybit_symbol,
-            #     side="Buy",
-            #     order_type="Market",
-            #     qty=position_size,
-            #     reduce_only=False,
-            #     # time_in_force="IOC"
-            #     take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-            #     stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-            # )
-        # if df['EMA_7_28_crossover'].iloc[-1] == -1 and df['EMA_7_28_crossover'].iloc[-2] == 1:
-        #     position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.005)
-            # session.place_order(
-            #     category="linear",
-            #     symbol=bybit_symbol,
-            #     side="Sell",
-            #     order_type="Market",
-            #     qty=position_size,
-            #     reduce_only=False,
-            #     # time_in_force="IOC"
-            #     take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-            #     stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-            # )
+        if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
+            # ema_7_28_crossover = True
+            # ema_7_28_crossover += 1
+            position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.005)
+            df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
+            session.place_order(
+                category="linear",
+                symbol=bybit_symbol,
+                side="Buy",
+                order_type="Market",
+                qty=position_size,
+                reduce_only=False,
+                # time_in_force="IOC"
+                # take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+                take_profit=str(round(entry_price + df.iloc[-1]['Close'] * df['HL_rolling_mean'], 6)),
+                stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+            )
+        if df['EMA_7_28_crossover'].iloc[-1] == -1 and df['EMA_7_28_crossover'].iloc[-2] == 1:
+            position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.005)
+            # ema_7_28_crossover = False
+            # print(f"ema_7_28_crossover_idx: {ema_7_28_crossover_idx}")
+            # HL = (df['High'].iloc[-ema_7_28_crossover_idx:] - df['Low'].iloc[-ema_7_28_crossover_idx:]) / df['Close'].iloc[-ema_7_28_crossover_idx:]
+            # HL = HL.dropna()
+            # ema_7_28_crossover_idx = 0
+            # HL = append((df['High'].iloc[-ema_7_28_crossover_idx:] - df['Low'].iloc[-ema_7_28_crossover_idx:])/df['Close'].iloc[-ema_7_28_crossover_idx:])
+            session.place_order(
+                category="linear",
+                symbol=bybit_symbol,
+                side="Sell",
+                order_type="Market",
+                qty=position_size,
+                reduce_only=False,
+                # time_in_force="IOC"
+                take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+                stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+            )
         if position == 0:
             if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
                 invest = max(capital * 0.05, 15)
@@ -978,13 +996,15 @@ def train_bot(df, agent, symbol, window_size=20):
                     position_pct_left = 1.0
                     partial_tp_hit = [False, False, False]
                     action = 3
-            
+        # if ema_7_28_crossover:
+            # ema_7_28_crossover_idx += 1
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
+        # ema_7_28_crossover_idx += 1
         if save_counter % 10080 == 0:
         # if save_counter % 24 * 60 == 0:
-            # print(f"[INFO] Training PPO on step {save_counter}...")
+            print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
             agent.savecheckpoint(symbol)
             # print(f"[INFO] Saved checkpoint at step {save_counter}")
@@ -1134,32 +1154,33 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             # sl_dist = atr * 1.5
             # sl_dist = df.iloc[-1]['Close'] * 0.994
             sl_dist = df.iloc[-1]['Close'] * 0.003
-            # if df['EMA_7_28_crossover'].iloc[t] == 1 and df['EMA_7_28_crossover'].iloc[t-1] == -1:
-            #     position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.0005)
-            #     session.place_order(
-            #         category="linear",
-            #         symbol=bybit_symbol,
-            #         side="Buy",
-            #         order_type="Market",
-            #         qty=position_size,
-            #         reduce_only=False,
-            #         # time_in_force="IOC"
-            #         take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-            #         stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-            #     )
-            # if df['EMMA_7_28_crossover'].iloc[t] == -1 and df['EMMA_7_28_crossover'].iloc[t-1] == 1:
-            #     position_size = calculate_position_size(capital, 0.35, entry_price, sl_dist)
-            #     session.place_order(
-            #         category="linear",
-            #         symbol=bybit_symbol,
-            #         side="Sell",
-            #         order_type="Market",
-            #         qty=position_size,
-            #         reduce_only=False,
-            #         # time_in_force="IOC"
-            #         take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-            #         stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-            #     )
+            if df['EMA_7_28_crossover'].iloc[t] == 1 and df['EMA_7_28_crossover'].iloc[t-1] == -1:
+                position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.0005)
+                session.place_order(
+                    category="linear",
+                    symbol=bybit_symbol,
+                    side="Buy",
+                    order_type="Market",
+                    qty=position_size,
+                    reduce_only=False,
+                    # time_in_force="IOC"
+                    # take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.005, 6)),
+                    take_profit=str(round(entry_price + df.iloc[-1]['Close'] * df.iloc[-1]['HL_rolling_mean'], 6)),
+                    stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+                )
+            if df['EMMA_7_28_crossover'].iloc[t] == -1 and df['EMMA_7_28_crossover'].iloc[t-1] == 1:
+                position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist)
+                session.place_order(
+                    category="linear",
+                    symbol=bybit_symbol,
+                    side="Sell",
+                    order_type="Market",
+                    qty=position_size,
+                    reduce_only=False,
+                    # time_in_force="IOC"
+                    take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.001, 6)),
+                    stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.0005, 6))
+                )
             if position == 0:
                 if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
                     invest = max(capital * 0.05, 15)
@@ -1261,6 +1282,12 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                 profit_pct = (price - entry_price) / entry_price
                 pnl = calc_order_qty(profit_pct * position_size, entry_price, min_size, qty_step)  # not margin
                 reward += pnl
+                if profit_pct >= 0.0001:
+                    response = session.set_trading_stop(
+                        category="linear",  # or "inverse", depending on your market
+                        symbol=bybit_symbol,
+                        trailing_stop=df['Close'].iloc[-t] * 0.0001,  # Trailing stop in USD or quote currency
+                    )
                 # tp_levels = [
                 #     entry_price + 0.4 * tp_dist,
                 #     entry_price + 0.5 * tp_dist,
@@ -1398,7 +1425,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     # rrKNN.save()
     # agent.train()
     # agent.savecheckpoint(symbol)
-    print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
+    # print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
 
 def main():
     # global lstm_ppo_agent
