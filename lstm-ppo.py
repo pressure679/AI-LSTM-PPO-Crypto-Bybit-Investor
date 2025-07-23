@@ -27,7 +27,7 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 # epsilon = 0.1
 
 # def load_last_mb(filepath, symbol, mb_size=20):
-def load_last_mb(filepath, symbol, mb_size=10):
+def load_last_mb(filepath, symbol, mb_size=6):
     # Search for a file containing the symbol in its name
     matching_files = [f for f in os.listdir(filepath) if symbol.lower() in f.lower()]
     if not matching_files:
@@ -59,7 +59,7 @@ def load_last_mb(filepath, symbol, mb_size=10):
 
     return df
 
-def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=6, delimiter=';', col_names=None):
+def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=2, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
     
@@ -757,7 +757,7 @@ def calculate_position_size(balance, risk_pct, entry_price, stop_loss, min_qty=0
 
     return position_size
 capital = 274
-def train_bot(df, agent, symbol, window_size=15):
+def train_bot(df, agent, symbol, window_size=16):
     # agent.loadcheckpoint(symbol)
     capital_lock = threading.Lock()
     global capital
@@ -782,6 +782,7 @@ def train_bot(df, agent, symbol, window_size=15):
     current_day = None
     save_counter = 0
     atr = 0.0
+    trailing_sl_pct = 0.0008
     # rrKNN = RewardRateKNN(symbol)
     # print(f"length of df: {len(df)}")
     # t = window_size - 1
@@ -853,10 +854,13 @@ def train_bot(df, agent, symbol, window_size=15):
                 
         # tp_dist = atr * 3
         # sl_dist = atr * 1.5
-        tp_dist = df.iloc[-1]['Close'] * 0.006
-        sl_dist = df.iloc[-1]['Close'] * 0.003
+        tp_dist = df.iloc[t]['Close'] * 0.006
+        sl_dist = df.iloc[t]['Close'] * 0.003
 
         final_pct = 0.0
+
+        max_price = 0.0
+        min_price = 0.0
 
         # ema_7_28_crossover_idx = 0
         # ema_7_28_crossover = False
@@ -865,42 +869,42 @@ def train_bot(df, agent, symbol, window_size=15):
         # HL = []
 
         # qty_step, min_qty = get_qty_step(symbol)
-        if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
-            # ema_7_28_crossover = True
-            # ema_7_28_crossover += 1
-            position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.005)
-            df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
-            session.place_order(
-                category="linear",
-                symbol=bybit_symbol,
-                side="Buy",
-                order_type="Market",
-                qty=position_size,
-                reduce_only=False,
-                # time_in_force="IOC"
-                # take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-                take_profit=str(round(entry_price + df.iloc[-1]['Close'] * df['HL_rolling_mean'], 6)),
-                stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-            )
-        if df['EMA_7_28_crossover'].iloc[-1] == -1 and df['EMA_7_28_crossover'].iloc[-2] == 1:
-            position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.005)
-            # ema_7_28_crossover = False
-            # print(f"ema_7_28_crossover_idx: {ema_7_28_crossover_idx}")
-            # HL = (df['High'].iloc[-ema_7_28_crossover_idx:] - df['Low'].iloc[-ema_7_28_crossover_idx:]) / df['Close'].iloc[-ema_7_28_crossover_idx:]
-            # HL = HL.dropna()
-            # ema_7_28_crossover_idx = 0
-            # HL = append((df['High'].iloc[-ema_7_28_crossover_idx:] - df['Low'].iloc[-ema_7_28_crossover_idx:])/df['Close'].iloc[-ema_7_28_crossover_idx:])
-            session.place_order(
-                category="linear",
-                symbol=bybit_symbol,
-                side="Sell",
-                order_type="Market",
-                qty=position_size,
-                reduce_only=False,
-                # time_in_force="IOC"
-                take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-                stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-            )
+        # if df['EMA_7_28_crossover'].iloc[t] == 1 and df['EMA_7_28_crossover'].iloc[t-1] == -1:
+        #     # ema_7_28_crossover = True
+        #     # ema_7_28_crossover += 1
+        #     position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.005)
+        #     df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
+        #     # session.place_order(
+        #     #     category="linear",
+        #     #     symbol=symbol,
+        #     #     side="Buy",
+        #     #     order_type="Market",
+        #     #     qty=position_size,
+        #     #     reduce_only=False,
+        #     #     # time_in_force="IOC"
+        #     #     # take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+        #     #     take_profit=str(round(entry_price + df.iloc[t]['Close'] * df['HL_rolling_mean'], 6)),
+        #     #     stop_loss=str(round(entry_price - df.iloc[t]['Close'] * 0.005, 6))
+        #     # )
+        # if df['EMA_7_28_crossover'].iloc[t] == -1 and df['EMA_7_28_crossover'].iloc[t-1] == 1:
+        #     position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[t]['Close'] * 0.005)
+        #     # ema_7_28_crossover = False
+        #     # print(f"ema_7_28_crossover_idx: {ema_7_28_crossover_idx}")
+        #     # HL = (df['High'].iloc[-ema_7_28_crossover_idx:] - df['Low'].iloc[-ema_7_28_crossover_idx:]) / df['Close'].iloc[-ema_7_28_crossover_idx:]
+        #     # HL = HL.dropna()
+        #     # ema_7_28_crossover_idx = 0
+        #     # HL = append((df['High'].iloc[-ema_7_28_crossover_idx:] - df['Low'].iloc[-ema_7_28_crossover_idx:])/df['Close'].iloc[-ema_7_28_crossover_idx:])
+        #     session.place_order(
+        #         category="linear",
+        #         symbol=symbol,
+        #         side="Sell",
+        #         order_type="Market",
+        #         qty=position_size,
+        #         reduce_only=False,
+        #         # time_in_force="IOC"
+        #         take_profit=str(round(entry_price + df.iloc[t]['Close'] * 0.01, 6)),
+        #         stop_loss=str(round(entry_price - df.iloc[t]['Close'] * 0.005, 6))
+        #     )
         if position == 0:
             # print(f"Open Buy or Sell order")
             if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
@@ -926,6 +930,11 @@ def train_bot(df, agent, symbol, window_size=15):
         # print(f"Manage open position")
         if position == 1:
             profit_pct = (price - entry_price) / entry_price
+            max_price = max(max_price, price)
+            if price <= max_price * (1 - trailing_sl_pct):
+                # exit_trade(reason="Trailing SL Hit")6
+                daily_pnl += profit_pct * position_size
+                action = 3
             # if df['BB_SMA'] != 0:
             #     invest = max(capital * 0.1, 15)
             #     position_size = invest * leverage
@@ -972,7 +981,12 @@ def train_bot(df, agent, symbol, window_size=15):
                                         
         elif position == -1:
             profit_pct = (entry_price - price) / entry_price
-            pnl = position_size * final_pct
+            pnl = position_size * profit_pct
+            min_price = min(min_price, price)
+            if price >= min_price * (1 + trailing_sl_pct):
+                # exit_trade(reason="Trailing SL Hit")6
+                daily_pnl += profit_pct * position_size
+                action = 3
             reward += pnl
             tp_levels = [
                 entry_price - 0.2 * tp_dist,
@@ -1015,7 +1029,7 @@ def train_bot(df, agent, symbol, window_size=15):
             # if save_counter % 24 * 60 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
-            agent.savecheckpoint(symbol)
+            # agent.savecheckpoint(symbol)
             print(f"[INFO] Saved checkpoint at step {save_counter}")
             # print()
     agent.train()
@@ -1025,9 +1039,17 @@ def train_bot(df, agent, symbol, window_size=15):
     # rrKNN.save()
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/274:.2f}")
 
-api_key = ""
-api_secret = ""
-def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
+# Bybit Demo API Key and Secret - eS2OePPbbpRvE1yHck - XFQB3NCBxpyHWxgYv8tef8l7McVcvCxRLR0X
+# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
+api_key = "PoP1ud3PuWajwecc4S"
+api_secret = "z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU"
+session = HTTP(
+    api_key=api_key,
+    api_secret=api_secret,
+    demo=False  # or False for mainnet
+)
+
+def test_bot(df, agent, symbol, bybit_symbol, session, window_size=16):
     global api_key
     global api_secret
     capital_lock = threading.Lock()
@@ -1077,6 +1099,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
             # df = df.iloc[1:].reset_index(drop=True)
             df = get_klines_df(bybit_symbol, 1, session, limit=240)
             df = add_indicators(df)
+            df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
             # print(f'price: {df['Close'].iloc[-1]}')
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"=== {bybit_symbol} stats at {now} ===")
@@ -1161,7 +1184,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
             # sl_dist = atr * 1.5
             # sl_dist = df.iloc[-1]['Close'] * 0.994
             sl_dist = df.iloc[-1]['Close'] * 0.003
-            if df['EMA_7_28_crossover'].iloc[t] == 1 and df['EMA_7_28_crossover'].iloc[t-1] == -1:
+            if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
                 position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.0005)
                 session.place_order(
                     category="linear",
@@ -1175,7 +1198,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
                     take_profit=str(round(entry_price + df.iloc[-1]['Close'] + df.iloc[-1]['HL_rolling_mean'], 6)),
                     stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
                 )
-            if df['EMA_7_28_crossover'].iloc[t] == -1 and df['EMA_7_28_crossover'].iloc[t-1] == 1:
+            if df['EMA_7_28_crossover'].iloc[-1] == -1 and df['EMA_7_28_crossover'].iloc[-2] == 1:
                 position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist)
                 session.place_order(
                     category="linear",
@@ -1425,8 +1448,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
         #             agent.savecheckpoint(symbol)
         #             # print()
         #             print(f"[INFO] Saved checkpoint at step {save_counter}")
-        if save_counter % 10080 == 0:
-        # if save_counter % 60 == 0:
+        # if save_counter % 10080 == 0:
+        if save_counter % 60 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
             agent.savecheckpoint(symbol)
@@ -1452,8 +1475,8 @@ def main():
             if symbol == "XAUUSD":
                 df = load_last_mb_xauusd("/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv")
             else:
-            #     continue
-                df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
+                continue
+            #     df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
             # df = yf.download(yf_symbols[counter], interval="1m", period="7d")
             # df = df[['Open', "High", "Low", "Close"]].values
             df = df[['Open', "High", "Low", "Close"]]
@@ -1462,7 +1485,7 @@ def main():
             # print(f"columns: {df.columns}")
             # df = df.reshape(20, 14)
             # print(f"length of df: {len(df)}")
-            lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=16, hidden_size=64, action_size=4)
             # train_bot(df, lstm_ppo_agent, symbol)
             t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbol))
             t.start()
@@ -1482,7 +1505,7 @@ def main():
             df = get_klines_df(bybit_symbol, 1, session)
             df = add_indicators(df)
             # print(f"columns: {df.columns}")
-            lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=16, hidden_size=64, action_size=4)
             t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[counter], bybit_symbol, session))
             t.start()
             test_threads.append(t)
