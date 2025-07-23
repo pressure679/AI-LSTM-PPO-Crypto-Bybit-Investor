@@ -1050,7 +1050,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             # print(f'price: {df['Close'].iloc[-1]}')
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"=== {bybit_symbol} stats at {now} ===")
-            print(f"['{bybit_symbol}'] price: {df['Close'].iloc[-1]}")
+            print(f"price: {df['Close'].iloc[-1]}")
             # print(f"close: {df['Close'].iloc[-1]:.6f}")
             print(f"adx: {df['ADX_zone'].iloc[-1]}")
             print(f"rsi: {df['RSI_zone'].iloc[-1]:.2f}")
@@ -1131,32 +1131,32 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             # sl_dist = atr * 1.5
             # sl_dist = df.iloc[-1]['Close'] * 0.994
             sl_dist = df.iloc[-1]['Close'] * 0.003
-            if df['EMA_7_28_crossover'].iloc[t] == 1 and df['EMA_7_28_crossover'].iloc[t-1] == -1:
-                position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.0005)
-                session.place_order(
-                    category="linear",
-                    symbol=bybit_symbol,
-                    side="Buy",
-                    order_type="Market",
-                    qty=position_size,
-                    reduce_only=False,
-                    # time_in_force="IOC"
-                    take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-                    stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-                )
-            if df['EMMA_7_28_crossover'].iloc[t] == -1 and df['EMMA_7_28_crossover'].iloc[t-1] == 1:
-                position_size = calculate_position_size(capital, 0.35, entry_price, sl_dist)
-                session.place_order(
-                    category="linear",
-                    symbol=bybit_symbol,
-                    side="Sell",
-                    order_type="Market",
-                    qty=position_size,
-                    reduce_only=False,
-                    # time_in_force="IOC"
-                    take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
-                    stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
-                )
+            # if df['EMA_7_28_crossover'].iloc[t] == 1 and df['EMA_7_28_crossover'].iloc[t-1] == -1:
+            #     position_size = calculate_position_size(capital, 0.35, entry_price, df.iloc[-1]['Close'] * 0.0005)
+            #     session.place_order(
+            #         category="linear",
+            #         symbol=bybit_symbol,
+            #         side="Buy",
+            #         order_type="Market",
+            #         qty=position_size,
+            #         reduce_only=False,
+            #         # time_in_force="IOC"
+            #         take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+            #         stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+            #     )
+            # if df['EMMA_7_28_crossover'].iloc[t] == -1 and df['EMMA_7_28_crossover'].iloc[t-1] == 1:
+            #     position_size = calculate_position_size(capital, 0.35, entry_price, sl_dist)
+            #     session.place_order(
+            #         category="linear",
+            #         symbol=bybit_symbol,
+            #         side="Sell",
+            #         order_type="Market",
+            #         qty=position_size,
+            #         reduce_only=False,
+            #         # time_in_force="IOC"
+            #         take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.01, 6)),
+            #         stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.005, 6))
+            #     )
             if position == 0:
                 if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
                     invest = max(capital * 0.05, 15)
@@ -1178,9 +1178,10 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         stop_loss=str(round(entry_price - sl_dist, 6))
                     )
                     tp_levels = [
+                        entry_price + 0.2 * tp_dist,
                         entry_price + 0.4 * tp_dist,
-                        entry_price + 0.5 * tp_dist,
-                        entry_price + 0.6 * tp_dist
+                        entry_price + 0.6 * tp_dist,
+                        entry_price + 0.8 * tp_dist
                     ]
                     for i in range(3):
                         # if not partial_tp_hit[i] and price >= tp_levels[i]:
@@ -1225,9 +1226,10 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         stop_loss=str(round(entry_price + sl_dist, 6))
                     )
                     tp_levels = [
+                        entry_price - 0.2 * tp_dist,
                         entry_price - 0.4 * tp_dist,
-                        entry_price - 0.5 * tp_dist,
-                        entry_price - 0.6 * tp_dist
+                        entry_price - 0.6 * tp_dist,
+                        entry_price - 0.8 * tp_dist
                     ]
                     for i in range(3):
                         # if not partial_tp_hit[i] and price >= tp_levels[i]:
