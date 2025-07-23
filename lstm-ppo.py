@@ -1027,7 +1027,7 @@ def train_bot(df, agent, symbol, window_size=15):
 
 api_key = ""
 api_secret = ""
-def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
+def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
     global api_key
     global api_secret
     capital_lock = threading.Lock()
