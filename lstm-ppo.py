@@ -755,7 +755,7 @@ def calculate_position_size(balance, risk_pct, entry_price, stop_loss, min_qty=0
         position_size = min_qty
 
     return position_size
-capital = 96
+capital = 400
 def train_bot(df, agent, symbol, window_size=20):
     capital_lock = threading.Lock()
     global capital
@@ -907,13 +907,15 @@ def train_bot(df, agent, symbol, window_size=20):
             pnl = profit_pct * position_size  # not margin
             reward += pnl
             tp_levels = [
+                entry_price + 0.2 * tp_dist,
                 entry_price + 0.4 * tp_dist,
-                entry_price + 0.5 * tp_dist,
-                entry_price + 0.6 * tp_dist
+                entry_price + 0.6 * tp_dist,
+                entry_price + 0.8 * tp_dist
             ]
             sl_price = entry_price - sl_dist
             tp_price = entry_price + tp_dist
             tp_shares = [0.4, 0.2, 0.2]
+            tp_shares = [0.2, 0.2, 0.2, 0.2]
 
             for i in range(3):
                 if not partial_tp_hit[i] and price >= tp_levels[i]:
@@ -944,14 +946,15 @@ def train_bot(df, agent, symbol, window_size=20):
             pnl = position_size * final_pct
             reward += pnl
             tp_levels = [
+                entry_price - 0.2 * tp_dist,
                 entry_price - 0.4 * tp_dist,
-                entry_price - 0.5 * tp_dist,
-                entry_price - 0.6 * tp_dist
+                entry_price - 0.6 * tp_dist,
+                entry_price - 0.8 * tp_dist
             ]
             sl_price = entry_price + sl_dist
             tp_price = entry_price - tp_dist
-            tp_shares = [0.4, 0.2, 0.2]
-            
+            tp_shares = [0.2, 0.2, 0.2, 0.2]
+
             for i in range(3):
                 if not partial_tp_hit[i] and price <= tp_levels[i]:
                     realized = position_size * tp_shares[i]
@@ -981,10 +984,10 @@ def train_bot(df, agent, symbol, window_size=20):
         save_counter += 1
         if save_counter % 10080 == 0:
         # if save_counter % 24 * 60 == 0:
-            print(f"[INFO] Training PPO on step {save_counter}...")
+            # print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
             agent.savecheckpoint(symbol)
-            print(f"[INFO] Saved checkpoint at step {save_counter}")
+            # print(f"[INFO] Saved checkpoint at step {save_counter}")
         # print()
     agent.train()
     agent.savecheckpoint(symbol)
