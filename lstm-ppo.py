@@ -938,6 +938,7 @@ api_secret = "z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU"
 def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     global api_key
     global api_secret
+    capital_lock = threading.lock()
     # max_window_size = 240
     # rrKNN = RewardRateKNN(symbol)
     # rrKNN.load()
@@ -971,23 +972,24 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
         df = get_klines_df(bybit_symbol, 1, session)
         df = add_indicators(df)
         # print(f'price: {df['Close'].iloc[-1]}')
-        print(f"=== {bybit_symbol} Stats ===")
-        print(f"['{bybit_symbol}'] price: {df['Close'].iloc[-1]}")
-        print(f"Close: {df['Close'].iloc[-1]:.6f}")
-        print(f"ADX: {df['ADX_zone'].iloc[-1]}")
-        print(f"RSI: {df['RSI_zone'].iloc[-1]:.2f}")
-        print(f"ATR: {atr:.6f}")
-        bias_ema_crossover = "Bullish" if df['EMA_crossover'].iloc[-1] > 0  else "Bearish" if df['EMA_crossover'].iloc[-1] < 0 else "Neutral"
-        print(f"EMA7/14/28 crossover above/below: {df['EMA_crossover'].iloc[-1] > 0}/{df['EMA_crossover'].iloc[-1] < 0} ({bias_ema_crossover})")
-        bias_macd_signal_line = "Bullish" if df['macd_direction'].iloc[-1] > 0 else "Bearish" if df["macd_direction"].iloc[-1] < 0 else "Neutral"
-        print(f"MacD zone: {df['macd_zone'].iloc[-1]:.2f} - going up/down: {df['macd_direction'].iloc[-1]} ({bias_macd_signal_line})")
-        # print(f"MacD line: {df['macd_line'].iloc[-1]:.2f} - going up/down: {df['macd_line_diff'].iloc[-1]:.2f} ({bias_macd_signal_line})")
-        # bias_osma_diff = "Bullish" if df['OSMA_Diff'].iloc[-1] > 0 else "Bearish" if df['OSMA_Diff'].iloc[-1] < 0 else "Neutral"
-        # print(f"OSMA zone: {df['OSMA'].iloc[-1]:.2f} - Direction: {df['OSMA_Diff'].iloc[-1]:.2f} ({bias_osma_diff})")
-        # di_diff = df['DI_Diff'].iloc[-1]
-        bias_di_diff = "Bullish" if df['+DI_val'].iloc[-1] > df['-DI_val'].iloc[-1] else "Bearish" if df['+DI_val'].iloc[-1] < df['-DI_val'].iloc[-1] else "Neutral"
-        print(f"+DI_val/-DI_val: {df['+DI_val'].iloc[-1]:.2f}/{df['-DI_val'].iloc[-1]:.2f} ({bias_di_diff})")
-        print()
+        with capital_lock:
+            print(f"=== {bybit_symbol} stats ===")
+            print(f"['{bybit_symbol}'] price: {df['close'].iloc[-1]}")
+            print(f"close: {df['close'].iloc[-1]:.6f}")
+            print(f"adx: {df['adx_zone'].iloc[-1]}")
+            print(f"rsi: {df['rsi_zone'].iloc[-1]:.2f}")
+            print(f"atr: {atr:.6f}")
+            bias_ema_crossover = "bullish" if df['ema_crossover'].iloc[-1] > 0  else "bearish" if df['ema_crossover'].iloc[-1] < 0 else "neutral"
+            print(f"ema7/14/28 crossover above/below: {df['ema_crossover'].iloc[-1] > 0}/{df['ema_crossover'].iloc[-1] < 0} ({bias_ema_crossover})")
+            bias_macd_signal_line = "bullish" if df['macd_direction'].iloc[-1] > 0 else "bearish" if df["macd_direction"].iloc[-1] < 0 else "neutral"
+            print(f"macd zone: {df['macd_zone'].iloc[-1]:.2f} - going up/down: {df['macd_direction'].iloc[-1]} ({bias_macd_signal_line})")
+            # print(f"macd line: {df['macd_line'].iloc[-1]:.2f} - going up/down: {df['macd_line_diff'].iloc[-1]:.2f} ({bias_macd_signal_line})")
+            # bias_osma_diff = "bullish" if df['osma_diff'].iloc[-1] > 0 else "bearish" if df['osma_diff'].iloc[-1] < 0 else "neutral"
+            # print(f"osma zone: {df['osma'].iloc[-1]:.2f} - direction: {df['osma_diff'].iloc[-1]:.2f} ({bias_osma_diff})")
+            # di_diff = df['di_diff'].iloc[-1]
+            bias_di_diff = "bullish" if df['+di_val'].iloc[-1] > df['-di_val'].iloc[-1] else "bearish" if df['+di_val'].iloc[-1] < df['-di_val'].iloc[-1] else "neutral"
+            print(f"+di_val/-di_val: {df['+di_val'].iloc[-1]:.2f}/{df['-di_val'].iloc[-1]:.2f} ({bias_di_diff})")
+            print()
     
         if df['ADX_zone'].iloc[-1] == 0:
             continue
