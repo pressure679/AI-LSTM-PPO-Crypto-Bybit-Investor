@@ -930,8 +930,10 @@ def train_bot(df, agent, symbol, window_size=20):
     # rrKNN.save()
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
 
-api_key = ""
-api_secret = ""
+# Bybit Demo API Key and Secret - eS2OePPbbpRvE1yHck - XFQB3NCBxpyHWxgYv8tef8l7McVcvCxRLR0X
+# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
+api_key = "PoP1ud3PuWajwecc4S"
+api_secret = "z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU"
 def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     global api_key
     global api_secret
@@ -963,6 +965,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     save_counter = 0
     atr = 0.0
     tp_shares = []
+    daily_pnl = 0.0
 
     while True:
         with capital_lock:
@@ -1046,11 +1049,11 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             bears = df.iloc[-1]['Bears']
             atr = df.iloc[-1]['ATR']
                     
-            # tp_dist = atr * 3.0
-            tp_dist = df.iloc[-1]['Close'] * 0.006
-            # sl_dist = atr * 1.5
+            tp_dist = atr * 3.0
+            # tp_dist = df.iloc[-1]['Close'] * 0.006
+            sl_dist = atr * 1.5
             # sl_dist = df.iloc[-1]['Close'] * 0.994
-            sl_dist = df.iloc[-1]['Close'] * 0.003
+            # sl_dist = df.iloc[-1]['Close'] * 0.003
 
             if position == 0:
                 if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
@@ -1067,7 +1070,9 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         order_type="Market",
                         qty=position_size,
                         reduce_only=False,
-                        time_in_force="IOC"
+                        time_in_force="IOC",
+                        take_profit=entry_price + tp_dist,
+                        stop_loss=entry_price - sl_dist 
                     )
                     tp_levels = [
                         entry_price + 0.4 * tp_dist,
@@ -1081,16 +1086,16 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         # capital += pnl
                         reward += pnl / capital
                         daily_pnl += pnl
-                        print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
+                        print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance(session):.2f}")
                         close_side = "Sell" if position == 1 else "Buy"
-                        response = session.place_active_order(
+                        response = session.place_order(
                             symbol=bybit_symbol,
                             side=close_side,  # opposite side to close position
                             order_type="Limit",
                             qty=pnl,
                             reduce_only=True,
                             time_in_force="ImmediateOrCancel",
-                            leverage=leverage
+                            # leverage=leverage
                         )
                         # partial_tp_hit = [False, False, False]
                         # position_pct_left = 1.0
@@ -1110,7 +1115,9 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         order_type="Market",
                         qty=position_size,
                         reduce_only=False,
-                        time_in_force="IOC"
+                        time_in_force="IOC",
+                        take_profit=entry_price - tp_dist,
+                        stop_loss=entry_price + sl_dist
                     )
                     tp_levels = [
                         entry_price - 0.4 * tp_dist,
@@ -1124,7 +1131,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                             # capital += pnl
                             reward += pnl / capital
                             daily_pnl += pnl
-                            print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
+                            print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance(session):.2f}")
                             close_side = "Sell" if position == 1 else "Buy"
                             response = session.place_active_order(
                                 symbol=bybit_symbol,
