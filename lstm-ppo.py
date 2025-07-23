@@ -1071,8 +1071,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         qty=position_size,
                         reduce_only=False,
                         time_in_force="IOC",
-                        take_profit=round(entry_price + tp_dist, 6),
-                        stop_loss=round(entry_price - sl_dist, 6)
+                        # take_profit=str(round(entry_price + tp_dist, 6)),
+                        # stop_loss=str(round(entry_price - sl_dist, 6))
                     )
                     tp_levels = [
                         entry_price + 0.4 * tp_dist,
@@ -1092,7 +1092,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                             symbol=bybit_symbol,
                             side=close_side,  # opposite side to close position
                             order_type="Limit",
-                            qty=round(pnl, 6),
+                            qty=str(round(pnl, 6)),
                             reduce_only=True,
                             time_in_force="ImmediateOrCancel",
                             # leverage=leverage
@@ -1113,11 +1113,11 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                         symbol=bybit_symbol,
                         side="Sell",
                         order_type="Market",
-                        qty=position_size,
+                        qty=str(position_size),
                         reduce_only=False,
                         time_in_force="IOC",
-                        take_profit=round(entry_price - tp_dist, 6),
-                        stop_loss=round(entry_price + sl_dist, 6)
+                        # take_profit=str(round(entry_price - tp_dist, 6)),
+                        # stop_loss=str(round(entry_price + sl_dist, 6))
                     )
                     tp_levels = [
                         entry_price - 0.4 * tp_dist,
@@ -1136,8 +1136,8 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
                             response = session.place_active_order(
                                 symbol=bybit_symbol,
                                 side=close_side,  # opposite side to close position
-                                order_type="limit",
-                                qty=round(pnl, 6),
+                                order_type="Limit",
+                                qty=str(round(pnl, 6)),
                                 reduce_only=True,
                                 time_in_force="ImmediateOrCancel",
                                 # leverage=leverage
