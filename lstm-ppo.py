@@ -788,8 +788,7 @@ def train_bot(df, agent, symbol, window_size=20):
             print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
             
             current_day = day
-            with capital_lock:
-                capital += daily_pnl
+            capital += daily_pnl
 
             daily_pnl = 0.0
 
@@ -967,12 +966,12 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
     atr = 0.0
 
     while True:
-        wait_until_next_candle(1)
-        print()
-        df = get_klines_df(bybit_symbol, 1, session)
-        df = add_indicators(df)
-        # print(f'price: {df['Close'].iloc[-1]}')
         with capital_lock:
+            wait_until_next_candle(1)
+            print()
+            df = get_klines_df(bybit_symbol, 1, session)
+            df = add_indicators(df)
+            # print(f'price: {df['Close'].iloc[-1]}')
             print(f"=== {bybit_symbol} stats ===")
             print(f"['{bybit_symbol}'] price: {df['Close'].iloc[-1]}")
             # print(f"close: {df['Close'].iloc[-1]:.6f}")
@@ -991,281 +990,281 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=20):
             print(f"+DI_val/-DI_val: {df['+DI_val'].iloc[-1]:.2f}/{df['-DI_val'].iloc[-1]:.2f} ({bias_DI_DIff})")
             print()
     
-        if df['ADX_zone'].iloc[-1] == 0:
-            continue
-        # state_seq = df[-window_size:].values.astype(np.float32)
-        state_seq = df[-14:].values.astype(np.float32)
-        # if state_seq.shape != (14, agent.state_size):
-        #     print("Shape mismatch:", state_seq.shape)
-        #     continue
+            if df['ADX_zone'].iloc[-1] == 0:
+                continue
+            # state_seq = df[-window_size:].values.astype(np.float32)
+            state_seq = df[-14:].values.astype(np.float32)
+            # if state_seq.shape != (14, agent.state_size):
+            #     print("Shape mismatch:", state_seq.shape)
+            #     continue
 
-        result = agent.select_action(state_seq)
-        if result is None:
-            continue
+            result = agent.select_action(state_seq)
+            if result is None:
+                continue
 
-        action, logprob, value = result
+            action, logprob, value = result
 
-        # print(f"action: {action}")
+            # print(f"action: {action}")
 
-        price = df.iloc[-1]["Close"]
-        # next_price = df.iloc[-1]["Close"]
-        day = str(df.index[-1]).split(' ')[0]
+            price = df.iloc[-1]["Close"]
+            # next_price = df.iloc[-1]["Close"]
+            day = str(df.index[-1]).split(' ')[0]
 
-        if current_day is None:
-            current_day = day
-        elif day != current_day:
-            # print(f"[{symbol}] Day {current_day} - PnL: {(daily_pnl / capital) * 100:.2f}% - Balance: {capital:.2f}")
-            daily_return_pct = (daily_pnl / capital) * 100 if capital != 0 else 0
-            daily_returns.append(daily_return_pct)
+            if current_day is None:
+                current_day = day
+            elif day != current_day:
+                # print(f"[{symbol}] Day {current_day} - PnL: {(daily_pnl / capital) * 100:.2f}% - Balance: {capital:.2f}")
+                daily_return_pct = (daily_pnl / capital) * 100 if capital != 0 else 0
+                daily_returns.append(daily_return_pct)
 
-            avg_profit_per_trade = daily_pnl / daily_trades if daily_trades > 0 else 0
-            sr = sharpe_ratio(daily_returns)
-            sor = sortino_ratio(daily_returns)
+                avg_profit_per_trade = daily_pnl / daily_trades if daily_trades > 0 else 0
+                sr = sharpe_ratio(daily_returns)
+                sor = sortino_ratio(daily_returns)
 
-            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
-            
-            current_day = day
-            # capital += daily_pnl
-
-            daily_pnl = 0.0
-
-        # Force close if ADX zone becomes 0
-        if df["ADX_zone"].iloc[-1] == 0 and position != 0:
-            action = 3
-        elif df["ADX_zone"].iloc[-1] == 0:
-            action = 0
-
-        # price_range = (df['High'].iloc[-14:].max() - df['Low'].iloc[-14:].min()) / df['Close'].iloc[-1]
-
-        # if price_range < 0.003:
-        #     continue
-
-        macd_zone = df.iloc[-1]['macd_zone']
-        plus_di = df.iloc[-1]['+DI_val']
-        minus_di = df.iloc[-1]['-DI_val']
-        bulls = df.iloc[-1]['Bulls']
-        bears = df.iloc[-1]['Bears']
-        atr = df.iloc[-1]['ATR']
-        
-        tp_dist = atr * 3
-        sl_dist = atr * 1.5
-
-        if position == 0:
-            if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
-                invest = max(capital * 0.05, 15)
-                position_size = calc_order_qty(float(invest), df['Close'].iloc[-1], min_qty, qty_step)
-                entry_price = price
-                # capital -= 0.0089
-                position = 1
-                print(f"[{bybit_symbol}] Entered Buy order")
-                session.place_order(
-                    category="linear",
-                    symbol=bybit_symbol,
-                    side="Buy",
-                    order_type="Market",
-                    qty=position_size,
-                    reduce_only=False,
-                    time_in_force="IOC"
-                )
-                tp_levels = [
-                    entry_price + 0.4 * tp_dist,
-                    entry_price + 0.5 * tp_dist,
-                    entry_price + 0.6 * tp_dist
-                ]
-                for i in range(3):
-                    # if not partial_tp_hit[i] and price >= tp_levels[i]:
-                    realized = position_size * tp_shares[i]
-                    pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
-                    # capital += pnl
-                    reward += pnl / capital
-                    daily_pnl += pnl
-                    print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
-                    close_side = "Sell" if position == 1 else "Buy"
-                    response = session.place_active_order(
-                        symbol=bybit_symbol,
-                        side=close_side,  # opposite side to close position
-                        order_type="Market",
-                        qty=pnl,
-                        reduce_only=True,
-                        time_in_force="ImmediateOrCancel",
-                        leverage=leverage
-                    )
-                # partial_tp_hit = [False, False, False]
-                # position_pct_left = 1.0
-                daily_trades += 1
+                print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
                 
-            elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
-                invest = max(capital * 0.05, 15)
-                position_size = calc_order_qty(float(invest), entry_price, min_qty, qty_step)
-                entry_price = price
-                # capital -= 0.0089
-                position = -1
-                print(f"[{bybit_symbol}] Entered Sell order")
-                session.place_order(
-                    category="linear",
-                    symbol=bybit_symbol,
+                current_day = day
+                # capital += daily_pnl
 
-                    side="Sell",
-                    order_type="Market",
-                    qty=qty,
-                    reduce_only=False,
-                    time_in_force="IOC"
-                )
-                tp_levels = [
-                    entry_price - 0.4 * tp_dist,
-                    entry_price - 0.5 * tp_dist,
-                    entry_price - 0.6 * tp_dist
-                ]
-                for i in range(3):
-                    if not partial_tp_hit[i] and price >= tp_levels[i]:
-                        realized = position_size * tp_shares[i]
-                        pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
-                        # capital += pnl
-                        reward += pnl / capital
-                        daily_pnl += pnl
-                        print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
-                        close_side = "Sell" if position == 1 else "Buy"
-                        response = session.place_active_order(
-                            symbol=bybit_symbol,
-                            side=close_side,  # opposite side to close position
-                            order_type="Market",
-                            qty=pnl,
-                            reduce_only=True,
-                            time_in_force="ImmediateOrCancel",
-                            leverage=leverage
-                        )
-                partial_tp_hit = [False, False, False]
-                position_pct_left = 1.0
-                daily_trades += 1
+                daily_pnl = 0.0
 
-        elif position == 1:
-            profit_pct = (price - entry_price) / entry_price
-            pnl = calc_order_qty(profit_pct * position_size, entry_price, min_size, qty_step)  # not margin
-            reward += pnl
-            # tp_levels = [
-            #     entry_price + 0.4 * tp_dist,
-            #     entry_price + 0.5 * tp_dist,
-            #     entry_price + 0.6 * tp_dist
-                                 # ]
-            # sl_price = entry_price - sl_dist
-            # tp_price = entry_price + tp_dist
-            # tp_shares = [0.4, 0.2, 0.2]
+                # Force close if ADX zone becomes 0
+                if df["ADX_zone"].iloc[-1] == 0 and position != 0:
+                    action = 3
+                elif df["ADX_zone"].iloc[-1] == 0:
+                    action = 0
 
-            # for i in range(3):
-            #     if not partial_tp_hit[i] and price >= tp_levels[i]:
-            #         realized = position_size * tp_shares[i]
-            #         pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
-            #         # capital += pnl
-            #         reward += pnl / capital
-            #         daily_pnl += pnl
-            #         print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
-            #         close_side = "Sell" if position == 1 else "Buy"
-            #         response = session.place_active_order(
-            #             symbol=symbol,
-            #             side=close_side,  # opposite side to close position
-            #             order_type="Market",
-            #             qty=pnl,
-            #             reduce_only=True,
-            #             time_in_force="ImmediateOrCancel",
-            #             leverage=leverage
-            #         )
-            #         capital += pnl
-            #         position_pct_left -= tp_shares[i]
-            #         partial_tp_hit[i] = True
-            #         action = 0
+                    # price_range = (df['High'].iloc[-14:].max() - df['Low'].iloc[-14:].min()) / df['Close'].iloc[-1]
 
-            # if price >= tp_price or price <= sl_price:
-            #     final_pct = (price - entry_price) / entry_price
-            #     pnl = position_size * final_pct
-            #         pnl = calc_order_qty(position_size * final_pct, entry_price, min_qty, qty_step)
-            #     # capital += pnl
-            #     reward += pnl / capital
-            #     daily_pnl += pnl
-            #     print(f"[{bybit_symbol}] Hit SL or TP, pnl pct: {price:6f}, realized {realized:.2f}, balance: {get_balance():.2f}")
-            #     close_side = "Sell" if position == 1 else "Buy"
-            #     response = session.place_active_order(
-            #         symbol=symbol,
-            #         side=close_side,  # opposite side to close position
-            #         order_type="Market",
-            #         qty=pnl,
-            #         reduce_only=True,
-            #         time_in_force="ImmediateOrCancel",
-            #         leverage=leverage
-            #     )
-            #     invest = 0
-            #     position = 0
-            #     position_pct_left = 1.0
-            #     partial_tp_hit = [False, False, False]
-            #     action = 3
+                    # if price_range < 0.003:
+                    #     continue
+
+                    macd_zone = df.iloc[-1]['macd_zone']
+                    plus_di = df.iloc[-1]['+DI_val']
+                    minus_di = df.iloc[-1]['-DI_val']
+                    bulls = df.iloc[-1]['Bulls']
+                    bears = df.iloc[-1]['Bears']
+                    atr = df.iloc[-1]['ATR']
                     
-        elif position == -1:
-            profit_pct = (entry_price - price) / entry_price
-            pnl = calc_order_qty(profit_pct * position_size, entry_price, min_size, qty_step)  # not margin
-            reward += pnl
-            # tp_levels = [
-            # entry_price - 0.4 * tp_dist,
-            # entry_price - 0.5 * tp_dist,
-            # entry_price - 0.6 * tp_dist
-                                 # ]
-            # sl_price = entry_price + sl_dist
-            # tp_price = entry_price - tp_dist
-            # tp_shares = [0.4, 0.2, 0.2]
-            
-            # for i in range(3):
-            #     if not partial_tp_hit[i] and price <= tp_levels[i]:
-            #         realized = position_size * tp_shares[i]
-            #         pnl = realized * profit_pct
-            #         # capital += realized + pnl
-            #         reward += pnl / capital
-            #         daily_pnl += pnl
-            #         print(f"[{bybit_symbol}] Hit TP {tp_levels[i]}, realized {realized}, balance: {get_balance()}")
-            #         close_side = "Sell" if position == 1 else "Buy"
-            #         response = session.place_active_order(
-            #             symbol=symbol,
-            #             side=close_side,  # opposite side to close position
-            #             order_type="Market",
-            #             qty=pnl,
-            #             reduce_only=True,
-            #             time_in_force="ImmediateOrCancel",
-            #             leverage=leverage
-            #         )
-            #         invest -= realized
-            #         position_pct_left -= tp_shares[i]
-            #         partial_tp_hit[i] = True
-            #         action = 0
+                    tp_dist = atr * 3
+                    sl_dist = atr * 1.5
 
-            # if price <= tp_price or price >= sl_price:
-            #     final_pct = (entry_price - price) / entry_price
-            #     pnl = position_size * final_pct
-            #     # capital += invest + pnl
-            #     reward += pnl / capital
-            #     daily_pnl += pnl
-            #     print(f"[{bybit_symbol}] Hit SL {price}, realized {pnl}, balance: {get_balance()}")
-            #     close_side = "Sell" if position == 1 else "Buy"
-            #     response = session.place_active_order(
-            #         symbol=symbol,
-            #         side=close_side,  # opposite side to close position
-            #         order_type="Market",
-            #         qty=pnl,
-            #         reduce_only=True,
-            #         time_in_force="ImmediateOrCancel",
-            #         leverage=leverage
-            #     )
-            #     invest = 0
-            #     position = 0
-            #     position_pct_left = 1.0
-            #     partial_tp_hit = [False, False, False]
-            #     action = 3
-            
-        # === Store reward and update step ===
-        agent.store_transition(state_seq, action, logprob, value, reward)
-        save_counter += 1
-        if save_counter % 10080 == 0:
-        # if save_counter % 24 * 60 == 0:
-            print(f"[INFO] Training PPO on step {save_counter}...")
-            agent.train()
-            agent.savecheckpoint(symbol)
-        # print()
+                    if position == 0:
+                        if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
+                            invest = max(capital * 0.05, 15)
+                            position_size = calc_order_qty(float(invest), df['Close'].iloc[-1], min_qty, qty_step)
+                            entry_price = price
+                            # capital -= 0.0089
+                            position = 1
+                            print(f"[{bybit_symbol}] Entered Buy order")
+                            session.place_order(
+                                category="linear",
+                                symbol=bybit_symbol,
+                                side="Buy",
+                                order_type="Market",
+                                qty=position_size,
+                                reduce_only=False,
+                                time_in_force="IOC"
+                            )
+                            tp_levels = [
+                                entry_price + 0.4 * tp_dist,
+                                entry_price + 0.5 * tp_dist,
+                                entry_price + 0.6 * tp_dist
+                            ]
+                            for i in range(3):
+                                # if not partial_tp_hit[i] and price >= tp_levels[i]:
+                                realized = position_size * tp_shares[i]
+                                pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                                # capital += pnl
+                                reward += pnl / capital
+                                daily_pnl += pnl
+                                print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
+                                close_side = "Sell" if position == 1 else "Buy"
+                                response = session.place_active_order(
+                                    symbol=bybit_symbol,
+                                    side=close_side,  # opposite side to close position
+                                    order_type="Market",
+                                    qty=pnl,
+                                    reduce_only=True,
+                                    time_in_force="ImmediateOrCancel",
+                                    leverage=leverage
+                                )
+                                # partial_tp_hit = [False, False, False]
+                                # position_pct_left = 1.0
+                                daily_trades += 1
+                                
+                        elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
+                            invest = max(capital * 0.05, 15)
+                            position_size = calc_order_qty(float(invest), entry_price, min_qty, qty_step)
+                            entry_price = price
+                            # capital -= 0.0089
+                            position = -1
+                            print(f"[{bybit_symbol}] Entered Sell order")
+                            session.place_order(
+                                category="linear",
+                                symbol=bybit_symbol,
+
+                                side="Sell",
+                                order_type="Market",
+                                qty=qty,
+                                reduce_only=False,
+                                time_in_force="IOC"
+                            )
+                            tp_levels = [
+                                entry_price - 0.4 * tp_dist,
+                                entry_price - 0.5 * tp_dist,
+                                entry_price - 0.6 * tp_dist
+                            ]
+                            for i in range(3):
+                                if not partial_tp_hit[i] and price >= tp_levels[i]:
+                                    realized = position_size * tp_shares[i]
+                                    pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                                    # capital += pnl
+                                    reward += pnl / capital
+                                    daily_pnl += pnl
+                                    print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
+                                    close_side = "Sell" if position == 1 else "Buy"
+                                    response = session.place_active_order(
+                                        symbol=bybit_symbol,
+                                        side=close_side,  # opposite side to close position
+                                        order_type="Market",
+                                        qty=pnl,
+                                        reduce_only=True,
+                                        time_in_force="ImmediateOrCancel",
+                                        leverage=leverage
+                                    )
+                                    partial_tp_hit = [False, False, False]
+                                    position_pct_left = 1.0
+                                    daily_trades += 1
+
+                                elif position == 1:
+                                    profit_pct = (price - entry_price) / entry_price
+                                    pnl = calc_order_qty(profit_pct * position_size, entry_price, min_size, qty_step)  # not margin
+                                    reward += pnl
+                                    # tp_levels = [
+                                    #     entry_price + 0.4 * tp_dist,
+                                    #     entry_price + 0.5 * tp_dist,
+                                    #     entry_price + 0.6 * tp_dist
+                                    # ]
+                                    # sl_price = entry_price - sl_dist
+                                    # tp_price = entry_price + tp_dist
+                                    # tp_shares = [0.4, 0.2, 0.2]
+
+                                    # for i in range(3):
+                                    #     if not partial_tp_hit[i] and price >= tp_levels[i]:
+                                    #         realized = position_size * tp_shares[i]
+                                    #         pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                                    #         # capital += pnl
+                                    #         reward += pnl / capital
+                                    #         daily_pnl += pnl
+                                    #         print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance():.2f}")
+                                    #         close_side = "Sell" if position == 1 else "Buy"
+                                    #         response = session.place_active_order(
+                                    #             symbol=symbol,
+                                    #             side=close_side,  # opposite side to close position
+                                    #             order_type="Market",
+                                    #             qty=pnl,
+                                    #             reduce_only=True,
+                                    #             time_in_force="ImmediateOrCancel",
+                                    #             leverage=leverage
+                                    #         )
+                                    #         capital += pnl
+                                    #         position_pct_left -= tp_shares[i]
+                                    #         partial_tp_hit[i] = True
+                                    #         action = 0
+
+                                    # if price >= tp_price or price <= sl_price:
+                                    #     final_pct = (price - entry_price) / entry_price
+                                    #     pnl = position_size * final_pct
+                                    #         pnl = calc_order_qty(position_size * final_pct, entry_price, min_qty, qty_step)
+                                    #     # capital += pnl
+                                    #     reward += pnl / capital
+                                    #     daily_pnl += pnl
+                                    #     print(f"[{bybit_symbol}] Hit SL or TP, pnl pct: {price:6f}, realized {realized:.2f}, balance: {get_balance():.2f}")
+                                    #     close_side = "Sell" if position == 1 else "Buy"
+                                    #     response = session.place_active_order(
+                                    #         symbol=symbol,
+                                    #         side=close_side,  # opposite side to close position
+                                    #         order_type="Market",
+                                    #         qty=pnl,
+                                    #         reduce_only=True,
+                                    #         time_in_force="ImmediateOrCancel",
+                                    #         leverage=leverage
+                                    #     )
+                                    #     invest = 0
+                                    #     position = 0
+                                    #     position_pct_left = 1.0
+                                    #     partial_tp_hit = [False, False, False]
+                                    #     action = 3
+                                    
+                                elif position == -1:
+                                    profit_pct = (entry_price - price) / entry_price
+                                    pnl = calc_order_qty(profit_pct * position_size, entry_price, min_size, qty_step)  # not margin
+                                    reward += pnl
+                                    # tp_levels = [
+                                    # entry_price - 0.4 * tp_dist,
+                                    # entry_price - 0.5 * tp_dist,
+                                    # entry_price - 0.6 * tp_dist
+                                    # ]
+                                    # sl_price = entry_price + sl_dist
+                                    # tp_price = entry_price - tp_dist
+                                    # tp_shares = [0.4, 0.2, 0.2]
+                                    
+                                    # for i in range(3):
+                                    #     if not partial_tp_hit[i] and price <= tp_levels[i]:
+                                    #         realized = position_size * tp_shares[i]
+                                    #         pnl = realized * profit_pct
+                                    #         # capital += realized + pnl
+                                    #         reward += pnl / capital
+                                    #         daily_pnl += pnl
+                                    #         print(f"[{bybit_symbol}] Hit TP {tp_levels[i]}, realized {realized}, balance: {get_balance()}")
+                                    #         close_side = "Sell" if position == 1 else "Buy"
+                                    #         response = session.place_active_order(
+                                    #             symbol=symbol,
+                                    #             side=close_side,  # opposite side to close position
+                                    #             order_type="Market",
+                                    #             qty=pnl,
+                                    #             reduce_only=True,
+                                    #             time_in_force="ImmediateOrCancel",
+                                    #             leverage=leverage
+                                    #         )
+                                    #         invest -= realized
+                                    #         position_pct_left -= tp_shares[i]
+                                    #         partial_tp_hit[i] = True
+                                    #         action = 0
+
+                                    # if price <= tp_price or price >= sl_price:
+                                    #     final_pct = (entry_price - price) / entry_price
+                                    #     pnl = position_size * final_pct
+                                    #     # capital += invest + pnl
+                                    #     reward += pnl / capital
+                                    #     daily_pnl += pnl
+                                    #     print(f"[{bybit_symbol}] Hit SL {price}, realized {pnl}, balance: {get_balance()}")
+                                    #     close_side = "Sell" if position == 1 else "Buy"
+                                    #     response = session.place_active_order(
+                                    #         symbol=symbol,
+                                    #         side=close_side,  # opposite side to close position
+                                    #         order_type="Market",
+                                    #         qty=pnl,
+                                    #         reduce_only=True,
+                                    #         time_in_force="ImmediateOrCancel",
+                                    #         leverage=leverage
+                                    #     )
+                                    #     invest = 0
+                                    #     position = 0
+                                    #     position_pct_left = 1.0
+                                    #     partial_tp_hit = [False, False, False]
+                                    #     action = 3
+                                    
+                                    # === Store reward and update step ===
+                                    agent.store_transition(state_seq, action, logprob, value, reward)
+                                    save_counter += 1
+                                    if save_counter % 10080 == 0:
+                                        # if save_counter % 24 * 60 == 0:
+                                        print(f"[INFO] Training PPO on step {save_counter}...")
+                                        agent.train()
+                                        agent.savecheckpoint(symbol)
+                                        # print()
     print(f"[INFO] Saved checkpoint at step {save_counter}")
     # rrKNN.train()
     # rrKNN.save()
