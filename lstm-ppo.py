@@ -1480,6 +1480,7 @@ def main():
     # Reset for test phase
     counter = 0
     test_threads = []
+    keep_session_alive()
     if test:
         for bybit_symbol in bybit_symbols:
             df = None
