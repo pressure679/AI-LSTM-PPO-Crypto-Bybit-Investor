@@ -29,8 +29,10 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 # gamma = 0.95
 # epsilon = 0.1
 
-api_key = ""
-api_secret = ""
+# Bybit Demo API Key and Secret - K2OW1k9LlnjeQWYHUK - y3TZKS6KV6Yt5Y4SqdmN6NO8y6htZXiAmUeV
+# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
+api_key = "PoP1ud3PuWajwecc4S"
+api_secret = "z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU"
 session = HTTP(
     api_key=api_key,
     api_secret=api_secret,
@@ -587,8 +589,12 @@ class LSTMPPOAgent:
 
             probs = probs / np.sum(probs)  # Normalize again just in case
 
-            action = np.random.choice(self.action_size, p=probs)
-            logprob = np.log(probs[action] + 1e-8)
+            if np.argmax(probs) >= 0.9:
+                action = np.argmax(probs)
+                logprob = np.log(probs[action] + 1e-8)
+            else:
+                action = np.random.choice(self.action_size, p=probs)
+                logprob = np.log(probs[action] + 1e-8)
 
             return action, logprob, value
         except Exception as e:
@@ -804,7 +810,7 @@ def calculate_position_size(balance, risk_pct, entry_price, stop_loss, leverage,
         position_size = min_qty
 
     return position_size
-capital = 274
+capital = 1000
 def train_bot(df, agent, symbol, window_size=15):
     # agent.loadcheckpoint(symbol)
     capital_lock = threading.Lock()
@@ -830,32 +836,19 @@ def train_bot(df, agent, symbol, window_size=15):
     current_day = None
     save_counter = 0
     atr = 0.0
-    trailing_sl_pct = 0.0008
+    trailing_sl_pct = 0.000875
+    begun = False
     # rrKNN = RewardRateKNN(symbol)
-    # print(f"length of df: {len(df)}")
-    # t = window_size - 1
-    for t in range(window_size, len(df) - 1):
-    # while t < len(df) - 1:
-        # print(f"t: {t}")
-        # if position != 0:
-        #     action = 3
-        # else:
-        #     action = 0
-        # if df['ADX_zone'].iloc[t] == 0:
-        #     continue
 
+    for t in range(window_size, len(df) - 1):
         state_seq = df[t - window_size:t].values.astype(np.float32)
         if state_seq.shape != (window_size, agent.state_size):
             print("Shape mismatch:", state_seq.shape)
             continue
-        # print(f"state_seq: {state_seq}")
         result = agent.select_action(state_seq)
         if result is None:
             continue
-        # print(f"result: {result}")
         action, logprob, value = result
-
-        # print(f"action: {action}")
 
         price = df.iloc[t]["Close"]
         next_price = df.iloc[t + 1]["Close"]
@@ -875,7 +868,7 @@ def train_bot(df, agent, symbol, window_size=15):
             capital += daily_pnl
             # df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
             # print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f} - HL rolling mean: {df['HL_rolling_mean'].iloc[-1]}")
-            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:2.f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.2f} - Sortino: {sor:.2f}")
+            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.2f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.2f} - Sortino: {sor:.2f}")
             
             current_day = day
 
@@ -956,52 +949,40 @@ def train_bot(df, agent, symbol, window_size=15):
         if position == 0:
             # print(f"Open Buy or Sell order")
             if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
-                invest = max(capital * 0.05, 15)
+                invest = max(capital * 0.05, 5)
                 position_size = invest * leverage
                 entry_price = price
                 capital -= 0.0089
                 position = 1
                 partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
-                daily_trades += 1
-                        
+                # daily_trades += 1
+
             elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
-                invest = max(capital * 0.05, 15)
+                invest = max(capital * 0.05, 5)
                 position_size = invest * leverage
                 entry_price = price
                 capital -= 0.0089
                 position = -1
                 partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
-                daily_trades += 1
+                # daily_trades += 1
 
-        # print(f"Manage open position")
         if position == 1:
             profit_pct = (price - entry_price) / entry_price
             max_price = max(max_price, price)
             if price <= max_price * (1 - trailing_sl_pct):
-                # exit_trade(reason="Trailing SL Hit")6
                 daily_pnl += profit_pct * position_size
                 action = 3
-            # if df['BB_SMA'] != 0:
-            #     invest = max(capital * 0.1, 15)
-            #     position_size = invest * leverage
             pnl = profit_pct * position_size  # not margin
             tp_levels = [
                 entry_price + 0.4 * tp_dist,
-                entry_price + 0.5 * tp_dist,
                 entry_price + 0.6 * tp_dist,
+                entry_price + 0.8 * tp_dist,
             ]
-            # tp_levels = [
-            #     entry_price + 0.2 * tp_dist,
-            #     entry_price + 0.4 * tp_dist,
-            #     entry_price + 0.6 * tp_dist,
-            #     entry_price + 0.8 * tp_dist
-            # ]
             sl_price = entry_price - sl_dist
             tp_price = entry_price + tp_dist
             tp_shares = [0.4, 0.2, 0.2]
-            # tp_shares = [0.2, 0.2, 0.2, 0.2]
 
             for i in range(3):
                 if not partial_tp_hit[i] and price >= tp_levels[i]:
@@ -1016,14 +997,14 @@ def train_bot(df, agent, symbol, window_size=15):
                     action = 0
 
             if price >= tp_price or price <= sl_price:
-                final_pct = (price - entry_price) / entry_price
-                pnl = position_size * final_pct
-                capital += pnl
-                reward += pnl / capital
-                daily_pnl += pnl
-                invest = 0
-                position = 0
-                position_pct_left = 1.0
+                # final_pct = (price - entry_price) / entry_price
+                # pnl = position_size * final_pct
+                # capital += pnl
+                # reward += pnl / capital
+                # daily_pnl += pnl
+                # invest = 0
+                # position = 0
+                # position_pct_left = 1.0
                 action = 3
                                         
         elif position == -1:
@@ -1037,12 +1018,11 @@ def train_bot(df, agent, symbol, window_size=15):
             reward += pnl
             tp_levels = [
                 entry_price - 0.4 * tp_dist,
-                entry_price - 0.5 * tp_dist,
-                entry_price - 0.6 * tp_dist
+                entry_price - 0.6 * tp_dist,
+                entry_price - 0.8 * tp_dist
             ]
             sl_price = entry_price + sl_dist
             tp_price = entry_price - tp_dist
-            # tp_shares = [0.2, 0.2, 0.2, 0.2]
             tp_shares = [0.4, 0.2, 0.2]
 
             for i in range(3):
@@ -1058,21 +1038,33 @@ def train_bot(df, agent, symbol, window_size=15):
                     action = 0
 
             if price <= tp_price or price >= sl_price:
-                final_pct = (entry_price - price) / entry_price
+                # final_pct = (entry_price - price) / entry_price
+                # pnl = position_size * final_pct
+                # capital += pnl
+                # reward += pnl / capital
+                # daily_pnl += pnl
+                # invest = 0
+                # position = 0
+                # position_pct_left = 1.0
+                # partial_tp_hit = [False, False, False, False]
+                action = 3
+        if action == 3 and position != 0:
+            final_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
+            if final_pct > 0.0:
+                # print(f"position size: {position_size}, final pct: {final_pct}")
                 pnl = position_size * final_pct
                 capital += pnl
                 reward += pnl / capital
-                daily_pnl += pnl
-                invest = 0
-                position = 0
-                position_pct_left = 1.0
-                # partial_tp_hit = [False, False, False, False]
-                action = 3
+            daily_trades += 1
+            entry_price = 0.0
+            position = 0
+           
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
         # print(f"save_counter: {save_counter}")
         if save_counter % 10080 == 0:
+            begun = True
             # if save_counter % 24 * 60 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
@@ -1087,18 +1079,10 @@ def train_bot(df, agent, symbol, window_size=15):
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/274:.2f}")
 
 def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
-    # global api_key
-    # global api_secret
     capital_lock = threading.Lock()
-    # max_window_size = 240
     # rrKNN = RewardRateKNN(symbol)
     # rrKNN.load()
     agent.loadcheckpoint(symbol)
-    # session = HTTP(
-    #     api_key=api_key,
-    #     api_secret=api_secret,
-    #     demo=False  # or False for mainnet
-    # )
     capital = get_balance()
     peak_capital = capital
     # session_position = session.get_positions(category="linear", symbol=symbol)
@@ -1136,21 +1120,12 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
         with capital_lock:
             wait_until_next_candle(1)
             print()
-            # df_buffer = get_klines_df(bybit_symbol, 1, session, limit=30)
-            # df_buffer = add_indicators(df_buffer)
-            # df_buffer = df_buffer.reshape(15, 14)
-            # print(f"df_buffer columns: {df_buffer.columns}")
-            # df = pd.concat([df, df_buffer.iloc[-1]], ignore_index=True)
-            # df = df.iloc[1:].reset_index(drop=True)
             df = get_klines_df(bybit_symbol, 1)
             df = add_indicators(df)
-            df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
             atr = df['ATR'].iloc[-1]
-            # print(f'price: {df['Close'].iloc[-1]}')
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"=== {bybit_symbol} stats at {now} ===")
             print(f"price: {df['Close'].iloc[-1]}")
-            # print(f"close: {df['Close'].iloc[-1]:.6f}")
             print(f"adx: {df['ADX_zone'].iloc[-1]}")
             print(f"rsi: {df['RSI_zone'].iloc[-1]:.2f}")
             print(f"atr: {atr:.6f}")
@@ -1159,16 +1134,13 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
             bias_macd_signal_line = "bullish" if df['macd_direction'].iloc[-1] > 0 else "bearish" if df["macd_direction"].iloc[-1] < 0 else "neutral"
             print(f"macd zone: {df['macd_zone'].iloc[-1]:.2f} - going up/down: {df['macd_direction'].iloc[-1]} ({bias_macd_signal_line})")
             # print(f"macd line: {df['macd_line'].iloc[-1]:.2f} - going up/down: {df['macd_line_diff'].iloc[-1]:.2f} ({bias_macd_signal_line})")
-            # bias_osma_diff = "bullish" if df['osma_diff'].iloc[-1] > 0 else "bearish" if df['osma_diff'].iloc[-1] < 0 else "neutral"
-            # print(f"osma zone: {df['osma'].iloc[-1]:.2f} - direction: {df['osma_diff'].iloc[-1]:.2f} ({bias_osma_diff})")
+            bias_osma_diff = "bullish" if df['osma_diff'].iloc[-1] > 0 else "bearish" if df['osma_diff'].iloc[-1] < 0 else "neutral"
+            print(f"OSMA zone: {df['osma'].iloc[-1]:.2f} - direction: {df['osma_diff'].iloc[-1]:.2f} ({bias_osma_diff})")
             # di_diff = df['di_diff'].iloc[-1]
             bias_DI_DIff = "bullish" if df['+DI_val'].iloc[-1] > df['-DI_val'].iloc[-1] else "bearish" if df['+DI_val'].iloc[-1] < df['-DI_val'].iloc[-1] else "neutral"
             print(f"+DI_val/-DI_val: {df['+DI_val'].iloc[-1]:.2f}/{df['-DI_val'].iloc[-1]:.2f} ({bias_DI_DIff})")
             print()
     
-            # if df['ADX_zone'].iloc[-1] == 0:
-            #     continue
-            # state_seq = df[-window_size:].values.astype(np.float32)
             state_seq = df[-window_size:].values.astype(np.float32)
             if state_seq.shape != (window_size, agent.state_size):
                 print("Shape mismatch:", state_seq.shape)
@@ -1180,16 +1152,12 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
 
             action, logprob, value = result
 
-            # print(f"action: {action}")
-
             price = df.iloc[-1]["Close"]
-            # next_price = df.iloc[-1]["Close"]
             day = str(df.index[-1]).split(' ')[0]
 
             if current_day is None:
                 current_day = day
             elif day != current_day:
-                # print(f"[{symbol}] Day {current_day} - PnL: {(daily_pnl / capital) * 100:.2f}% - Balance: {capital:.2f}")
                 daily_return_pct = (daily_pnl / capital) * 100 if capital != 0 else 0
                 daily_returns.append(daily_return_pct)
 
@@ -1199,7 +1167,6 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
 
                 capital = get_balance(session)
 
-                # print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f} - HL rolling mean: {df['HL_rolling_mean'].iloc[-1]}")
                 print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f} - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
                 current_day = day
                 # capital += daily_pnl
@@ -1263,11 +1230,9 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
             #     )
             if position == 0:
                 if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
-                    invest = max(capital * 0.05, 15)
-                    # position_size = calc_order_qty(float(invest), df['Close'].iloc[-1], min_qty, qty_step)
+                    invest = max(capital * 0.05, 5)
                     entry_price = price
                     position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist, 50)
-                    # capital -= 0.0089
                     position = 1
                     print(f"[{bybit_symbol}] Entered Buy order")
                     session.place_order(
@@ -1275,20 +1240,17 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
                         symbol=bybit_symbol,
                         side="Buy",
                         order_type="Market",
-                        qty=round(position_size, price_precision),
+                        qty=str(round(position_size, price_precision)),
                         reduce_only=False,
                         buyLeverage=leverage,
                         sellLeverage=leverage,
-                        # time_in_force="IOC"
-                        # take_profit=str(round(entry_price + tp_dist, price_precision)),
-                        # stop_loss=str(round(entry_price - sl_dist, price_precision))
                     )
                     response = session.set_trading_stop(
                         category="linear",  # or "inverse", depending on your market
                         symbol=bybit_symbol,
-                        trailing_stop=str(round(entry_price * 0.00875, price_precision)),  # Trailing stop in USD or quote currency
+                        trailing_stop=str(round(entry_price * 0.000875, price_precision)),  # Trailing stop in USD or quote currency
                         # side="Buy",
-                        base_price=str(round(df['Close'].iloc[-1] * 1.00875, price_precision)),
+                        base_price=str(round(df['Close'].iloc[-1] * 1.000875, price_precision)),
                         position_idx=0
                     )
                     tp_levels = [
@@ -1298,13 +1260,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
                     ]
                     tp_shares = [0.4, 0.2, 0.2]
                     for i in range(3):
-                        # if not partial_tp_hit[i] and price >= tp_levels[i]:
                         realized = position_size * tp_shares[i]
                         pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
-                        # capital += pnl
-                        # reward += pnl / capital
-                        # daily_pnl += pnl
-                        # print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance(session):.2f}")
                         close_side = "Sell" if position == 1 else "Buy"
                         response = session.place_order(
                             symbol=bybit_symbol,
@@ -1313,17 +1270,12 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
                             qty=str(round(pnl, price_precision)),
                             price=str(round(tp_levels[i], price_precision)),
                             reduce_only=True
-                            # time_in_force="ImmediateOrCancel"
-                            # time_in_force="IOC"
-                            # leverage=leverage
                         )
                         partial_tp_hit = [False, False, False]
                         # position_pct_left = 1.0
                         daily_trades += 1
                                 
                 elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
-                    # invest = max(capital * 0.05, 15)
-                    # position_size = calc_order_qty(float(invest), entry_price, min_qty, qty_step)
                     entry_price = price
                     position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist, 50)
                     # capital -= 0.0089
@@ -1338,20 +1290,12 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
                         reduce_only=False,
                         buyLeverage=leverage,
                         sellLeverage=leverage,
-                        # time_in_force="IOC",
-                        # take_profit=str(round(entry_price - tp_dist, price_precision)),
-                        # stop_loss=str(round(entry_price + sl_dist, price_precision))
                     )
                     response = session.set_trading_stop(
                         category="linear",  # or "inverse", depending on your market
                         symbol=bybit_symbol,
-                        # trailing_stop=entry_price * 0.00175,  # Trailing stop in USD or quote currency
-                        # side="Sell",
-                        # trailing_stop=str(round(entry_price * 0.00175, price_precision)),  # Trailing stop in USD or quote currency
-                        trailing_stop=str(round(entry_price * 0.00875, price_precision)),  # Trailing stop in USD or quote currency
-                        base_price=str(round(df['Close'].iloc[-1] * (1-0.00875), price_precision)),
-
-                        # side="Buy",
+                        trailing_stop=str(round(entry_price * 0.000875, price_precision)),  # Trailing stop in USD or quote currency
+                        base_price=str(round(df['Close'].iloc[-1] * (1-0.000875), price_precision)),
                         position_idx=0
                     )
                     tp_levels = [
@@ -1361,13 +1305,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
                     ]
                     tp_shares = [0.4, 0.2, 0.2]
                     for i in range(3):
-                        # if not partial_tp_hit[i] and price >= tp_levels[i]:
                         realized = position_size * tp_shares[i]
                         pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
-                        # capital += pnl
-                        # reward += pnl / capital
-                        # daily_pnl += pnl
-                        # print(f"[{bybit_symbol}] Hit Partial TP {tp_levels[i]:.6f}, realized {pnl:.2f}, balance: {get_balance(session):.2f}")
                         close_side = "Sell" if position == 1 else "Buy"
                         response = session.place_active_order(
                             symbol=bybit_symbol,
@@ -1378,9 +1317,6 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
                             reduce_only=True,
                             buyLeverage=leverage,
                             sellLeverage=leverage,
-                            # time_in_force="ImmediateOrCancel"
-                            # time_in_force="IOC"
-                            # leverage=leverage
                         )
                         partial_tp_hit = [False, False, False]
                         position_pct_left = 1.0
@@ -1392,34 +1328,14 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
                 reward += pnl
                 if profit_pct >= 0.0035 or profit_pct <= -0.00175:
                     action = 3
-                # if profit_pct >= 0.0001:
-                # response = session.set_trading_stop(
-                #     category="linear",  # or "inverse", depending on your market
-                #     symbol=bybit_symbol,
-                #     trailing_stop=df['Close'].iloc[-1] * 0.0008,  # Trailing stop in USD or quote currency
-                #     side="Buy",
-                #     base_price=df['Close'].iloc[-1],
-                #     position_idx=0
-                # )
-                if action == 3:
-                   close_old_orders(bybit_symbol) 
             elif position == -1:
                 profit_pct = (entry_price - price) / entry_price
                 pnl = calc_order_qty(profit_pct * position_size, entry_price, min_size, qty_step)  # not margin
                 reward += pnl
                 if profit_pct >= 0.0035 or profit_pct <= -0.00175:
                     action = 3
-                # response = session.set_trading_stop(
-                #     category="linear",  # or "inverse", depending on your market
-                #     symbol=bybit_symbol,
-                #     trailing_stop=df['Close'].iloc[-1] * 0.0008,  # Trailing stop in USD or quote currency
-                #     side="Sell",
-                #     base_price=df['Close'].iloc[-1] * 0.997,
-                #     position_idx=0
-                # )
-                if action == 3:
-                   close_old_orders(bybit_symbol) 
-                
+            if action == 3:
+                close_old_orders(bybit_symbol)
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
