@@ -31,8 +31,8 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 
 # Bybit Demo API Key and Secret - K2OW1k9LlnjeQWYHUK - y3TZKS6KV6Yt5Y4SqdmN6NO8y6htZXiAmUeV
 # Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
-api_key = "K2OW1k9LlnjeQWYHUK"
-api_secret = "y3TZKS6KV6Yt5Y4SqdmN6NO8y6htZXiAmUeV"
+api_key = "PoP1ud3PuWajwecc4S"
+api_secret = "z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU"
 session = HTTP(
     api_key=api_key,
     api_secret=api_secret,
@@ -188,7 +188,7 @@ def BearsPower(df, period=14):
     ema = EMA(df['Close'], period)
     return df['Low'] - ema
 
-def get_klines_df(symbol, interval, session, limit=240):
+def get_klines_df(symbol, interval, limit=240):
     response = session.get_kline(category="linear", symbol=symbol, interval=interval, limit=limit)
     data = response['result']['list']
     df = pd.DataFrame(data, columns=["Timestamp", "Open", "High", "Low", "Close", "Volume", "Turnover"])
@@ -847,7 +847,7 @@ def train_bot(df, agent, symbol, window_size=15):
         #     continue
 
         state_seq = df[t - window_size:t].values.astype(np.float32)
-        if state_seq.shape != (15, agent.state_size):
+        if state_seq.shape != (window_size, agent.state_size):
             print("Shape mismatch:", state_seq.shape)
             continue
         # print(f"state_seq: {state_seq}")
@@ -877,7 +877,7 @@ def train_bot(df, agent, symbol, window_size=15):
             capital += daily_pnl
             # df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
             # print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f} - HL rolling mean: {df['HL_rolling_mean'].iloc[-1]}")
-            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
+            print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:2.f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.2f} - Sortino: {sor:.2f}")
             
             current_day = day
 
@@ -1088,8 +1088,7 @@ def train_bot(df, agent, symbol, window_size=15):
     # rrKNN.save()
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/274:.2f}")
 
-
-def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
+def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
     # global api_key
     # global api_secret
     capital_lock = threading.Lock()
@@ -1102,7 +1101,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
     #     api_secret=api_secret,
     #     demo=False  # or False for mainnet
     # )
-    capital = get_balance(session)
+    capital = get_balance()
     peak_capital = capital
     # session_position = session.get_positions(category="linear", symbol=symbol)
     position = 0
@@ -1114,18 +1113,22 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
     sl_price = 0.0
     tp_price = 0.0
     leverage=50
-    qty_step, min_qty = get_qty_step(bybit_symbol, session)
+    qty_step, min_qty = get_qty_step(bybit_symbol)
     current_day = None
     reward = 0.0
     save_counter = 0
     atr = 0.0
     tp_shares = []
     daily_pnl = 0.0
-    df = get_klines_df(bybit_symbol, 1, session)
+    df = get_klines_df(bybit_symbol, 1)
     df = add_indicators(df)
     begun = False
     partial_tp_hit = []
     position_size = 0.0
+    instrument_info = session.get_instruments_info(
+        category="linear",
+        symbol=bybit_symbol
+    )
     info = instrument_info['result']['list'][0]
     qty_step = float(info['lotSizeFilter']['qtyStep'])  # Minimum qty increment
     min_qty = float(info['lotSizeFilter']['minOrderQty'])  # Minimum allowed qty
@@ -1141,7 +1144,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
             # print(f"df_buffer columns: {df_buffer.columns}")
             # df = pd.concat([df, df_buffer.iloc[-1]], ignore_index=True)
             # df = df.iloc[1:].reset_index(drop=True)
-            df = get_klines_df(bybit_symbol, 1, session, limit=240)
+            df = get_klines_df(bybit_symbol, 1)
             df = add_indicators(df)
             df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
             atr = df['ATR'].iloc[-1]
@@ -1169,7 +1172,7 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
             #     continue
             # state_seq = df[-window_size:].values.astype(np.float32)
             state_seq = df[-window_size:].values.astype(np.float32)
-            if state_seq.shape != (15, agent.state_size):
+            if state_seq.shape != (window_size, agent.state_size):
                 print("Shape mismatch:", state_seq.shape)
                 continue
 
@@ -1229,37 +1232,37 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
             # sl_dist = atr * 1.5
             # sl_dist = df.iloc[-1]['Close'] * 0.994
             sl_dist = df.iloc[-1]['Close'] * 0.00175
-            if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
-                position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.0005, 50)
-                session.place_order(
-                    category="linear",
-                    symbol=bybit_symbol,
-                    side="Buy",
-                    order_type="Market",
-                    qty=round(position_size, price_precision),
-                    reduce_only=False,
-                    buyLeverage=leverage,
-                    sellLeverage=leverage,
-                    # time_in_force="IOC"
-                    # take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.005, 6)),
-                    take_profit=str(round(entry_price + df.iloc[-1]['Close'] + df.iloc[-1]['HL_rolling_mean'], price_precision)),
-                    stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.00175, price_precision))
-                )
-            if df['EMA_7_28_crossover'].iloc[-1] == -1 and df['EMA_7_28_crossover'].iloc[-2] == 1:
-                position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist, 50)
-                session.place_order(
-                    category="linear",
-                    symbol=bybit_symbol,
-                    side="Sell",
-                    order_type="Market",
-                    qty=round(position_size, price_precision),
-                    reduce_only=False,
-                    # time_in_force="IOC"
-                    buyLeverage=leverage,
-                    sellLeverage=leverage,
-                    take_profit=str(round(entry_price + df.iloc[-1]['Close'] - df.iloc[-1]['HL_rolling_mean'], price_precision)),
-                    stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.00175, price_precision))
-                )
+            # if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
+            #     position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.0005, 50)
+            #     session.place_order(
+            #         category="linear",
+            #         symbol=bybit_symbol,
+            #         side="Buy",
+            #         order_type="Market",
+            #         qty=round(position_size, price_precision),
+            #         reduce_only=False,
+            #         buyLeverage=leverage,
+            #         sellLeverage=leverage,
+            #         # time_in_force="IOC"
+            #         # take_profit=str(round(entry_price + df.iloc[-1]['Close'] * 0.005, 6)),
+            #         take_profit=str(round(entry_price + df.iloc[-1]['Close'] + df.iloc[-1]['HL_rolling_mean'], price_precision)),
+            #         stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.00175, price_precision))
+            #     )
+            # if df['EMA_7_28_crossover'].iloc[-1] == -1 and df['EMA_7_28_crossover'].iloc[-2] == 1:
+            #     position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist, 50)
+            #     session.place_order(
+            #         category="linear",
+            #         symbol=bybit_symbol,
+            #         side="Sell",
+            #         order_type="Market",
+            #         qty=round(position_size, price_precision),
+            #         reduce_only=False,
+            #         # time_in_force="IOC"
+            #         buyLeverage=leverage,
+            #         sellLeverage=leverage,
+            #         take_profit=str(round(entry_price + df.iloc[-1]['Close'] - df.iloc[-1]['HL_rolling_mean'], price_precision)),
+            #         stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.00175, price_precision))
+            #     )
             if position == 0:
                 if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
                     invest = max(capital * 0.05, 15)
@@ -1285,9 +1288,9 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
                     response = session.set_trading_stop(
                         category="linear",  # or "inverse", depending on your market
                         symbol=bybit_symbol,
-                        trailing_stop=round(entry_price * 0.00175, price_precision),  # Trailing stop in USD or quote currency
-                        side="Buy",
-                        base_price=df['Close'].iloc[-1],
+                        trailing_stop=str(round(entry_price * 0.00875, price_precision)),  # Trailing stop in USD or quote currency
+                        # side="Buy",
+                        base_price=str(round(df['Close'].iloc[-1] * 1.00875, price_precision)),
                         position_idx=0
                     )
                     tp_levels = [
@@ -1344,9 +1347,13 @@ def test_bot(df, agent, symbol, bybit_symbol, session, window_size=15):
                     response = session.set_trading_stop(
                         category="linear",  # or "inverse", depending on your market
                         symbol=bybit_symbol,
-                        trailing_stop=entry_price * 0.00175,  # Trailing stop in USD or quote currency
-                        side="Sell",
-                        base_price=df['Close'].iloc[-1],
+                        # trailing_stop=entry_price * 0.00175,  # Trailing stop in USD or quote currency
+                        # side="Sell",
+                        # trailing_stop=str(round(entry_price * 0.00175, price_precision)),  # Trailing stop in USD or quote currency
+                        trailing_stop=str(round(entry_price * 0.00875, price_precision)),  # Trailing stop in USD or quote currency
+                        base_price=str(round(df['Close'].iloc[-1] * (1-0.00875), price_precision)),
+
+                        # side="Buy",
                         position_idx=0
                     )
                     tp_levels = [
@@ -1443,7 +1450,7 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = False
+    train = True
     test = True
     
     if train:
@@ -1479,7 +1486,7 @@ def main():
         for bybit_symbol in bybit_symbols:
             df = None
             # session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
-            keep_session_alive()
+            # keep_session_alive()
             df = get_klines_df(bybit_symbol, 1)
             df = add_indicators(df)
             # print(f"columns: {df.columns}")
