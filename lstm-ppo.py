@@ -12,6 +12,7 @@ import time
 from decimal import Decimal
 from pybit.unified_trading import HTTP
 from sklearn.neighbors import NearestNeighbors
+from sklearn.metrics.pairwise import cosine_similarity
 import warnings
 import yfinance as yf
 
@@ -28,6 +29,8 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 # alpha = 0.1
 # gamma = 0.95
 # epsilon = 0.1
+
+capital = 1000
 
 # Bybit Demo API Key and Secret - K2OW1k9LlnjeQWYHUK - y3TZKS6KV6Yt5Y4SqdmN6NO8y6htZXiAmUeV
 # Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
@@ -524,6 +527,22 @@ def wait_until_next_candle(interval_minutes):
     # print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
     time.sleep(sleep_seconds)
 
+def get_position(symbol):
+    try:
+        response = session.get_positions(category="linear", symbol=symbol)
+        positions = response.get("result", {}).get("list", [])
+        
+        if not positions:
+            # print(f"[INFO] No positions found for {symbol}.")
+            return None
+
+        pos = positions[0]
+        size = float(pos.get("size", 0))
+        return pos
+    except Exception as e:
+        print(f"[get_position] Error fetching position for {symbol}: {e}")
+        return None
+
 def close_old_orders(symbol):
     """
     1) Close any live position at market (reduce‑only).
@@ -623,7 +642,24 @@ class LSTMPPOAgent:
         probs = self.softmax(logits)
         return probs, value[0]
 
-    def select_action(self, state_seq):
+    def sl_tp_forward(self, x_seq):
+        h = self.lstm_forward(x_seq)
+        # logits = np.dot(self.model['W_policy'], h) + self.model['b_policy']
+        logits = np.dot(self.model['W_policy'], h) + self.model['b_policy']
+        # probs = self.softmax(logits)
+        value = np.dot(self.model['W_value'], h) + self.model['b_value']
+        continuous_action = self.sigmoid(logits)
+        # return probs, value[0]
+        return continuous_action, value[0] # (tp_raw, sl_raw)
+
+    def scale_action(self, tp_raw, sl_raw):
+        tp_min, tp_max = 0.005, 0.05  # 0.5% to 5%
+        sl_min, sl_max = 0.0025, 0.025  # 0.2% to 3%
+        tp_pct = tp_min + (tp_max - tp_min) * tp_raw
+        sl_pct = sl_min + (sl_max - sl_min) * sl_raw
+        return tp_pct, sl_pct
+
+    def select_action(self, state_seq, in_position):
         try:
             logits, value = self.forward(state_seq)
 
@@ -639,12 +675,15 @@ class LSTMPPOAgent:
 
             probs = probs / np.sum(probs)  # Normalize again just in case
 
-            if np.argmax(probs) >= 0.95:
+            if np.argmax(probs) >= 0.9:
                 action = np.argmax(probs)
                 logprob = np.log(probs[action] + 1e-8)
             else:
                 action = np.random.choice(self.action_size, p=probs)
                 logprob = np.log(probs[action] + 1e-8)
+
+            if in_position and action == 3:
+                action = 0
 
             return action, logprob, value
         except Exception as e:
@@ -811,9 +850,34 @@ class WinRateKNN:
         self.states.append(state)
         self.labels.append(1 if is_win else 0)
 
+        if len(self.states) >= 1000:
+            self._remove_redundant_neighbor()
+            # self.states.pop(0)
+            # self.labels.pop(0)
+
         if len(self.states) >= self.k:
             self._fit()
 
+    def _remove_redundant_neighbor(self):
+        if len(self.states) < 2:
+            return  # Nothing to remove
+
+        X = np.array(self.states)
+
+        # Compute pairwise similarity (cosine, or use euclidean if you prefer)
+        sim_matrix = cosine_similarity(X)
+
+        # Zero out diagonal (self-similarity)
+        np.fill_diagonal(sim_matrix, 0)
+
+        # Compute average similarity for each row (how redundant each entry is)
+        redundancy_scores = sim_matrix.mean(axis=1)
+
+        # Remove the most redundant (highest avg similarity)
+        idx_to_remove = np.argmax(redundancy_scores)
+
+        del self.states[idx_to_remove]
+        del self.labels[idx_to_remove]
     def _fit(self):
         """
         Fit the KNN model with stored data.
@@ -828,7 +892,7 @@ class WinRateKNN:
         self.model = NearestNeighbors(n_neighbors=k_neighbors)
         self.model.fit(self.states)
 
-    def predict_win_rate(self, state_seq):
+    def predict_win_rate(self, state_seq, k_near=25, k_far=25):
         """
         Return the win rate based on k nearest neighbors of the input state.
         """
@@ -837,13 +901,35 @@ class WinRateKNN:
             # return True  # Not enough data
             return 1  # Not enough data
 
-        state_flat = np.array(state_seq).flatten().reshape(1, -1)
-        distances, indices = self.model.kneighbors(state_flat)
+        # Find the 100 nearest neighbors
+        distances, indices = self.model.kneighbors(state.reshape(1, -1), n_neighbors=50)
+        distances = distances[0]
+        indices = indices[0]
 
-        wins = sum(self.labels[i] for i in indices[0])
-        win_rate = wins / len(indices[0])
+        # Split into nearest and farthest groups
+        nearest_idx = indices[:k_near]
+        nearest_dist = distances[:k_near]
+
+        farthest_idx = indices[-k_far:]
+        farthest_dist = distances[-k_far:]
+
+        # Combine indices and distances
+        combined_idx = np.concatenate([nearest_idx, farthest_idx])
+        combined_dist = np.concatenate([nearest_dist, farthest_dist])
+
+        # Get win/loss labels for selected neighbors
+        selected_labels = np.array([self.labels[i] for i in combined_idx])
+
+        # Calculate weights (closer gets higher weight)
+        weights = 1 / (combined_dist + 1e-6)  # Add epsilon to avoid div-by-zero
+
+        # Normalize weights
+        weights /= weights.sum()
+
+        # Compute weighted win rate
+        win_rate = np.dot(selected_labels, weights)
+
         return win_rate
-
     def save(self):
         """
         Save the KNN model to disk.
@@ -864,13 +950,19 @@ class WinRateKNN:
         # path = f"LSTM-PPO-saves/win_rate_knn-{self.symbol}.pkl"
         files = sorted(os.listdir("LSTM-PPO-saves"))
         files = [f for f in files if f.endswith(".win_rate_knn.pkl") and self.symbol in f]
+        if not files:
+            print(f"[!] No checkpoint found for {self.symbol}")
+            return
+
+        latest = os.path.join("LSTM-PPO-saves", files[-1])
+
         try:
-            with open(path, "rb") as f:
+            with open(latest, "rb") as f:
                 data = pickle.load(f)
                 self.states = data["states"]
                 self.labels = data["labels"]
                 self.model = data["model"]
-                print(f"✅ Loaded WinRateKNN from {path}")
+                # print(f"✅ Loaded WinRateKNN from {latest}")
         except FileNotFoundError:
             print(f"⚠️ No saved KNN found at {path}. Starting fresh.")
     
@@ -899,7 +991,6 @@ def calculate_position_size(balance, risk_pct, entry_price, stop_loss, leverage,
         position_size = min_qty
 
     return position_size
-capital = 260
 def train_bot(df, agent, symbol, window_size=17):
     # agent.loadcheckpoint(symbol)
     capital_lock = threading.Lock()
@@ -925,24 +1016,28 @@ def train_bot(df, agent, symbol, window_size=17):
     current_day = None
     save_counter = 0
     atr = 0.0
-    trailing_sl_pct = 0.000875
+    # trailing_sl_pct = 0.000875
     knn = WinRateKNN(symbol)
     entry_state = None
-    begun = False
-    trade_reward = 0.0
+    trade_reward = 0
+    in_position = False
 
     for t in range(window_size, len(df) - 1):
         state_seq = df[t - window_size:t].values.astype(np.float32)
         if state_seq.shape != (window_size, agent.state_size):
             print("Shape mismatch:", state_seq.shape)
             continue
-        result = agent.select_action(state_seq)
+        result = agent.select_action(state_seq, in_position)
         if result is None:
             continue
         action, logprob, value = result
 
+        if get_position(bybit_symbol) != None:
+            in_position = True
+        else:
+            in_position = False
+
         price = df.iloc[t]["Close"]
-        next_price = df.iloc[t + 1]["Close"]
         day = str(df.index[t]).split(' ')[0]
 
         if current_day is None:
@@ -983,12 +1078,16 @@ def train_bot(df, agent, symbol, window_size=17):
         minus_di = df.iloc[t]['-DI_val']
         bulls = df.iloc[t]['Bulls']
         bears = df.iloc[t]['Bears']
+        osma_direction = df.iloc[t]['macd_osma_direction']
+        macd_direction = df.iloc[t]['macd_direction']
+        ema_crossover = df.iloc[t]['EMA_crossover']
         atr = df.iloc[t]['ATR']
                 
-        # tp_dist = atr * 3
-        # sl_dist = atr * 1.5
-        tp_dist = df.iloc[t]['Close'] * 0.0035
-        sl_dist = df.iloc[t]['Close'] * 0.00175
+        tp_dist = atr * 10
+        sl_dist = atr * 5
+        trailing_sl_pct = atr * 2.5 / price
+        # tp_dist = df.iloc[t]['Close'] * 0.0035
+        # sl_dist = df.iloc[t]['Close'] * 0.00175
 
         final_pct = 0.0
 
@@ -1038,11 +1137,33 @@ def train_bot(df, agent, symbol, window_size=17):
         #     #     take_profit=str(round(entry_price + df.iloc[t]['Close'] * 0.01, 6)),
         #     #     stop_loss=str(round(entry_price - df.iloc[t]['Close'] * 0.005, 6))
         #     # )
-        # print(f"win rate: {knn.predict_win_rate(state_seq)}")
+
         if position == 0:
             # print(f"Open Buy or Sell order")
-            # if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
+            # if action == 1 and macd_direction == 1 and plus_di > minus_di and bulls > 0:
+            # if action == 1 and macd_direction == 1 and plus_di > minus_di and bulls > 0  and knn.predict_win_rate(state_seq) > 0.9:
+            # if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
             if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
+                if ema_crossover == 1:
+                    reward += 1
+                elif ema_crossover == -1:
+                    reward -= 1
+                if macd_direction == 1:
+                    reward += 1
+                elif macd_direction == -1:
+                    reward -= 1
+                if plus_di > minus_di:
+                    reward += 1
+                elif plus_di < minus_di:
+                    reward -= 1
+                if bulls > 0:
+                    reward += 1
+                else:
+                    reward -= 1
+                if osma_direction == 1:
+                    reward += 1
+                elif osma_direction == -1:
+                    reward -= 1
                 entry_state = state_seq
                 invest = max(capital * 0.05, 5)
                 position_size = invest * leverage
@@ -1051,11 +1172,32 @@ def train_bot(df, agent, symbol, window_size=17):
                 position = 1
                 partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
+                in_position = True
                 # daily_trades += 1
 
             # elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
-            # elif action == 2:
+            # elif action == 2 and macd_direction == -1 and minus_di > plus_di and bears > 0  and knn.predict_win_rate(state_seq) > 0.9:
             if action == 2 and knn.predict_win_rate(state_seq) > 0.9:
+                if ema_crossover == -1:
+                    reward += 1
+                elif ema_crossover == 1:
+                    reward -= 1
+                if macd_direction == -1:
+                    reward += 1
+                elif macd_direction == 1:
+                    reward -= 1
+                if plus_di < minus_di:
+                    reward += 1
+                elif plus_di > minus_di:
+                    reward -= 1
+                if bears < 0:
+                    reward += 1
+                elif bulls > 0:
+                    reward -= 1
+                if osma_direction == 1:
+                    reward += 1
+                elif osma_direction == -1:
+                    reward -= 1
                 invest = max(capital * 0.05, 5)
                 position_size = invest * leverage
                 entry_price = price
@@ -1063,13 +1205,14 @@ def train_bot(df, agent, symbol, window_size=17):
                 position = -1
                 partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
+                in_position = True
                 # daily_trades += 1
 
         if position == 1:
             profit_pct = (price - entry_price) / entry_price
             max_price = max(max_price, price)
             if price <= max_price * (1 - trailing_sl_pct):
-                daily_pnl += profit_pct * position_size
+                # daily_pnl += profit_pct * position_size
                 action = 3
             pnl = profit_pct * position_size  # not margin
             tp_levels = [
@@ -1092,7 +1235,7 @@ def train_bot(df, agent, symbol, window_size=17):
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
                     reward += 1
-                    trade_reward += 1
+                    # trade_reward += 1
                     action = 0
 
             if price >= tp_price or price <= sl_price:
@@ -1109,7 +1252,7 @@ def train_bot(df, agent, symbol, window_size=17):
             pnl = position_size * profit_pct
             min_price = min(min_price, price)
             if price >= min_price * (1 + trailing_sl_pct):
-                daily_pnl += profit_pct * position_size
+                # daily_pnl += profit_pct * position_size
                 action = 3
             reward += pnl
             tp_levels = [
@@ -1133,7 +1276,7 @@ def train_bot(df, agent, symbol, window_size=17):
                     partial_tp_hit[i] = True
                     daily_trades += 1
                     reward += 1
-                    trade_reward += 1
+                    # trade_reward += 1
                     action = 0
 
             if price <= tp_price or price >= sl_price:
@@ -1161,17 +1304,65 @@ def train_bot(df, agent, symbol, window_size=17):
             if final_pct != 0.00:
                 pnl = position_size * final_pct
                 capital += pnl
-                reward += pnl / capital
+                # reward += pnl / capital
+                reward = final_pct
                 daily_pnl += pnl
                 daily_trades += 1
-                knn.add(entry_state, is_win=(trade_reward > 0))
+                knn.add(entry_state, is_win=(final_pct > 0))
                 entry_price = 0.0
                 position = 0
+                close_old_orders(bybit_symbol)
+                in_position = False
+
+        if action == 0 and position != 0:
+            if position == 1:
+                if macd_direction == 1:
+                    reward += 1
+                else:
+                    reward -= 1
+                if plus_di > minus_di:
+                    reward += 1
+                else:
+                    reward -= 1
+                if bulls > 0:
+                    reward += 1
+                else:
+                    reward -= 1
+                if osma_direction == 1:
+                    reward += 1
+                else:
+                    reward -= 1
+            if position == -1:
+                if ema_crossover == -1:
+                    reward += 1
+                elif ema_crossover == 1:
+                    reward -= 1
+                if macd_direction == -1:
+                    reward += 1
+                elif macd_direction == 1:
+                    reward -= 1
+                if plus_di < minus_di:
+                    reward += 1
+                elif plus_di > minus_di:
+                    reward -= 1
+                if bears < 0:
+                    reward += 1
+                elif bulls > 0:
+                    reward -= 1
+                if osma_direction == 1:
+                    reward += 1
+                elif osma_direction == -1:
+                    reward -= 1
+            profit_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
+            # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
+            # pnl = position_size * profit_pct
+            # reward += pnl
+            reward = profit_pct
                 
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
-        # print(f"save_counter: {save_counter}")
+        reward = 0
         if save_counter % 10080 == 0:
         # if save_counter % 24 * 60 == 0:
             # begun = True
@@ -1180,14 +1371,14 @@ def train_bot(df, agent, symbol, window_size=17):
             # agent.savecheckpoint(symbol)
             knn._fit()
             # knn.save()
-            print(f"[INFO] Saved checkpoint at step {save_counter}")
+            # print(f"[INFO] Saved checkpoint at step {save_counter}")
             # print()
     agent.train()
     agent.savecheckpoint(symbol)
     knn._fit()
     knn.save()
     print(f"[INFO] Saved checkpoint at step {save_counter}")
-    print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/274:.2f}")
+    print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total accumulation: {capital/1000:.2f}x")
 
 def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
     capital_lock = threading.Lock()
@@ -1218,6 +1409,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
     begun = False
     partial_tp_hit = []
     position_size = 0.0
+    in_position = False
+    
     instrument_info = session.get_instruments_info(
         category="linear",
         symbol=bybit_symbol
@@ -1226,6 +1419,12 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
     qty_step = float(info['lotSizeFilter']['qtyStep'])  # Minimum qty increment
     min_qty = float(info['lotSizeFilter']['minOrderQty'])  # Minimum allowed qty
     price_precision = int(info['priceScale'])
+
+    response = session.get_positions(category="linear", symbol=bybit_symbol)
+    positions = response["result"]["list"]
+    if positions:
+        session_position = positions[0]
+        position = 1 if float(session_position["size"]) > 0 else -1 if float(session_position["size"]) < 0 else 0
 
     while True:
         with capital_lock:
@@ -1257,7 +1456,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                 print("Shape mismatch:", state_seq.shape)
                 continue
 
-            result = agent.select_action(state_seq)
+            result = agent.select_action(state_seq, in_position)
             if result is None:
                 continue
 
@@ -1301,14 +1500,17 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
             minus_di = df.iloc[-1]['-DI_val']
             bulls = df.iloc[-1]['Bulls']
             bears = df.iloc[-1]['Bears']
+            osma_direction = df.iloc[-1]['macd_osma_direction']
+            macd_direction = df.iloc[-1]['macd_direction']
+            ema_crossover = df.iloc[-1]['EMA_crossover']
             atr = df.iloc[-1]['ATR']
             capital = get_balance()
                     
-            # tp_dist = atr * 3.0
-            tp_dist = df.iloc[-1]['Close'] * 0.0035
-            # sl_dist = atr * 1.5
-            # sl_dist = df.iloc[-1]['Close'] * 0.994
-            sl_dist = df.iloc[-1]['Close'] * 0.00175
+            tp_dist = atr * 10
+            sl_dist = atr * 5
+            trailing_sl_dist = atr * 2.5
+            # tp_dist = df.iloc[-1]['Close'] * 0.0035
+            # sl_dist = df.iloc[-1]['Close'] * 0.00175
             # if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
             #     position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.0005, 50)
             #     session.place_order(
@@ -1341,12 +1543,36 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
             #         stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.00175, price_precision))
             #     )
             if position == 0:
-                # if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
+                # if action == 1 and macd_direction == 1 and plus_di > minus_di and bulls > 0:
+                # if action == 1 and macd_direction == 1 and plus_di > minus_di and bulls > 0 and knn.predict_win_rate(state_seq) > 0.9:
                 if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
-                    invest = max(capital * 0.05, 5)
+                    if ema_crossover == 1:
+                        reward += 1
+                    elif ema_crossover == -1:
+                        reward -= 1
+                    if macd_direction == 1:
+                        reward += 1
+                    elif macd_direction == -1:
+                        reward -= 1
+                    if plus_di > minus_di:
+                        reward += 1
+                    elif plus_di < minus_di:
+                        reward -= 1
+                    if bulls > 0:
+                        reward += 1
+                    else:
+                        reward -= 1
+                    if osma_direction == 1:
+                        reward += 1
+                    elif osma_direction == -1:
+                        reward -= 1
                     entry_price = price
-                    position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist, 50)
+                    entry_seq = state_seq
+                    # position_size = calculate_position_size(capital, 0.15 * reward, entry_price, sl_dist, 50)
+                    position_size = calculate_position_size(capital, 0.15, entry_price, sl_dist, 50)
                     position = 1
+                    in_position = True
+                    
                     print(f"[{bybit_symbol}] Entered Buy order")
                     session.place_order(
                         category="linear",
@@ -1358,12 +1584,13 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                         buyLeverage=leverage,
                         sellLeverage=leverage,
                     )
+                    # print(f"trailing sl - entry price: {entry_price}, base price: {entry_price * (1 + 0.000875)}, trailing sl: {entry_price * 0.000875:.2f}")
                     response = session.set_trading_stop(
                         category="linear",  # or "inverse", depending on your market
                         symbol=bybit_symbol,
-                        trailing_stop=str(round(entry_price * 0.000875, price_precision)),  # Trailing stop in USD or quote currency
+                        trailing_stop=str(round(atr * 2.5, price_precision)),  # Trailing stop in USD or quote currency
                         # side="Buy",
-                        base_price=str(round(df['Close'].iloc[-1] * 1.000875, price_precision)),
+                        base_price=str(round(entry_price + atr * 2.5, price_precision)),
                         position_idx=0
                     )
                     tp_levels = [
@@ -1375,6 +1602,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                     for i in range(3):
                         realized = position_size * tp_shares[i]
                         pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                        if pnl == 0:
+                            continue
                         close_side = "Sell" if position == 1 else "Buy"
                         response = session.place_order(
                             symbol=bybit_symbol,
@@ -1388,12 +1617,35 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                         # position_pct_left = 1.0
                         daily_trades += 1
                                 
-                # elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
+                # if action == 2 and macd_direction == -1 and minus_di > plus_di and bears > 0 and knn.predict_win_rate(state_seq) > 0.9:
                 if action == 2 and knn.predict_win_rate(state_seq) > 0.9:
+                    if ema_crossover == -1:
+                        reward += 1
+                    elif ema_crossover == 1:
+                        reward -= 1
+                    if macd_direction == -1:
+                        reward += 1
+                    elif macd_direction == 1:
+                        reward -= 1
+                    if plus_di < minus_di:
+                        reward += 1
+                    elif plus_di > minus_di:
+                        reward -= 1
+                    if bears < 0:
+                        reward += 1
+                    elif bulls > 0:
+                        reward -= 1
+                    if osma_direction == 1:
+                        reward += 1
+                    elif osma_direction == -1:
+                        reward -= 1
                     entry_price = price
-                    position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist, 50)
-                    # capital -= 0.0089
+                    entry_seq = state_seq
+                    # position_size = calculate_position_size(capital, 0.15 * reward, entry_price, sl_dist, 50)
+                    position_size = calculate_position_size(capital, 0.15, entry_price, sl_dist, 50)
                     position = -1
+                    in_position = True
+
                     print(f"[{bybit_symbol}] Entered Sell order")
                     session.place_order(
                         category="linear",
@@ -1405,11 +1657,12 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                         buyLeverage=leverage,
                         sellLeverage=leverage,
                     )
+                    # print(f"trailing sl - entry price: {entry_price}, base price: {entry_price * (1 - 0.000875)}, trailing sl: {entry_price * 0.000875:.2f}")
                     response = session.set_trading_stop(
                         category="linear",  # or "inverse", depending on your market
                         symbol=bybit_symbol,
-                        trailing_stop=str(round(entry_price * 0.000875, price_precision)),  # Trailing stop in USD or quote currency
-                        base_price=str(round(df['Close'].iloc[-1] * (1-0.000875), price_precision)),
+                        trailing_stop=str(round(atr * 2.5, price_precision)),  # Trailing stop in USD or quote currency
+                        base_price=str(round(entry_price - atr * 2.5, price_precision)),
                         position_idx=0
                     )
                     tp_levels = [
@@ -1421,8 +1674,10 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                     for i in range(3):
                         realized = position_size * tp_shares[i]
                         pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                        if pnl == 0:
+                            continue
                         close_side = "Sell" if position == 1 else "Buy"
-                        response = session.place_active_order(
+                        response = session.place_order(
                             symbol=bybit_symbol,
                             side=close_side,  # opposite side to close position
                             order_type="Limit",
@@ -1436,27 +1691,65 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                         position_pct_left = 1.0
                         daily_trades += 1
 
-            elif position == 1:
-                profit_pct = (price - entry_price) / entry_price
-                pnl = calc_order_qty(profit_pct * position_size, entry_price, min_size, qty_step)  # not margin
-                reward += pnl
-                if profit_pct >= 0.0035 or profit_pct <= -0.00175:
-                    action = 3
-            elif position == -1:
-                profit_pct = (entry_price - price) / entry_price
-                pnl = calc_order_qty(profit_pct * position_size, entry_price, min_size, qty_step)  # not margin
-                reward += pnl
-                if profit_pct >= 0.0035 or profit_pct <= -0.00175:
-                    action = 3
-            if action == 3:
+            if action == 3 and position != 0:
                 profit_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
-                pnl = calc_order_qty(profit_pct * position_size, entry_price, min_size, qty_step)  # not margin
-                reward += pnl
-                knn.add(entry_seq, is_win=(reward > 0))
+                pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
+                reward = profit_pct
+                knn.add(entry_seq, is_win=(profit_pct > 0))
                 close_old_orders(bybit_symbol)
+                in_position = False
+            if action == 0 and position != 0:
+                if position == 1:
+                    if ema_crossover == 1:
+                        reward += 1
+                    elif ema_crossover == -1:
+                        reward -= 1
+                    if macd_direction == 1:
+                        reward += 1
+                    elif macd_direction == -1:
+                        reward -= 1
+                    if plus_di > minus_di:
+                        reward += 1
+                    elif plus_di < minus_di:
+                        reward -= 1
+                    if bulls > 0:
+                        reward += 1
+                    elif bears < 0:
+                        reward -= 1
+                    if osma_direction == 1:
+                        reward += 1
+                    elif osma_direction == -1:
+                        reward -= 1
+
+                if position == -1:
+                    if ema_crossover == -1:
+                        reward += 1
+                    elif ema_crossover == 1:
+                        reward -= 1
+                    if macd_direction == -1:
+                        reward += 1
+                    elif macd_direction == 1:
+                        reward -= 1
+                    if plus_di < minus_di:
+                        reward += 1
+                    elif plus_di > minus_di:
+                        reward -= 1
+                    if bears < 0:
+                        reward += 1
+                    elif bulls > 0:
+                        reward -= 1
+                    if osma_direction == 1:
+                        reward += 1
+                    elif osma_direction == -1:
+                        reward -= 1
+                profit_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
+                pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
+                reward = profit_pct
+
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
+        reward = 0
         # if not begun:
         #     for t in range(30, len(df)):
         #         if t % 60 == 0:
