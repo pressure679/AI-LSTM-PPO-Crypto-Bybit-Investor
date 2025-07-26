@@ -11,9 +11,9 @@ import threading
 import time
 from decimal import Decimal
 from pybit.unified_trading import HTTP
-# from sklearn.neighbors import KNeighborsRegressor
+from sklearn.neighbors import NearestNeighbors
 import warnings
-# import yfinance
+import yfinance as yf
 
 # warnings.filterwarnings("ignore", category=RuntimeWarning)
 # Popular crypto: "DOGEUSDT", "HYPEUSDT", "FARTCOINUSDT", "SUIUSDT", "INITUSDT", "BABYUSDT", "NILUSDT"
@@ -60,6 +60,7 @@ def load_last_mb(filepath, symbol, mb_size=6):
 
     lines = data.split("\n")[1:] if start else data.split("\n")
     df = pd.read_csv(StringIO("\n".join([l for l in lines if l.strip()])), header=None)
+    
     df.columns = [
         "Open time","Open","High","Low","Close","Volume","Close time",
         "Quote asset vol","Trades","Taker buy base","Taker buy quote","Ignore"
@@ -104,6 +105,37 @@ def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_dat
     
     df = df.dropna()
     
+    return df
+
+def yf_get_ohlc_df(symbol: str, interval: str = "1m", period: str = "7d") -> pd.DataFrame:
+    """
+    Downloads OHLCV data using yfinance and returns a DataFrame.
+
+    Args:
+        symbol (str): The ticker symbol, e.g., "BTC-USD", "ETH-USD", "AAPL"
+        interval (str): The interval (e.g., "1m", "5m", "15m", "1h", "1d")
+        period (str): How much historical data to pull (e.g., "1d", "5d", "60d", "1y")
+
+    Returns:
+        pd.DataFrame: DataFrame with ['Open', 'High', 'Low', 'Close', 'Volume']
+    """
+    df = yf.download(
+        tickers=symbol,
+        interval=interval,
+        period=period,
+        progress=False,
+        auto_adjust=True,
+        threads=False
+    )
+
+    df = df.dropna()
+    # df.columns = [col.lower() for col in df.columns]  # ['open', 'high', 'low', 'close', 'volume']
+    # print(f"df.columns: {df.columns}")
+    df.columns = [
+        "Open", "High", "Low", "Close", "Volume"
+    ]
+    df = df.rename_axis("Timestamp").reset_index()
+
     return df
 
 def EMA(series, period):
@@ -215,10 +247,10 @@ def add_indicators(df):
     # df['ATR'] = tr.rolling(window=14).mean()
     df['ATR'] = ATR(df)
 
-    df['macd_line'], df['macd_signal'], df['macd_histogram'] = MACD(df['Close'])
+    df['macd_line'], df['macd_signal'], df['macd_osma'] = MACD(df['Close'])
     df['macd_signal_diff'] = df['macd_signal'].diff()
     # df['macd_signal_angle_deg'] = np.degrees(np.arctan(df['macd_signal_diff']))
-    # df['macd_histogram_diff'] = df['macd_histogram'].diff()
+    df['macd_osma_diff'] = df['macd_osma'].diff()
 
     # df['bb_sma'], df['bb_upper'], df['bb_lower'] = Bollinger_Bands(df['Close'])
     # df['bb_sma_pos'] = (df['Close'] >= df['bb_sma']).astype(int)
@@ -241,7 +273,7 @@ def add_indicators(df):
     df["Bears"] = df["Low"] - df['EMA_14']
     
     # df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_signal_diff", "macd_histogram", "BB_SMA", "RSI", "ADX", "Bulls", "Bears", "+DI", "-DI", "ATR"]].copy()
-    df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_signal_diff", "macd_histogram", "RSI", "ADX", "Bulls", "Bears", "+DI", "-DI", "ATR"]].copy()
+    df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_signal_diff", "macd_osma", "macd_osma_diff", "RSI", "ADX", "Bulls", "Bears", "+DI", "-DI", "ATR"]].copy()
 
     # conditions_sma = [
     #     df['BB_SMA'] < df['Close'],
@@ -329,6 +361,24 @@ def add_indicators(df):
         [-1, 1],
         default=0
     )
+
+    df['macd_osma'] = np.select(
+        [
+            df['macd_osma'] < 0,
+            df['macd_osma'] > 0
+        ],
+        [-1, 1],
+        default=0
+    )
+
+    df['macd_osma_direction'] = np.select(
+        [
+            df['macd_osma_diff'] < 0,
+            df['macd_osma_diff'] > 0
+        ],
+        [-1, 1],
+        default=0
+    )
     
     # MACD trend (histogram): -1 bearish, 1 bullish, 0 neutral
     df['Bears'] = np.select(
@@ -356,7 +406,7 @@ def add_indicators(df):
     # df["Close"] = df["Close"].pct_change().fillna(0)  # as return
 
     # df = df[["Open", "High", "Low", "Close", "EMA_crossover", "EMA_7_28_crossover", "macd_zone", "macd_direction", "BB_SMA", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
-    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "EMA_7_28_crossover", "macd_zone", "macd_direction", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
+    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "EMA_7_28_crossover", "macd_zone", "macd_direction", "macd_osma", "macd_osma_direction", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
 
     df.dropna(inplace=True)
     return df
@@ -740,51 +790,84 @@ def value_loss(values, returns):
     return 0.5 * np.mean((returns - values) ** 2)
 
 
-# class RewardRateKNN:
-#     def __init__(self, symbol, k=10, reward_threshold=0.003):
-#         self.symbol = symbol
-#         self.k = k
-#         self.threshold = reward_threshold
-#         self.model = KNeighborsRegressor(n_neighbors=k)
-#         self.X = []
-#         self.y = []
+class WinRateKNN:
+    def __init__(self, symbol, k=10):
+        self.k = k
+        self.symbol = symbol
+        self.states = []
+        self.labels = []  # 1 = win, 0 = loss
+        self.model = None
 
-#     def add_experience(self, state, reward):
-#         self.X.append(state)
-#         self.y.append(reward)
+    def add(self, state, is_win):
+        try:
+            state = np.array(state, dtype=np.float32).flatten()  # Force all elements to float
+        except Exception as e:
+            # print("❌ Could not convert state to float:", state, "| Error:", e)
+            return
 
-#     def train(self):
-#         if len(self.X) >= self.k:
-#             self.model.fit(self.X, self.y)
+        if not np.all(np.isfinite(state)):
+            # print("⚠️ Skipping state with NaN or Inf:", state)
+            return
 
-#     def should_act(self, current_state):
-#         if len(self.X) < self.k:
-#             return True
-#         predicted_reward = self.model.predict([current_state])[0]
-#         return predicted_reward >= self.threshold
+        self.states.append(state)
+        self.labels.append(1 if is_win else 0)
 
-#     def save(self, path=None):
-#         if path is None:
-#             path = f"/mnt/chromeos/removable/sd_card/LSTM-PPO-saves/reward_rate_knn-{self.symbol}.pkl"
-#         with open(path, "wb") as f:
-#             pickle.dump({
-#                 "X": self.X,
-#                 "y": self.y,
-#                 "model": self.model
-#             }, f)
+        if len(self.states) >= self.k:
+            self._fit()
 
-#     def load(self, path=None):
-#         if path is None:
-#             path = f"/mnt/chromeos/removable/sd_card/LSTM-PPO-saves/reward_rate_knn-{self.symbol}.pkl"
-#         try:
-#             with open(path, "rb") as f:
-#                 data = pickle.load(f)
-#                 self.X = data["X"]
-#                 self.y = data["y"]
-#                 self.model = data["model"]
-#         except FileNotFoundError:
-#             print(f"No saved KNN found at {path}. Starting fresh.")
+    def _fit(self):
+        """
+        Fit the KNN model with stored data.
+        """
+        self.model = NearestNeighbors(n_neighbors=min(self.k, len(self.states)), algorithm='auto')
+        self.model.fit(self.states)
 
+    def predict_win_rate(self, state_seq):
+        """
+        Return the win rate based on k nearest neighbors of the input state.
+        """
+        # if not self.model or len(self.states) < self.k:
+        if len(self.states) < 1000:
+            # return True  # Not enough data
+            return 1  # Not enough data
+
+        state_flat = np.array(state_seq).flatten().reshape(1, -1)
+        distances, indices = self.model.kneighbors(state_flat)
+
+        wins = sum(self.labels[i] for i in indices[0])
+        win_rate = wins / len(indices[0])
+        return win_rate
+
+    def save(self, path=None):
+        """
+        Save the KNN model to disk.
+        """
+        if path is None:
+            path = f"LSTM-PPO-saves/win_rate_knn-{self.symbol}.pkl"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            pickle.dump({
+                "states": self.states,
+                "labels": self.labels,
+                "model": self.model
+            }, f)
+
+    def load(self, path=None):
+        """
+        Load the KNN model from disk.
+        """
+        if path is None:
+            path = f"LSTM-PPO-saves/win_rate_knn-{self.symbol}.pkl"
+        try:
+            with open(path, "rb") as f:
+                data = pickle.load(f)
+                self.states = data["states"]
+                self.labels = data["labels"]
+                self.model = data["model"]
+                print(f"✅ Loaded WinRateKNN from {path}")
+        except FileNotFoundError:
+            print(f"⚠️ No saved KNN found at {path}. Starting fresh.")
+    
 def sharpe_ratio(returns, risk_free_rate=0.0):
     mean_ret = np.mean(returns)
     std_ret = np.std(returns)
@@ -810,8 +893,8 @@ def calculate_position_size(balance, risk_pct, entry_price, stop_loss, leverage,
         position_size = min_qty
 
     return position_size
-capital = 1000
-def train_bot(df, agent, symbol, window_size=15):
+capital = 260
+def train_bot(df, agent, symbol, window_size=17):
     # agent.loadcheckpoint(symbol)
     capital_lock = threading.Lock()
     global capital
@@ -837,8 +920,9 @@ def train_bot(df, agent, symbol, window_size=15):
     save_counter = 0
     atr = 0.0
     trailing_sl_pct = 0.000875
+    knn = WinRateKNN(symbol)
+    entry_state = None
     begun = False
-    # rrKNN = RewardRateKNN(symbol)
 
     for t in range(window_size, len(df) - 1):
         state_seq = df[t - window_size:t].values.astype(np.float32)
@@ -946,9 +1030,12 @@ def train_bot(df, agent, symbol, window_size=15):
         #     #     take_profit=str(round(entry_price + df.iloc[t]['Close'] * 0.01, 6)),
         #     #     stop_loss=str(round(entry_price - df.iloc[t]['Close'] * 0.005, 6))
         #     # )
+        # print(f"win rate: {knn.predict_win_rate(state_seq)}")
         if position == 0:
             # print(f"Open Buy or Sell order")
-            if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
+            # if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
+            if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
+                entry_state = state_seq
                 invest = max(capital * 0.05, 5)
                 position_size = invest * leverage
                 entry_price = price
@@ -958,7 +1045,9 @@ def train_bot(df, agent, symbol, window_size=15):
                 position_pct_left = 1.0
                 # daily_trades += 1
 
-            elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
+            # elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
+            # elif action == 2:
+            if action == 2 and knn.predict_win_rate(state_seq) > 0.9:
                 invest = max(capital * 0.05, 5)
                 position_size = invest * leverage
                 entry_price = price
@@ -1050,11 +1139,13 @@ def train_bot(df, agent, symbol, window_size=15):
                 action = 3
         if action == 3 and position != 0:
             final_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
-            if final_pct > 0.0:
+            if final_pct > 0.00:
                 # print(f"position size: {position_size}, final pct: {final_pct}")
                 pnl = position_size * final_pct
                 capital += pnl
                 reward += pnl / capital
+                daily_pnl += pnl
+            knn.add(entry_state, is_win=(reward > 0))
             daily_trades += 1
             entry_price = 0.0
             position = 0
@@ -1064,9 +1155,11 @@ def train_bot(df, agent, symbol, window_size=15):
         save_counter += 1
         # print(f"save_counter: {save_counter}")
         if save_counter % 10080 == 0:
-            begun = True
-            # if save_counter % 24 * 60 == 0:
+        # if save_counter % 24 * 60 == 0:
+            # begun = True
             print(f"[INFO] Training PPO on step {save_counter}...")
+            knn._fit()
+            # rrKNN.save()
             agent.train()
             # agent.savecheckpoint(symbol)
             print(f"[INFO] Saved checkpoint at step {save_counter}")
@@ -1074,14 +1167,14 @@ def train_bot(df, agent, symbol, window_size=15):
     agent.train()
     agent.savecheckpoint(symbol)
     print(f"[INFO] Saved checkpoint at step {save_counter}")
-    # rrKNN.train()
-    # rrKNN.save()
+    knn._fit()
+    knn.save()
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/274:.2f}")
 
-def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
+def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
     capital_lock = threading.Lock()
-    # rrKNN = RewardRateKNN(symbol)
-    # rrKNN.load()
+    knn = WinRateKNN(symbol)
+    knn.load()
     agent.loadcheckpoint(symbol)
     capital = get_balance()
     peak_capital = capital
@@ -1229,7 +1322,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
             #         stop_loss=str(round(entry_price - df.iloc[-1]['Close'] * 0.00175, price_precision))
             #     )
             if position == 0:
-                if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
+                # if action == 1 and macd_zone == 1 and plus_di > minus_di and bulls > 0:
+                if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
                     invest = max(capital * 0.05, 5)
                     entry_price = price
                     position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist, 50)
@@ -1275,7 +1369,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
                         # position_pct_left = 1.0
                         daily_trades += 1
                                 
-                elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
+                # elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
+                if action == 2 and knn.predict_win_rate(state_seq) > 0.9:
                     entry_price = price
                     position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist, 50)
                     # capital -= 0.0089
@@ -1335,6 +1430,10 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
                 if profit_pct >= 0.0035 or profit_pct <= -0.00175:
                     action = 3
             if action == 3:
+                profit_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
+                pnl = calc_order_qty(profit_pct * position_size, entry_price, min_size, qty_step)  # not margin
+                reward += pnl
+                knn.add(entry_seq, is_win=(reward > 0))
                 close_old_orders(bybit_symbol)
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
@@ -1350,6 +1449,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=15):
         # if save_counter % 10080 == 0:
         if save_counter % 60 == 0:
             print(f"[INFO] Training PPO on step {save_counter}...")
+            knn._fit()
+            knn.save()
             agent.train()
             agent.savecheckpoint(symbol)
             # print()
@@ -1366,6 +1467,7 @@ def main():
     test_threads = []
     train = True
     test = True
+    counter = 0
     
     if train:
         for symbol in symbols:
@@ -1376,17 +1478,11 @@ def main():
             else:
                 df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
                 # continue
-            # df = yf.download(yf_symbols[counter], interval="1m", period="7d")
-            # df = df[['Open', "High", "Low", "Close"]].values
+            # df = yf_get_ohlc_df(yf_symbol)
             df = df[['Open', "High", "Low", "Close"]]
-            # df = df.reshape(20, 4)
             df = add_indicators(df)
-            # print(f"columns: {df.columns}")
-            # df = df.reshape(20, 14)
-            # p7575rint(f"length of df: {len(df)}")
-            lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
-            # train_bot(df, lstm_ppo_agent, symbol)
-            t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbol))
+            lstm_ppo_agent = LSTMPPOAgent(state_size=17, hidden_size=64, action_size=4)
+            t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[counter]))
             t.start()
             test_threads.append(t)
             counter += 1
@@ -1405,7 +1501,7 @@ def main():
             df = get_klines_df(bybit_symbol, 1)
             df = add_indicators(df)
             # print(f"columns: {df.columns}")
-            lstm_ppo_agent = LSTMPPOAgent(state_size=15, hidden_size=64, action_size=4)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=17, hidden_size=64, action_size=4)
             t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[counter], bybit_symbol))
             t.start()
             test_threads.append(t)
