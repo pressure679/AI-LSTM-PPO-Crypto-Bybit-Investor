@@ -639,7 +639,7 @@ class LSTMPPOAgent:
 
             probs = probs / np.sum(probs)  # Normalize again just in case
 
-            if np.argmax(probs) >= 0.9:
+            if np.argmax(probs) >= 0.95:
                 action = np.argmax(probs)
                 logprob = np.log(probs[action] + 1e-8)
             else:
@@ -705,7 +705,6 @@ class LSTMPPOAgent:
 
     def loadcheckpoint(self, symbol):
         files = sorted(os.listdir("LSTM-PPO-saves"))
-        # print(f"files: {files}")
         files = [f for f in files if f.endswith(".checkpoint.lstm-ppo.pkl") and symbol in f]
         if not files:
             print(f"[!] No checkpoint found for {symbol}")
@@ -819,7 +818,14 @@ class WinRateKNN:
         """
         Fit the KNN model with stored data.
         """
-        self.model = NearestNeighbors(n_neighbors=min(self.k, len(self.states)), algorithm='auto')
+        if len(self.states) < 1:
+            # print("⚠️ Not enough data to fit KNN.")
+            return
+
+        # Safety check
+        k_neighbors = max(1, min(self.k, len(self.states)))
+
+        self.model = NearestNeighbors(n_neighbors=k_neighbors)
         self.model.fit(self.states)
 
     def predict_win_rate(self, state_seq):
@@ -838,12 +844,11 @@ class WinRateKNN:
         win_rate = wins / len(indices[0])
         return win_rate
 
-    def save(self, path=None):
+    def save(self):
         """
         Save the KNN model to disk.
         """
-        if path is None:
-            path = f"LSTM-PPO-saves/win_rate_knn-{self.symbol}.pkl"
+        path = f"LSTM-PPO-saves/{datetime.now().strftime('%Y-%m-%d')}-{self.symbol}.win_rate_knn.pkl"
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as f:
             pickle.dump({
@@ -852,12 +857,13 @@ class WinRateKNN:
                 "model": self.model
             }, f)
 
-    def load(self, path=None):
+    def load(self):
         """
         Load the KNN model from disk.
         """
-        if path is None:
-            path = f"LSTM-PPO-saves/win_rate_knn-{self.symbol}.pkl"
+        # path = f"LSTM-PPO-saves/win_rate_knn-{self.symbol}.pkl"
+        files = sorted(os.listdir("LSTM-PPO-saves"))
+        files = [f for f in files if f.endswith(".win_rate_knn.pkl") and self.symbol in f]
         try:
             with open(path, "rb") as f:
                 data = pickle.load(f)
@@ -923,6 +929,7 @@ def train_bot(df, agent, symbol, window_size=17):
     knn = WinRateKNN(symbol)
     entry_state = None
     begun = False
+    trade_reward = 0.0
 
     for t in range(window_size, len(df) - 1):
         state_seq = df[t - window_size:t].values.astype(np.float32)
@@ -957,6 +964,7 @@ def train_bot(df, agent, symbol, window_size=17):
             current_day = day
 
             daily_pnl = 0.0
+            daily_trades = 0
 
         # Force close if ADX zone becomes 0
         if df["ADX_zone"].iloc[t] == 0 and position != 0:
@@ -1043,7 +1051,7 @@ def train_bot(df, agent, symbol, window_size=17):
                 position = 1
                 partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
-                daily_trades += 1
+                # daily_trades += 1
 
             # elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
             # elif action == 2:
@@ -1055,7 +1063,7 @@ def train_bot(df, agent, symbol, window_size=17):
                 position = -1
                 partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
-                daily_trades += 1
+                # daily_trades += 1
 
         if position == 1:
             profit_pct = (price - entry_price) / entry_price
@@ -1083,17 +1091,17 @@ def train_bot(df, agent, symbol, window_size=17):
                     invest -= realized
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
+                    reward += 1
+                    trade_reward += 1
                     action = 0
 
             if price >= tp_price or price <= sl_price:
-                # final_pct = (price - entry_price) / entry_price
-                # pnl = position_size * final_pct
-                # capital += pnl
-                # reward += pnl / capital
-                # daily_pnl += pnl
-                # invest = 0
-                # position = 0
-                # position_pct_left = 1.0
+                if price >= tp_price:
+                    trade_reward += 1
+                    reward += 1
+                else:
+                    trade_reward -= 1
+                    reward -= 1 
                 action = 3
                                         
         elif position == -1:
@@ -1101,7 +1109,6 @@ def train_bot(df, agent, symbol, window_size=17):
             pnl = position_size * profit_pct
             min_price = min(min_price, price)
             if price >= min_price * (1 + trailing_sl_pct):
-                # exit_trade(reason="Trailing SL Hit")6
                 daily_pnl += profit_pct * position_size
                 action = 3
             reward += pnl
@@ -1124,6 +1131,9 @@ def train_bot(df, agent, symbol, window_size=17):
                     invest -= realized
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
+                    daily_trades += 1
+                    reward += 1
+                    trade_reward += 1
                     action = 0
 
             if price <= tp_price or price >= sl_price:
@@ -1136,21 +1146,28 @@ def train_bot(df, agent, symbol, window_size=17):
                 # position = 0
                 # position_pct_left = 1.0
                 # partial_tp_hit = [False, False, False, False]
+                if price >= tp_price:
+                    reward += 1
+                    trade_reward += 1
+                else:
+                    reward -= 1
+                    trade_reward -= 1
                 action = 3
         if action == 3 and position != 0:
             final_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
             # if final_pct > 0.00:
                 # print(f"position size: {position_size}, final pct: {final_pct}")
+            capital -= 0.0089
             if final_pct != 0.00:
                 pnl = position_size * final_pct
                 capital += pnl
                 reward += pnl / capital
                 daily_pnl += pnl
-                # daily_trades += 1
-                knn.add(entry_state, is_win=(reward > 0))
+                daily_trades += 1
+                knn.add(entry_state, is_win=(trade_reward > 0))
                 entry_price = 0.0
                 position = 0
-           
+                
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
@@ -1160,9 +1177,9 @@ def train_bot(df, agent, symbol, window_size=17):
             # begun = True
             print(f"[INFO] Training PPO on step {save_counter}...")
             agent.train()
-            agent.savecheckpoint(symbol)
+            # agent.savecheckpoint(symbol)
             knn._fit()
-            knn.save()
+            # knn.save()
             print(f"[INFO] Saved checkpoint at step {save_counter}")
             # print()
     agent.train()
@@ -1266,6 +1283,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                 # capital += daily_pnl
 
                 daily_pnl = 0.0
+                daily_trades = 0
                 
             # Force close if ADX zone becomes 0
             if df["ADX_zone"].iloc[-1] == 0 and position != 0:
