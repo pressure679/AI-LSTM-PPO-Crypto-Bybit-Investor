@@ -1043,7 +1043,7 @@ def train_bot(df, agent, symbol, window_size=17):
                 position = 1
                 partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
-                # daily_trades += 1
+                daily_trades += 1
 
             # elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
             # elif action == 2:
@@ -1055,7 +1055,7 @@ def train_bot(df, agent, symbol, window_size=17):
                 position = -1
                 partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
-                # daily_trades += 1
+                daily_trades += 1
 
         if position == 1:
             profit_pct = (price - entry_price) / entry_price
@@ -1139,16 +1139,17 @@ def train_bot(df, agent, symbol, window_size=17):
                 action = 3
         if action == 3 and position != 0:
             final_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
-            if final_pct > 0.00:
+            # if final_pct > 0.00:
                 # print(f"position size: {position_size}, final pct: {final_pct}")
+            if final_pct != 0.00:
                 pnl = position_size * final_pct
                 capital += pnl
                 reward += pnl / capital
                 daily_pnl += pnl
-            knn.add(entry_state, is_win=(reward > 0))
-            daily_trades += 1
-            entry_price = 0.0
-            position = 0
+                # daily_trades += 1
+                knn.add(entry_state, is_win=(reward > 0))
+                entry_price = 0.0
+                position = 0
            
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
@@ -1158,17 +1159,17 @@ def train_bot(df, agent, symbol, window_size=17):
         # if save_counter % 24 * 60 == 0:
             # begun = True
             print(f"[INFO] Training PPO on step {save_counter}...")
-            knn._fit()
-            # rrKNN.save()
             agent.train()
-            # agent.savecheckpoint(symbol)
+            agent.savecheckpoint(symbol)
+            knn._fit()
+            knn.save()
             print(f"[INFO] Saved checkpoint at step {save_counter}")
             # print()
     agent.train()
     agent.savecheckpoint(symbol)
-    print(f"[INFO] Saved checkpoint at step {save_counter}")
     knn._fit()
     knn.save()
+    print(f"[INFO] Saved checkpoint at step {save_counter}")
     print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/274:.2f}")
 
 def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
@@ -1227,8 +1228,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
             bias_macd_signal_line = "bullish" if df['macd_direction'].iloc[-1] > 0 else "bearish" if df["macd_direction"].iloc[-1] < 0 else "neutral"
             print(f"macd zone: {df['macd_zone'].iloc[-1]:.2f} - going up/down: {df['macd_direction'].iloc[-1]} ({bias_macd_signal_line})")
             # print(f"macd line: {df['macd_line'].iloc[-1]:.2f} - going up/down: {df['macd_line_diff'].iloc[-1]:.2f} ({bias_macd_signal_line})")
-            bias_osma_diff = "bullish" if df['osma_diff'].iloc[-1] > 0 else "bearish" if df['osma_diff'].iloc[-1] < 0 else "neutral"
-            print(f"OSMA zone: {df['osma'].iloc[-1]:.2f} - direction: {df['osma_diff'].iloc[-1]:.2f} ({bias_osma_diff})")
+            bias_osma_diff = "bullish" if df['macd_osma_direction'].iloc[-1] > 0 else "bearish" if df['macd_osma_direction'].iloc[-1] < 0 else "neutral"
+            print(f"OSMA zone: {df['macd_osma'].iloc[-1]:.2f} - direction: {df['macd_osma_direction'].iloc[-1]:.2f} ({bias_osma_diff})")
             # di_diff = df['di_diff'].iloc[-1]
             bias_DI_DIff = "bullish" if df['+DI_val'].iloc[-1] > df['-DI_val'].iloc[-1] else "bearish" if df['+DI_val'].iloc[-1] < df['-DI_val'].iloc[-1] else "neutral"
             print(f"+DI_val/-DI_val: {df['+DI_val'].iloc[-1]:.2f}/{df['-DI_val'].iloc[-1]:.2f} ({bias_DI_DIff})")
