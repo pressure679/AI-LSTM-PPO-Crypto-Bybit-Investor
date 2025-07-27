@@ -18,9 +18,12 @@ import yfinance as yf
 
 # warnings.filterwarnings("ignore", category=RuntimeWarning)
 # Popular crypto: "DOGEUSDT", "HYPEUSDT", "FARTCOINUSDT", "SUIUSDT", "INITUSDT", "BABYUSDT", "NILUSDT"
-yf_symbols = ["BTC-USD", "BNB-USD", "ETH-USD", "XRP-USD", "XAUUSD=X"]
-bybit_symbols = ["BTCUSDT", "BNBUSDT", "ETHUSDT", "XRPUSDT", "XAUTUSDT"]
-symbols = ["BTCUSD", "BNBUSD", "ETHUSD", "XRPUSD", "XAUUSD"]
+# yf_symbols = ["BTC-USD", "BNB-USD", "ETH-USD", "XRP-USD", "XAUUSD=X"]
+# bybit_symbols = ["BTCUSDT", "BNBUSDT", "ETHUSDT", "XRPUSDT", "XAUTUSDT"]
+# symbols = ["BTCUSD", "BNBUSD", "ETHUSD", "XRPUSD", "XAUUSD"]
+yf_symbols = ["BTC-USD", "BNB-USD", "ETH-USD", "XRP-USD"]
+bybit_symbols = ["BTCUSDT", "BNBUSDT", "ETHUSDT", "XRPUSDT"]
+symbols = ["BTCUSD", "BNBUSD", "ETHUSD", "XRPUSD"]
 # yf_symbols = ["BNB-USD", "ETH-USD", "XRP-USD", "XAUUSD=X"]
 # bybit_symbols = ["BNBUSDT", "ETHUSDT", "XRPUSDT", "XAUTUSDT"]
 # symbols = ["BNBUSD", "ETHUSD", "XRPUSD", "XAUUSD"]
@@ -45,7 +48,7 @@ session = HTTP(
 )
 
 # def load_last_mb(filepath, symbol, mb_size=20):
-def load_last_mb(filepath, symbol, mb_size=6):
+def load_last_mb(filepath, symbol, mb_size=6*5*3):
     # Search for a file containing the symbol in its name
     matching_files = [f for f in os.listdir(filepath) if symbol.lower() in f.lower()]
     if not matching_files:
@@ -76,9 +79,16 @@ def load_last_mb(filepath, symbol, mb_size=6):
     # Keep only OHLC columns
     df = df[['Open', 'High', 'Low', 'Close']].copy()
 
+    df = df.resample('15min').agg({
+        'Open': 'first',
+        'High': 'max',
+        'Low': 'min',
+        'Close': 'last'
+    }).dropna()
+
     return df
 
-def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=2, delimiter=';', col_names=None):
+def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv", mb=2*5*3, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
     
@@ -105,6 +115,13 @@ def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/XAUUSD_1m_dat
     df['Date'] = pd.to_datetime(df['Date'])
     df.set_index('Date', inplace=True)
     df = df[['Open', 'High', 'Low', 'Close']].copy()
+
+    df = df.resample('15min').agg({
+        'Open': 'first',
+        'High': 'max',
+        'Low': 'min',
+        'Close': 'last'
+    }).dropna()
     
     df = df.dropna()
     
@@ -145,12 +162,25 @@ def EMA(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
 def ATR(df, period=14):
-    high_low = df['High'] - df['Low']
-    high_close = (df['High'] - df['Close'].shift()).abs()
-    low_close = (df['Low'] - df['Close'].shift()).abs()
-    ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    true_range = ranges.max(axis=1)
-    return true_range.rolling(window=period).mean()
+    """
+    candles = list of [open, high, low, close, volume]
+    Returns the latest ATR value.
+    """
+    trs = []
+    for i in range(1, len(df)):
+        high = df.iloc[i]['High']
+        low = df.iloc[i]['Low']
+        prev_close = df.iloc[i - 1]['Close']
+
+        tr = max(
+            high - low,
+            abs(high - prev_close),
+            abs(low - prev_close)
+        )
+        trs.append(tr)
+
+    atr = sum(trs[-period:]) / period
+    return atr
 
 def RSI(series, period):
     delta = series.diff()
@@ -596,7 +626,9 @@ class LSTMPPOAgent:
 
             # Policy head
             'W_policy': np.random.randn(action_size, hidden_size) * 0.1,
+            'W_policy_2': np.random.randn(1, hidden_size) * 0.1,
             'b_policy': np.zeros(action_size),
+            'b_policy_2': np.zeros(1),
 
             # Value head
             'W_value': np.random.randn(1, hidden_size) * 0.1,
@@ -645,7 +677,7 @@ class LSTMPPOAgent:
     def sl_tp_forward(self, x_seq):
         h = self.lstm_forward(x_seq)
         # logits = np.dot(self.model['W_policy'], h) + self.model['b_policy']
-        logits = np.dot(self.model['W_policy'], h) + self.model['b_policy']
+        logits = np.dot(self.model['W_policy_2'], h) + self.model['b_policy_2']
         # probs = self.softmax(logits)
         value = np.dot(self.model['W_value'], h) + self.model['b_value']
         continuous_action = self.sigmoid(logits)
@@ -653,13 +685,14 @@ class LSTMPPOAgent:
         return continuous_action, value[0] # (tp_raw, sl_raw)
 
     def scale_action(self, tp_raw, sl_raw):
-        tp_min, tp_max = 0.005, 0.05  # 0.5% to 5%
-        sl_min, sl_max = 0.0025, 0.025  # 0.2% to 3%
+        tp_min, tp_max = 0.0002, 0.002  # 0.5% to 5%, 0.2% to 2% with 50x leverage
+        sl_min, sl_max = 0.0001, 0.001 # 0.2% to 3%, 
         tp_pct = tp_min + (tp_max - tp_min) * tp_raw
         sl_pct = sl_min + (sl_max - sl_min) * sl_raw
         return tp_pct, sl_pct
 
     def select_action(self, state_seq, in_position):
+        valid_actions = []
         try:
             logits, value = self.forward(state_seq)
 
@@ -682,8 +715,28 @@ class LSTMPPOAgent:
                 action = np.random.choice(self.action_size, p=probs)
                 logprob = np.log(probs[action] + 1e-8)
 
-            if in_position and action == 3:
-                action = 0
+            # if in_position:
+            #     action = 0
+            if in_position:
+                valid_actions = [0, 1]  # Hold or Close
+            else:
+                valid_actions = [0, 2, 3]  # Hold, Long, Short
+                
+            # Mask invalid actions:
+            masked_probs = np.array([probs[a] if a in valid_actions else 0 for a in range(self.action_size)])
+            if masked_probs.sum() == 0:
+                masked_probs = np.ones(self.action_size) / self.action_size
+            else:
+                masked_probs = masked_probs / masked_probs.sum()
+                    
+            if np.argmax(masked_probs) >= 0.9:
+                action = np.argmax(masked_probs)
+            else:
+                action = np.random.choice(self.action_size, p=masked_probs)
+            logprob = np.log(masked_probs[action] + 1e-8)
+
+            # if last_ema_crossover == current_ema_crossover:
+            #     action = 0
 
             return action, logprob, value
         except Exception as e:
@@ -983,7 +1036,7 @@ def sortino_ratio(returns, risk_free_rate=0.0):
         return 0
     return (mean_ret - risk_free_rate) / downside_std
 def calculate_position_size(balance, risk_pct, entry_price, stop_loss, leverage, min_qty=0.001):
-    risk_amount = balance * risk_pct
+    risk_amount = max(balance * risk_pct, 50)
     position_size = risk_amount / abs(entry_price - stop_loss) * leverage
     # position_size = round(position_size, 3)
 
@@ -1021,6 +1074,7 @@ def train_bot(df, agent, symbol, window_size=17):
     entry_state = None
     trade_reward = 0
     in_position = False
+    last_ema_crossover = 0
 
     for t in range(window_size, len(df) - 1):
         state_seq = df[t - window_size:t].values.astype(np.float32)
@@ -1032,10 +1086,11 @@ def train_bot(df, agent, symbol, window_size=17):
             continue
         action, logprob, value = result
 
-        if get_position(bybit_symbol) != None:
-            in_position = True
-        else:
-            in_position = False
+        tp_raw, sl_raw = agent.sl_tp_forward(state_seq)
+        tp_pct, sl_pct = agent.scale_action(tp_raw, sl_raw)
+        # print(f"tp_raw: {tp_raw}, tp_pct: {tp_pct}")
+        # if tp_pct < 0.0002:
+        #     continue
 
         price = df.iloc[t]["Close"]
         day = str(df.index[t]).split(' ')[0]
@@ -1054,6 +1109,7 @@ def train_bot(df, agent, symbol, window_size=17):
             capital += daily_pnl
             # df['HL_rolling_mean'] = (df['High'] - df['Low']).rolling(window=14).mean()
             # print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f} - HL rolling mean: {df['HL_rolling_mean'].iloc[-1]}")
+            # print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade/(capital*0.05)*100:.2f}% - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.2f} - Sortino: {sor:.2f}")
             print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.2f} - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.2f} - Sortino: {sor:.2f}")
             
             current_day = day
@@ -1083,16 +1139,20 @@ def train_bot(df, agent, symbol, window_size=17):
         ema_crossover = df.iloc[t]['EMA_crossover']
         atr = df.iloc[t]['ATR']
                 
-        tp_dist = atr * 10
-        sl_dist = atr * 5
-        trailing_sl_pct = atr * 2.5 / price
-        # tp_dist = df.iloc[t]['Close'] * 0.0035
-        # sl_dist = df.iloc[t]['Close'] * 0.00175
+        # tp_dist = atr * 10
+        # sl_dist = atr * 5
+        # trailing_sl_pct = atr * 2.5 / price
+        tp_dist = df.iloc[t]['Close'] * 0.0035
+        sl_dist = df.iloc[t]['Close'] * 0.00175
+        trailing_sl_dist = df.iloc[t]['Close'] * 0.000875
+        trailing_sl_pct = 0.000875
 
         final_pct = 0.0
 
         max_price = 0.0
-        min_price = 0.0
+        min_price = 0.0    
+
+        # last_ema_crossover == ema_crossover
 
         # ema_7_28_crossover_idx = 0
         # ema_7_28_crossover = False
@@ -1143,7 +1203,9 @@ def train_bot(df, agent, symbol, window_size=17):
             # if action == 1 and macd_direction == 1 and plus_di > minus_di and bulls > 0:
             # if action == 1 and macd_direction == 1 and plus_di > minus_di and bulls > 0  and knn.predict_win_rate(state_seq) > 0.9:
             # if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
-            if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
+            # if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
+            if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and minus_di < plus_di and bulls > 0 and ema_crossover == 1:
+                last_ema_crossover = 1
                 if ema_crossover == 1:
                     reward += 1
                 elif ema_crossover == -1:
@@ -1165,10 +1227,16 @@ def train_bot(df, agent, symbol, window_size=17):
                 elif osma_direction == -1:
                     reward -= 1
                 entry_state = state_seq
-                invest = max(capital * 0.05, 5)
+                if capital < 110:
+                    print(f"capital under minimum, ${capital:.2f}, waiting until amount is free")
+                    break
+                invest = max(capital * 0.05, 100)
+                if invest < 50:
+                    print(f"investment amount under minimum, ${invest:.2f}, waiting until amount is free")
+                    break
                 position_size = invest * leverage
                 entry_price = price
-                capital -= 0.0089
+                capital -= 0.75
                 position = 1
                 partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
@@ -1177,7 +1245,9 @@ def train_bot(df, agent, symbol, window_size=17):
 
             # elif action == 2 and macd_zone == -1 and minus_di > plus_di and bears > 0:
             # elif action == 2 and macd_direction == -1 and minus_di > plus_di and bears > 0  and knn.predict_win_rate(state_seq) > 0.9:
-            if action == 2 and knn.predict_win_rate(state_seq) > 0.9:
+            # if action == 2 and knn.predict_win_rate(state_seq) > 0.9:
+            if action == 2 and knn.predict_win_rate(state_seq) > 0.9 and minus_di > plus_di and bears < 0 and ema_crossover == -1:
+                last_ema_crossover = -1
                 if ema_crossover == -1:
                     reward += 1
                 elif ema_crossover == 1:
@@ -1198,10 +1268,17 @@ def train_bot(df, agent, symbol, window_size=17):
                     reward += 1
                 elif osma_direction == -1:
                     reward -= 1
-                invest = max(capital * 0.05, 5)
+                entry_state = state_seq
+                if capital < 110:
+                    print(f"Free capital under minimum, ${capital:.2f}, waiting until amount is free")
+                    break
+                invest = max(capital * 0.05, 100)
+                if invest < 50:
+                    print(f"Free investment amount under minimum, {invest:.2f}, waiting until amount is free")
+                    break
                 position_size = invest * leverage
                 entry_price = price
-                capital -= 0.0089
+                capital -= 0.75
                 position = -1
                 partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
@@ -1300,9 +1377,13 @@ def train_bot(df, agent, symbol, window_size=17):
             final_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
             # if final_pct > 0.00:
                 # print(f"position size: {position_size}, final pct: {final_pct}")
-            capital -= 0.0089
+            capital -= 0.75
             if final_pct != 0.00:
                 pnl = position_size * final_pct
+                # if pnl < 2:
+                #     reward -= 1
+                # if pnl > 2:
+                #     reward += 1
                 capital += pnl
                 # reward += pnl / capital
                 reward = final_pct
@@ -1311,7 +1392,6 @@ def train_bot(df, agent, symbol, window_size=17):
                 knn.add(entry_state, is_win=(final_pct > 0))
                 entry_price = 0.0
                 position = 0
-                close_old_orders(bybit_symbol)
                 in_position = False
 
         if action == 0 and position != 0:
@@ -1404,9 +1484,9 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
     atr = 0.0
     tp_shares = []
     daily_pnl = 0.0
-    df = get_klines_df(bybit_symbol, 1)
-    df = add_indicators(df)
-    begun = False
+    df = None
+    # df = get_klines_df(bybit_symbol, 5)
+    # df = add_indicators(df)
     partial_tp_hit = []
     position_size = 0.0
     in_position = False
@@ -1420,17 +1500,11 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
     min_qty = float(info['lotSizeFilter']['minOrderQty'])  # Minimum allowed qty
     price_precision = int(info['priceScale'])
 
-    response = session.get_positions(category="linear", symbol=bybit_symbol)
-    positions = response["result"]["list"]
-    if positions:
-        session_position = positions[0]
-        position = 1 if float(session_position["size"]) > 0 else -1 if float(session_position["size"]) < 0 else 0
-
     while True:
         with capital_lock:
-            wait_until_next_candle(1)
+            wait_until_next_candle(15)
             print()
-            df = get_klines_df(bybit_symbol, 1)
+            df = get_klines_df(bybit_symbol, 15)
             df = add_indicators(df)
             atr = df['ATR'].iloc[-1]
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1456,6 +1530,13 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                 print("Shape mismatch:", state_seq.shape)
                 continue
 
+            response = session.get_positions(category="linear", symbol=bybit_symbol)
+            positions = response["result"]["list"]
+            if positions:
+                session_position = positions[0]
+                position = 1 if float(session_position["size"]) > 0 else -1 if float(session_position["size"]) < 0 else 0
+                in_position = True
+
             result = agent.select_action(state_seq, in_position)
             if result is None:
                 continue
@@ -1475,7 +1556,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                 sr = sharpe_ratio(daily_returns)
                 sor = sortino_ratio(daily_returns)
 
-                capital = get_balance(session)
+                capital = get_balance()
 
                 print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.4f} - PnL: {daily_pnl:.2f} - Balance: {capital:.2f} - Sharpe: {sr:.4f} - Sortino: {sor:.4f}")
                 current_day = day
@@ -1506,11 +1587,12 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
             atr = df.iloc[-1]['ATR']
             capital = get_balance()
                     
-            tp_dist = atr * 10
-            sl_dist = atr * 5
-            trailing_sl_dist = atr * 2.5
-            # tp_dist = df.iloc[-1]['Close'] * 0.0035
-            # sl_dist = df.iloc[-1]['Close'] * 0.00175
+            # tp_dist = atr * 10
+            # sl_dist = atr * 5
+            # trailing_sl_dist = atr * 2.5
+            tp_dist = df.iloc[-1]['Close'] * 0.0035
+            sl_dist = df.iloc[-1]['Close'] * 0.00175
+            trailing_sl_dist = df.iloc[-1]['Close'] * 0.000875
             # if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
             #     position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.0005, 50)
             #     session.place_order(
@@ -1545,7 +1627,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
             if position == 0:
                 # if action == 1 and macd_direction == 1 and plus_di > minus_di and bulls > 0:
                 # if action == 1 and macd_direction == 1 and plus_di > minus_di and bulls > 0 and knn.predict_win_rate(state_seq) > 0.9:
-                if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
+                if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and minus_di < plus_di and bulls > 0 and ema_crossover == 1:
                     if ema_crossover == 1:
                         reward += 1
                     elif ema_crossover == -1:
@@ -1568,8 +1650,16 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                         reward -= 1
                     entry_price = price
                     entry_seq = state_seq
+                    capital = get_balance()
+                    if capital < 110:
+                        print(f"Free capital under minimum, ${capital:.2f}, waiting until amount is free")
+                        continue
+                    invest = max(capital * 0.05, 100)
+                    if invest < 50:
+                        print(f"Free investment amount under minimum, ${invest:.2f}, waiting until amount is free")
+                        continue
                     # position_size = calculate_position_size(capital, 0.15 * reward, entry_price, sl_dist, 50)
-                    position_size = calculate_position_size(capital, 0.15, entry_price, sl_dist, 50)
+                    position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist, 50)
                     position = 1
                     in_position = True
                     
@@ -1588,9 +1678,10 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                     response = session.set_trading_stop(
                         category="linear",  # or "inverse", depending on your market
                         symbol=bybit_symbol,
-                        trailing_stop=str(round(atr * 2.5, price_precision)),  # Trailing stop in USD or quote currency
+                        trailing_stop=str(round(trailing_sl_dist, price_precision)),  # Trailing stop in USD or quote currency
                         # side="Buy",
-                        base_price=str(round(entry_price + atr * 2.5, price_precision)),
+                        # active_price=str(round(entry_price, price_precision)),
+                        active_price=str(round(entry_price + trailing_sl_dist, price_precision)),
                         position_idx=0
                     )
                     tp_levels = [
@@ -1618,7 +1709,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                         daily_trades += 1
                                 
                 # if action == 2 and macd_direction == -1 and minus_di > plus_di and bears > 0 and knn.predict_win_rate(state_seq) > 0.9:
-                if action == 2 and knn.predict_win_rate(state_seq) > 0.9:
+                if action == 2 and knn.predict_win_rate(state_seq) > 0.9 and minus_di > plus_di and bears < 0 and ema_crossover == -1:
                     if ema_crossover == -1:
                         reward += 1
                     elif ema_crossover == 1:
@@ -1642,7 +1733,15 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                     entry_price = price
                     entry_seq = state_seq
                     # position_size = calculate_position_size(capital, 0.15 * reward, entry_price, sl_dist, 50)
-                    position_size = calculate_position_size(capital, 0.15, entry_price, sl_dist, 50)
+                    capital = get_balance()
+                    if capital < 110:
+                        print(f"Free capital under minimum, ${capital:.2f}, waiting until amount is free")
+                        continue
+                    invest = max(capital * 0.05, 100)
+                    if invest < 50:
+                        print(f"Free investment amount under minimum, ${invest:.2f}, waiting until amount is free")
+                        continue
+                    position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist, 50)
                     position = -1
                     in_position = True
 
@@ -1661,8 +1760,10 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                     response = session.set_trading_stop(
                         category="linear",  # or "inverse", depending on your market
                         symbol=bybit_symbol,
-                        trailing_stop=str(round(atr * 2.5, price_precision)),  # Trailing stop in USD or quote currency
-                        base_price=str(round(entry_price - atr * 2.5, price_precision)),
+                        trailing_stop=str(round(trailing_sl_dist, price_precision)),  # Trailing stop in USD or quote currency
+                        # base_price=str(round(entry_price - atr * 2.5, price_precision)),
+                        # base_price=str(round(entry_price, price_precision)),
+                        active_price=str(round(entry_price - trailing_sl_dist, price_precision)),
                         position_idx=0
                     )
                     tp_levels = [
@@ -1695,6 +1796,10 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=17):
                 profit_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
                 pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
                 reward = profit_pct
+                # if pnl < 2:
+                #     reward -= 1
+                # if pnl > 2:
+                #     reward += 1
                 knn.add(entry_seq, is_win=(profit_pct > 0))
                 close_old_orders(bybit_symbol)
                 in_position = False
@@ -1778,7 +1883,7 @@ def main():
     counter = 0
     test_threads = []
     train = True
-    test = True
+    test = False
     counter = 0
     
     if train:
@@ -1786,9 +1891,9 @@ def main():
             df = None
             print(f"Initialized looping over symbols, currently at #{counter + 1}, {symbol}")
             if symbol == "XAUUSD":
-                df = load_last_mb_xauusd("/mnt/chromeos/removable/sd_card/XAUUSD_1m_data.csv")
+                df = load_last_mb_xauusd("/mnt/chromeos/removable/sd_card/1m dataframes/XAUUSD_1m_data.csv")
             else:
-                df = load_last_mb("/mnt/chromeos/removable/sd_card", symbol)
+                df = load_last_mb("/mnt/chromeos/removable/sd_card/1m dataframes", symbol)
                 # continue
             # df = yf_get_ohlc_df(yf_symbol)
             df = df[['Open', "High", "Low", "Close"]]
