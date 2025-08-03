@@ -69,7 +69,7 @@ This bot is based on a **custom LSTM-based PPO agent**, making it suitable for s
 
 6. **Run training or test**
    ```bash
-   python lstm-ppo.py
+   cd AI-LSTM-PPO-Crypto-Bybit-Investor; python lstm-ppo.py
    ```
 
 ---
