@@ -1714,7 +1714,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         print(f"macd zone: {df['macd_zone'].iloc[-1]:.2f} ({bias_macd_signal_line})")
         # print(f"macd line: {df['macd_line'].iloc[-1]:.2f} - going up/down: {df['macd_line_diff'].iloc[-1]:.2f} ({bias_macd_signal_line})")
         bias_osma_diff = "bullish" if df['macd_osma'].iloc[-1] > 0 else "bearish" if df['macd_osma'].iloc[-1] < 0 else "neutral"
-        print(f"OSMA zone: {df['macd_osma'].iloc[-1]:.2f} - ({bias_osma_diff})")
+        print(f"OSMA zone: {df['macd_osma'].iloc[-1]:.2f} ({bias_osma_diff})")
         # di_diff = df['di_diff'].iloc[-1]
         bias_DI_DIff = "bullish" if df['+DI_val'].iloc[-1] > df['-DI_val'].iloc[-1] else "bearish" if df['+DI_val'].iloc[-1] < df['-DI_val'].iloc[-1] else "neutral"
         print(f"+DI_val/-DI_val: {df['+DI_val'].iloc[-1]:.2f}/{df['-DI_val'].iloc[-1]:.2f} ({bias_DI_DIff})")
