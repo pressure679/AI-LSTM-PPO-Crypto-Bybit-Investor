@@ -114,7 +114,6 @@ OSMA zone: 1.00 - (bullish)
 - This bot **does not require GPUs** and is optimized for low-resource environments.
 - All indicators and reward logic are implemented in **pure Python (NumPy, pandas)**.
 - Training is **thread-safe** and supports multi-symbol backtesting.
-- In training it went from $1000 to $80k to $5+ million in 3 months.
 - You can skip training by setting train = False in the main function (at the end of lstm-ppo-bot.py, False by default) if you already trained the bot.
 
 ---
