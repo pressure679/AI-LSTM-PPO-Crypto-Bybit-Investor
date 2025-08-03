@@ -2,7 +2,7 @@
 
 A deep reinforcement learning bot that uses a custom **LSTM + PPO** (Proximal Policy Optimization) agent to simulate and learn profitable trading behavior on historical OHLC price data.
 
-It does 5-20 operations with avg profit of 0%-25% per day (after transaction costs) and has a sharpe ratio of 0.7-1 and sortino ratio of 25-70. Remember to set leverage in Bybit in each crypto pair and XAUTUSDT if you plan to use this program. I have set them to 50.
+It does 5-20 operations with avg profit of 0%-30% per day (after transaction costs) and 0-4 trades per symbol per day and has a sharpe ratio of 0.7-1 and sortino ratio of 25-70. Remember to set leverage in Bybit in each crypto pair and XAUTUSDT if you plan to use this program. I have set them to 50.
 
 This project is designed to run efficiently on **low-memory machines** (like older laptops or Chromebooks). It features a **custom PPO agent** with an LSTM network for temporal learning, allowing it to detect profitable patterns over time.
 
