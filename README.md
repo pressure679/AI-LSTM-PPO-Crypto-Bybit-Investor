@@ -4,7 +4,7 @@ A deep reinforcement learning bot that uses a custom **LSTM + PPO** (Proximal Po
 
 This project is designed to run efficiently on **low-memory machines** (like older laptops or Chromebooks). It features a **custom PPO agent** with an LSTM network for temporal learning, allowing it to detect profitable patterns over time.
 
-If you want to use this yourself you should edit api_key and api_secret to your bybit api key and secret.
+If you want to use this yourself you should edit api_key and api_secret to your bybit api key and secret, further instructions are below.
 
 It trains on 3 months and data and should be updated every once in a while with Kaggle data, I aim to update it every 3 months.
 
