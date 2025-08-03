@@ -1639,17 +1639,17 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # begun = True
             print(f"[{symbol}] [INFO] Training PPO on step {save_counter}...")
             agent.train()
-            agent.savecheckpoint(symbol)
+            # agent.savecheckpoint(symbol)
             knn._fit()
-            knn.save()
+            # knn.save()
             print(f"[{symbol}] [INFO] Saved checkpoint at step {save_counter}")
-            print()
+            # print()
     agent.train()
     agent.savecheckpoint(symbol)
     knn._fit()
     knn.save()
     print(f"[{symbol}] [INFO] Saved checkpoint at step {save_counter}")
-    print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total accumulation: {capital/100:.2f}x")
+    print(f"✅ [{symbol}] PPO training complete. Final capital: {capital:.2f}, Total accumulation: {capital/100:.2f}x")
 
 def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     capital_lock = threading.Lock()
