@@ -1168,13 +1168,28 @@ def sharpe_ratio(returns, risk_free_rate=0.0):
 
 def sortino_ratio(returns, risk_free_rate=0.0):
     mean_ret = np.mean(returns)
-    downside_returns = [r for r in returns if r < risk_free_rate]
-    if len(downside_returns) == 0:
-        return 0
-    downside_std = np.std(downside_returns)
+    # Downside deviation: only consider returns below risk-free rate, and their square differences
+    downside_diff = [(r - risk_free_rate)**2 for r in returns if r < risk_free_rate]
+    
+    if len(downside_diff) == 0:
+        return 0  # Or float('inf') if you'd rather signal perfect performance
+    
+    downside_std = np.sqrt(np.mean(downside_diff))
+    
     if downside_std == 0:
         return 0
+    
     return (mean_ret - risk_free_rate) / downside_std
+
+# def sortino_ratio(returns, risk_free_rate=0.0):
+#     mean_ret = np.mean(returns)
+#     downside_returns = [r for r in returns if r < risk_free_rate]
+#     if len(downside_returns) == 0:
+#         return 0
+#     downside_std = np.std(downside_returns)
+#     if downside_std == 0:
+#         return 0
+#     return (mean_ret - risk_free_rate) / downside_std
 def calculate_position_size(balance, risk_pct, entry_price, stop_loss, leverage, min_qty=0.001):
     risk_amount = max(balance * risk_pct, 15)
     position_size = risk_amount / abs(entry_price - stop_loss) * leverage
@@ -1391,8 +1406,8 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # position_size = calculate_position_size(capital, 0.15, entry_price, sl_dist, leverage, min_qty=min_qty)
                 # print(f"position size: {position_size}")
                 # position_size /= leverage
+                # print(f"position size: {position_size}, entry price: {entry_price}, min_qty: {min_qty}, qty_step: {qty_step}")
                 # position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
-                # print(f"position size: {position_size}")
                 entry_price = price
                 capital -= positions_size * 0.00075
                 position = 1
@@ -1418,12 +1433,11 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 #     break
                 leverage = get_max_leverage(position_size, bybit_symbol)
                 position_size = invest
-                # position_size = calculate_position_size(capital, 0.05, entry_price, sl_dist, 50, min_qty=min_qty)
                 # position_size = calculate_position_size(capital, 0.15, entry_price, sl_dist, leverage, min_qty=min_qty)
                 # print(f"position size: {position_size}")
                 # position_size /= leverage
+                # print(f"position size: {position_size}, entry price: {entry_price}, min_qty: {min_qty}, qty_step: {qty_step}")
                 # position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
-                # print(f"position size: {position_size}")
                 entry_price = price
                 capital -= position_size * 0.00075
                 position = -1
