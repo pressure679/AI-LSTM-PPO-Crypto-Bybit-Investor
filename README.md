@@ -46,28 +46,36 @@ This bot is based on a **custom LSTM-based PPO agent**, making it suitable for s
 - **Memory**: LSTM for short/long-term temporal pattern tracking
 - **Actions**: Buy, Sell, Hold, or Close
 - **Rewards**:  
-  - Percentage PnL  
-  - Profitability of position  
-  - MACD signal line agreement
+  - Profit percentage
 
-> ✨ Future additions may include DI+/DI-, Bulls/Bears Power, and KNN-based action filtering.
+> ✨ Future additions may include DI+/DI-, Bulls/Bears Power, and KNN-based action filtering and GUI for Android.
 
 ---
 
 ## 🛠️ How to Use
 
-1. **Install dependencies**
+1. **Install install.sh**
+   copy and paste content of install.sh into your linux terminal, whether on Window Subsystem for Linux, Linux, or Linux for ChromeBook.
+
+2. **Create an API key and secret (and Bybit account if not already created, and verify yourself with passport and proof of address)**
+   API key and secret creation: https://www.bybit.com/future-activity/en/developer
+
+3. **Paste the API key and secret into line 38 and 39 in lstm-ppo-bot.py**
+
+4. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **Edit file paths**  
+5. **Edit file paths**  
    Open the script and modify the following functions to point to your desired directories:
+   - `load_last_mb()` — Where to load the kaggle csv files
+   - `load_last_mb_xauusd` — Where to load the kaggle XAUUSD csv file (rename the file from XAU_1m_Binance.csv to XAUUSD_1m_Binance.csv)
    - `save_checkpoint()` — where to save the model checkpoints
    - `load_checkpoint()` — where to load previous models from
    - `load_last_mb()` — path to your downloaded OHLCV `.csv` files
 
-3. **Run training**
+7. **Run training or test**
    ```bash
    python lstm-ppo.py
    ```
@@ -76,15 +84,15 @@ This bot is based on a **custom LSTM-based PPO agent**, making it suitable for s
 
 ## 🧪 Optional: KNN Reward Filter
 
-A `RewardRateKNN` module is included (commented out by default). It filters actions based on expected reward quality using a K-Nearest Neighbor regressor. You can experiment with this for advanced selective behavior based on historical context.
+A `WinRateKNN` module is included (commented out by default). It filters actions based on expected reward quality using a K-Nearest Neighbor regressor. You can experiment with this for advanced selective behavior based on historical context.
 
 ---
 
 ## ✅ Example Output
 
 ```
-[BTCUSD] Day 2025-05-03 - PnL: 2.67% - Balance: 770.68
-[ETHUSD] Day 2025-04-27 - PnL: -0.01% - Balance: 738.97
+[BNBUSD] Day 2025-04-30 - Trades: 4 - Avg Profit: 30.71, 9.69% - PnL: 1.90% - Balance: 6460.76 - Sharpe: 0.55 - Sortino: 20.12
+[XAUUSD] Day 2025-05-20 - Trades: 0 - Avg Profit: 0.00, 0.00% - PnL: 0.00% - Balance: 6460.76 - Sharpe: 0.74 - Sortino: 91.68
 ...
 ```
 
