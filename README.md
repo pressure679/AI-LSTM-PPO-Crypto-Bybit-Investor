@@ -6,7 +6,7 @@ This project is designed to run efficiently on **low-memory machines** (like old
 
 If you want to use this yourself you should edit api_key and api_secret to your bybit api key and secret, further instructions are below.
 
-It trains on 3 months and data and should be updated every once in a while with Kaggle data, I aim to update it every 3 months, the checkpoint files for testing/live deployment are uploaded here unto GitHub, and are available so you don't need to train the LSTM + PPO bot. The checkpoint files will be updated ever 2-3 months, so you should run install.sh every now and then (command 'sh install.sh', further instructions are below).
+It trains on 3 months and data and should be updated every once in a while with Kaggle data, I aim to update it every 3 months, the checkpoint files for testing/live deployment are uploaded here unto GitHub, and are available so you don't need to train the LSTM + PPO bot. The checkpoint files will be updated ever 2-3 months, so you should run install.sh every now and then (command 'sh install.sh', or just copy-paste the content into your Linux terminal, further instructions are below).
 
 ---
 
