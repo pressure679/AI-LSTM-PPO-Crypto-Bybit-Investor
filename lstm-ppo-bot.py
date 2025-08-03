@@ -93,7 +93,7 @@ def load_last_mb(symbol, filepath="/mnt/chromeos/removable/sd_card/1m dataframes
     ready_event.set()
     return df
 
-def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/1m dataframes/XAUUSD_1m_data.csv", mb=2.5*2, delimiter=';', col_names=None):
+def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/1m dataframes/XAUUSD_1m_data.csv", mb=2*2, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
     
@@ -591,6 +591,7 @@ def append_new_candle_and_update(df, new_candle):
     return df
 
 def keep_session_alive():
+    global session
     for attempt in range(30):
         try:
             # Example: Get latest position
@@ -600,6 +601,7 @@ def keep_session_alive():
             print(f"[WARN] Timeout on attempt {attempt+1}, retrying...")
             time.sleep(2)  # wait before retry
         finally:
+            session = HTTP(api_key=api_key, api_secret=api_secret, demo=False, recv_window=5000, timeout=60)
             threading.Timer(1500, keep_session_alive).start()
 
 def get_balance():
@@ -1649,7 +1651,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
     knn._fit()
     knn.save()
     print(f"[{symbol}] [INFO] Saved checkpoint at step {save_counter}")
-    print(f"✅ [{symbol}] PPO training complete. Final capital: {capital:.2f}, Total accumulation: {capital/100:.2f}x")
+    print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total accumulation: {capital/100:.2f}x")
 
 def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     capital_lock = threading.Lock()
@@ -1849,15 +1851,15 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 #     continue
                 # position_size = calc_order_qty(invest, entry_price, min_qty, qty_step)
                 leverage = get_max_leverage(position_size, bybit_symbol)
-                position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
-                position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
-                # position_size = calc_order_qty(invest, entry_price, min_qty, qty_step)
+                # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
+                # position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
+                position_size = calc_order_qty(invest, entry_price, min_qty, qty_step)
                 position = 1
                 in_position = True
 
                 session.set_leverage(
                     category="linear",        # or "inverse", depending on the symbol type
-                    symbol=bybit_symmbol,         # or any other trading pair
+                    symbol=bybit_symbol,         # or any other trading pair
                     buyLeverage=str(leverage),         # leverage for long positions
                     sellLeverage=str(leverage)         # leverage for short positions
                 )
@@ -1929,14 +1931,15 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # position_size = calc_order_qty(invest, entry_price, min_qty, qty_step)
                 leverage = get_max_leverage(position_size, bybit_symbol)
                 # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty=min_qty)
-                position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
-                position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
+                # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
+                # position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
+                position_size = calc_order_qty(invest, entry_price, min_qty, qty_step)
                 position = -1
                 in_position = True
 
                 session.set_leverage(
                     category="linear",        # or "inverse", depending on the symbol type
-                    symbol=bybit_symmbol,         # or any other trading pair
+                    symbol=bybit_symbol,         # or any other trading pair
                     buyLeverage=str(leverage),         # leverage for long positions
                     sellLeverage=str(leverage)         # leverage for short positions
                 )
@@ -2034,6 +2037,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         agent.store_transition(state_seq, action, logprob, value, reward)
         save_counter += 1
         reward = 0
+        if not started:
+            started = True
         # if not begun:
         #     for t in range(30, len(df)):
         #         if t % 60 == 0:
@@ -2043,7 +2048,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         #             # print()
         #             print(f"[INFO] Saved checkpoint at step {save_counter}")
         # if save_counter % 10080 == 0:
-        if save_counter % 4 == 0:
+        if save_counter % 60 == 0:
             print(f"[{bybit_symbol}] [INFO] Training PPO on step {save_counter}...")
             knn._fit()
             knn.save()
@@ -2066,11 +2071,12 @@ def main():
     train = False
     test = True
     counter = 0
-    keep_session_alive()
+    # keep_session_alive()
+    threading.Thread(target=keep_session_alive).start()
     
     if train:
         print("Starting training phase...")
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = []
             for i in range(0, len(symbols)):
                 df = None
