@@ -42,7 +42,7 @@ Make sure to place the `.csv` files in the correct folder and edit the `load_las
 
 This bot is based on a **custom LSTM-based PPO agent**, making it suitable for small machines with limited RAM.
 
-- **Inputs**: 15 technical indicators + OHLC-derived features
+- **Inputs**: 19 technical indicators + OHLC-derived features
 - **Memory**: LSTM for short/long-term temporal pattern tracking
 - **Actions**: Buy, Sell, Hold, or Close
 - **Rewards**:  
