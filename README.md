@@ -24,7 +24,7 @@ It trains on 3 months and data and should be updated every once in a while with 
 
 ## 📁 Data Setup
 
-The bot is trained on **1-minute historical OHLCV data**. You can download the data used from the following Kaggle datasets:
+The bot is trained on **1-minute historical OHLCV data aggregated into 15m timeframe**. You can download the data used from the following Kaggle datasets:
 
 | Symbol  | Source |
 |---------|--------|
@@ -113,7 +113,7 @@ OSMA zone: 1.00 - (bullish)
 - All indicators and reward logic are implemented in **pure Python (NumPy, pandas)**.
 - Training is **thread-safe** and supports multi-symbol backtesting.
 - In training it went from $1000 to $80k to $5+ million in 3 months.
-- You can skip training by setting train = False in the main function if you already trained the bot.
+- You can skip training by setting train = False in the main function (at the end of lstm-ppo-bot.py, False by default) if you already trained the bot.
 
 ---
 
