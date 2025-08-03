@@ -1,3 +1,4 @@
+cd ~/
 sudo apt install wget git python3
 python3 -m pip install pybit scikit-learn pandas numpy
 git clone https://github.com/pressure679/AI-LSTM-PPO-Crypto-Bybit-Investor
