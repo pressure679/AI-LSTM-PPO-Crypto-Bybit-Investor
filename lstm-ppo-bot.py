@@ -93,6 +93,7 @@ def load_last_mb(symbol, filepath="/mnt/chromeos/removable/sd_card/1m dataframes
     ready_event.set()
     return df
 
+def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/1m dataframes/XAUUSD_1m_data.csv", mb=2.5*2, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
     
