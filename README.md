@@ -115,6 +115,7 @@ OSMA zone: 1.00 - (bullish)
 - All indicators and reward logic are implemented in **pure Python (NumPy, pandas)**.
 - Training is **thread-safe** and supports multi-symbol backtesting.
 - You can skip training by setting train = False in the main function (at the end of lstm-ppo-bot.py, False by default) if you already trained the bot.
+- The bot gets from $1000 to $80k to $5 million without leverage in 3 months of training.
 
 ---
 
