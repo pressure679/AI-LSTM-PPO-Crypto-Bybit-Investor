@@ -83,8 +83,25 @@ A `WinRateKNN` module is included (commented out by default). It filters actions
 ## ✅ Example Output
 
 ```
-[BNBUSD] Day 2025-04-30 - Trades: 4 - Avg Profit: 30.71, 9.69% - PnL: 1.90% - Balance: 6460.76 - Sharpe: 0.55 - Sortino: 20.12
-[XAUUSD] Day 2025-05-20 - Trades: 0 - Avg Profit: 0.00, 0.00% - PnL: 0.00% - Balance: 6460.76 - Sharpe: 0.74 - Sortino: 91.68
+=== [BNBUSDT] stats at 2025-08-03 20:45:00 ===
+price: 750.0
+adx: 0
+rsi: 3.00
+atr: 1.728571
+ema7/14/28 crossover above/below: True/False (bullish)
+macd zone: 1.00 (bullish)
+OSMA zone: 1.00 - (bullish)
++DI_val/-DI_val: 3.00/3.00 (neutral)
+
+=== [BTCUSDT] stats at 2025-08-03 20:45:01 ===
+price: 114273.5
+adx: 0
+rsi: 4.00
+atr: 169.671429
+ema7/14/28 crossover above/below: True/False (bullish)
+macd zone: 1.00 (bullish)
+OSMA zone: 1.00 - (bullish)
++DI_val/-DI_val: 4.00/3.00 (bullish)
 ...
 ```
 
