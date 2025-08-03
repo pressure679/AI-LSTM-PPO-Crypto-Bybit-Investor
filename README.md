@@ -34,7 +34,7 @@ The bot is trained on **1-minute historical OHLCV data aggregated into 15m timef
 | **ETHUSD** | [ETH 1m data](https://www.kaggle.com/datasets/imranbukhari/comprehensive-ethusd-1m-data) |
 | **XRPUSD** | [XRP 1m data](https://www.kaggle.com/datasets/imranbukhari/comprehensive-xrpusd-1m-data) |
 
-If you want to train the bot yourself make sure to place the `.csv` files in the correct folder and edit the `load_last_mb()` and `load_last_mb_xauusd` file paths in your script to match that path.
+If you want to train the bot yourself make sure to place the `.csv` files in the correct folder and edit the `load_last_mb()` and `load_last_mb_xauusd` file paths in your script to match that path. And set train = True for training in the main function (At the end of the file).
 
 ---
 
