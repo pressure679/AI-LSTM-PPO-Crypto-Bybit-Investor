@@ -39,8 +39,11 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 
 capital = 1000
 
-api_key = ""
-api_secret = ""
+# Bybit Demo API Key and Secret - K2OW1k9LlnjeQWYHUK - y3TZKS6KV6Yt5Y4SqdmN6NO8y6htZXiAmUeV
+# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
+# Bybit SubAccount API Key and Secret - UwZ6Br6QwinYJeDcf6 - Nai4QZfKVOU9756IsRpbm1d7gh70RAEwFd4K
+api_key = "UwZ6Br6QwinYJeDcf6"
+api_secret = "Nai4QZfKVOU9756IsRpbm1d7gh70RAEwFd4K"
 session = HTTP(
     api_key=api_key,
     api_secret=api_secret,
@@ -1421,12 +1424,12 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # if invest < 15:
                 #     print(f"investment amount under minimum, ${invest:.2f}, waiting until amount is free")
                 #     break
-                # invest = max(capital * 0.05, 15)
-                # position_size = invest
-                # leverage = get_max_leverage(position_size, bybit_symbol)
-                position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
+                invest = max(capital * 0.05, 15)
+                position_size = invest
+                leverage = get_max_leverage(position_size, bybit_symbol)
+                # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
                 # print(f"position size: {position_size}")
-                position_size /= leverage
+                # position_size /= leverage
                 # print(f"position size: {position_size}, entry price: {entry_price}, min_qty: {min_qty}, qty_step: {qty_step}")
                 position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
                 entry_price = price
@@ -1451,10 +1454,10 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # if invest < 15:
                 #     print(f"Free investment amount under minimum, {invest:.2f}, waiting until amount is free")
                 #     break
-                # invest = max(capital * 0.05, 15)
-                # position_size = invest
-                # leverage = get_max_leverage(position_size, bybit_symbol)
-                position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
+                invest = max(capital * 0.05, 15)
+                position_size = invest
+                leverage = get_max_leverage(position_size, bybit_symbol)
+                # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
                 # print(f"position size: {position_size}")
                 position_size /= leverage
                 # print(f"position size: {position_size}, entry price: {entry_price}, min_qty: {min_qty}, qty_step: {qty_step}")
@@ -1633,7 +1636,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # agent.savecheckpoint(symbol)
             knn._fit()
             # knn.save()
-            print(f"[{symbol}] [INFO] Saved checkpoint at step {save_counter}")
+            # print(f"[{symbol}] [INFO] Saved checkpoint at step {save_counter}")
             # print()
     agent.train()
     agent.savecheckpoint(symbol)
@@ -1838,20 +1841,20 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # if invest < 50:
                 #     print(f"Free investment amount under minimum, ${invest:.2f}, waiting until amount is free")
                 #     continue
-                # position_size = calc_order_qty(invest, entry_price, min_qty, qty_step)
+                position_size = calc_order_qty(invest * 50, entry_price, min_qty, qty_step)
                 leverage = get_max_leverage(position_size, bybit_symbol)
                 # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
                 # position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
-                position_size = calc_order_qty(invest, entry_price, min_qty, qty_step)
+                # position_size = calc_order_qty(invest, entry_price, min_qty, qty_step)
                 position = 1
                 in_position = True
 
-                session.set_leverage(
-                    category="linear",        # or "inverse", depending on the symbol type
-                    symbol=bybit_symbol,         # or any other trading pair
-                    buyLeverage=str(leverage),         # leverage for long positions
-                    sellLeverage=str(leverage)         # leverage for short positions
-                )
+                # session.set_leverage(
+                #     category="linear",        # or "inverse", depending on the symbol type
+                #     symbol=bybit_symbol,         # or any other trading pair
+                #     buyLeverage=str(leverage),         # leverage for long positions
+                #     sellLeverage=str(leverage)         # leverage for short positions
+                # )
                 session.place_order(
                     category="linear",
                     symbol=bybit_symbol,
@@ -1913,25 +1916,25 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # if capital < 110:
                 #     print(f"Free capital under minimum, ${capital:.2f}, waiting until amount is free")
                 #     continue
-                invest = max(capital * 0.05, 15)
+                invest = max(capital * 0.05, 15) * 50
                 # if invest < 50:
                 #     print(f"Free investment amount under minimum, ${invest:.2f}, waiting until amount is free")
                 #     continue
-                # position_size = calc_order_qty(invest, entry_price, min_qty, qty_step)
+                position_size = calc_order_qty(invest * 50, entry_price, min_qty, qty_step)
                 leverage = get_max_leverage(position_size, bybit_symbol)
                 # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty=min_qty)
                 # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
                 # position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
-                position_size = calc_order_qty(invest, entry_price, min_qty, qty_step)
+                # position_size = calc_order_qty(invest, entry_price, min_qty, qty_step)
                 position = -1
                 in_position = True
 
-                session.set_leverage(
-                    category="linear",        # or "inverse", depending on the symbol type
-                    symbol=bybit_symbol,         # or any other trading pair
-                    buyLeverage=str(leverage),         # leverage for long positions
-                    sellLeverage=str(leverage)         # leverage for short positions
-                )
+                # session.set_leverage(
+                #     category="linear",        # or "inverse", depending on the symbol type
+                #     symbol=bybit_symbol,         # or any other trading pair
+                #     buyLeverage=str(leverage),         # leverage for long positions
+                #     sellLeverage=str(leverage)         # leverage for short positions
+                # )
                 session.place_order(
                     category="linear",
                     symbol=bybit_symbol,
@@ -2069,7 +2072,7 @@ def main():
             futures = []
             for i in range(0, len(symbols)):
                 df = None
-                print(f"Initialized looping over symbols, currently at #{counter + 1}, {symbols[i]}")
+                print(f"Initialized looping over symbol, currently at {counter + 1}/{len(symbols)}, {symbols[i]}")
                 if symbols[i] == "XAUUSD":
                     df = load_last_mb_xauusd()
                 else:
