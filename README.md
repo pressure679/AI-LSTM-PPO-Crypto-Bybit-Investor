@@ -114,7 +114,6 @@ OSMA zone: 1.00 - (bullish)
 - Training is **thread-safe** and supports multi-symbol backtesting.
 - In training it went from $1000 to $80k to $5+ million in 3 months.
 - You can skip training by setting train = False in the main function if you already trained the bot.
-- I am currently testing it in ByBit demo mode, so if you want to disable that you comment out demo=True in the session call just above the main function.
 
 ---
 
