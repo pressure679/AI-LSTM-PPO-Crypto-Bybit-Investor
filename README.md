@@ -18,7 +18,7 @@ It trains on 3 months and data and should be updated every once in a while with 
 - ✅ Compatible with multi-symbol training (BTC, ETH, BNB, XRP, XAU)
 - ✅ Supports save/load checkpoint functionality
 - ✅ Threaded session management for training stability
-- 🧪 *(Optional)* KNN-based experience filtering (commented out for now)
+- ✅ KNN-based experience filtering
 
 ---
 
