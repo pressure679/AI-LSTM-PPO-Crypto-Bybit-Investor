@@ -67,15 +67,7 @@ This bot is based on a **custom LSTM-based PPO agent**, making it suitable for s
    pip install -r requirements.txt
    ```
 
-5. **Edit file paths**  
-   Open the script and modify the following functions to point to your desired directories:
-   - `load_last_mb()` — Where to load the kaggle csv files
-   - `load_last_mb_xauusd` — Where to load the kaggle XAUUSD csv file (rename the file from XAU_1m_Binance.csv to XAUUSD_1m_Binance.csv)
-   - `save_checkpoint()` — where to save the model checkpoints
-   - `load_checkpoint()` — where to load previous models from
-   - `load_last_mb()` — path to your downloaded OHLCV `.csv` files
-
-7. **Run training or test**
+6. **Run training or test**
    ```bash
    python lstm-ppo.py
    ```
