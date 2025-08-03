@@ -40,8 +40,10 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 
 capital = 1000
 
-api_key = ""
-api_secret = ""
+# Bybit Demo API Key and Secret - K2OW1k9LlnjeQWYHUK - y3TZKS6KV6Yt5Y4SqdmN6NO8y6htZXiAmUeV
+# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
+api_key = "PoP1ud3PuWajwecc4S"
+api_secret = "z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU"
 session = HTTP(
     api_key=api_key,
     api_secret=api_secret,
@@ -88,10 +90,10 @@ def load_last_mb(symbol, filepath="/mnt/chromeos/removable/sd_card/1m dataframes
         'Low': 'min',
         'Close': 'last'
     }).dropna()
-
+    ready_event.set()
     return df
 
-def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/1m dataframes/XAUUSD_1m_data.csv", mb=2*3, delimiter=';', col_names=None):
+def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/1m dataframes/XAUUSD_1m_data.csv", mb=2*2, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
     
@@ -659,7 +661,8 @@ def wait_until_next_candle(interval_minutes):
     now = time.time()
     seconds_per_candle = interval_minutes * 60
     sleep_seconds = seconds_per_candle - (now % seconds_per_candle)
-    print(f"Waiting {round(sleep_seconds, 2)} seconds until next candle...")
+    print(f"Waiting {round(sleep_seconds / 60, 2)} minutes until next candle...")
+    print()
     time.sleep(sleep_seconds)
 
 def update_candles(df, symbol, interval=15):
@@ -1709,7 +1712,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         atr = df['ATR'].iloc[-1]
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         started = True
-        print(f"=== {bybit_symbol} stats at {now} ===")
+        print(f"=== [{bybit_symbol}] stats at {now} ===")
         print(f"price: {df['Close'].iloc[-1]}")
         print(f"adx: {df['ADX_zone'].iloc[-1]}")
         print(f"rsi: {df['RSI_zone'].iloc[-1]:.2f}")
@@ -2056,8 +2059,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     # agent.savecheckpoint(symbol)
     # print(f"✅ PPO training complete. Final capital: {capital:.2f}, Total PnL: {capital/1000:.2f}")
 
-MAX_WORKERS = 4
-    
+MAX_WORKERS = 5
+
 def main():
     # global lstm_ppo_agent
     counter = 0
@@ -2065,34 +2068,30 @@ def main():
     train = False
     test = True
     counter = 0
- 
+    keep_session_alive()
+    
     if train:
         print("Starting training phase...")
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = []
-        for i in range(0, len(symbols)):
-            df = None
-            print(f"Initialized looping over symbols, currently at #{counter + 1}, {symbols[i]}")
-            if symbols[i] == "XAUUSD":
-                continue
-                # df = load_last_mb_xauusd()
-            else:
-                df = load_last_mb(symbols[i])
-                # continue
-            # df = yf_get_ohlc_df(yf_symbol)
-            df = df[['Open', "High", "Low", "Close"]]
-            # time.sleep(1)
-            df = add_indicators(df)
-            # time.sleep(1)
-            df['signal'] = generate_signals(df)
-            # time.sleep(1)
-            lstm_ppo_agent = LSTMPPOAgent(state_size=23, hidden_size=64, action_size=4)
-            futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
-            counter += 1
-            # t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
-            # t.start()
-            t1 = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i])).start()
-            test_threads.append(t1)
+            for i in range(0, len(symbols)):
+                df = None
+                print(f"Initialized looping over symbols, currently at #{counter + 1}, {symbols[i]}")
+                if symbols[i] == "XAUUSD":
+                    df = load_last_mb_xauusd()
+                else:
+                    df = load_last_mb(symbols[i])
+                    # continue
+                    # df = yf_get_ohlc_df(yf_symbol)
+                # df = df[['Open', "High", "Low", "Close"]]
+                df = add_indicators(df)
+                df['signal'] = generate_signals(df)
+                lstm_ppo_agent = LSTMPPOAgent(state_size=23, hidden_size=64, action_size=4)
+                counter += 1
+                futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            t.start()
+            test_threads.append(t)
         for future in as_completed(futures):
             try:
                 future.result()
@@ -2104,7 +2103,6 @@ def main():
     # Reset for test phase
     counter = 0
     test_threads = []
-    keep_session_alive()
     # check if weekend
     # today = datetime.utcnow().weekday()  # Monday=0 ... Sunday=6
     # is_weekend = today >= 5  # 5 = Saturday, 6 = Sunday
@@ -2114,13 +2112,12 @@ def main():
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = []
             for i, bybit_symbol in enumerate(bybit_symbols):
-                if bybit_symbols[i] == "XAUTUSDT":
-                    continue
                 df = get_klines_df(bybit_symbol, 96)
                 df = add_indicators(df)
                 df['signal'] = generate_signals(df)
                 agent = LSTMPPOAgent(state_size=23, hidden_size=64, action_size=4)
                 futures.append(executor.submit(test_bot, df, agent, symbols[i], bybit_symbol))
+
             for future in as_completed(futures):
                 try:
                     future.result()
