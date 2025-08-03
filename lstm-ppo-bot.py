@@ -1709,7 +1709,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         print(f"rsi: {df['RSI_zone'].iloc[-1]:.2f}")
         print(f"atr: {atr:.6f}")
         bias_ema_crossover = "bullish" if df['EMA_crossover'].iloc[-1] > 0  else "bearish" if df['EMA_crossover'].iloc[-1] < 0 else "neutral"
-        print(f"ema7/14/28 crossover above/below: {df['EMA_crossover'].iloc[-1] > 0}/{df['EMA_crossover'].iloc[-1] < 0} ({bias_ema_crossover})")
+        print(f"ema7/14/28 crossover up/down: {df['EMA_crossover'].iloc[-1] > 0}/{df['EMA_crossover'].iloc[-1] < 0} ({bias_ema_crossover})")
         bias_macd_signal_line = "bullish" if df['macd_signal'].iloc[-1] > 0 else "bearish" if df["macd_signal"].iloc[-1] < 0 else "neutral"
         print(f"macd zone: {df['macd_zone'].iloc[-1]:.2f} ({bias_macd_signal_line})")
         # print(f"macd line: {df['macd_line'].iloc[-1]:.2f} - going up/down: {df['macd_line_diff'].iloc[-1]:.2f} ({bias_macd_signal_line})")
