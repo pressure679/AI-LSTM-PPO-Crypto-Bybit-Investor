@@ -2050,7 +2050,7 @@ def main():
             df = None
             # session = HTTP(demo=True, api_key=api_key, api_secret=api_secret)
             # keep_session_alive()
-            df = get_klines_df(bybit_symbol, 15)
+            df = get_klines_df(bybit_symbol, 96)
             df = add_indicators(df)
             df['signal'] = generate_signals(df)
             # print(f"columns: {df.columns}")
