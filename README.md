@@ -48,11 +48,11 @@ This bot is based on a **custom LSTM-based PPO agent**, making it suitable for s
 - **Rewards**:  
   - Profit percentage
 
-> ✨ Future additions may include DI+/DI-, Bulls/Bears Power, and KNN-based action filtering and GUI for Android.
+> ✨ Future additions may include a GUI for Android and Windows and ChromeBook.
 
 ---
 
-## 🛠️ How to Use
+## 🛠️ How to Use (If you find it too difficult to install the program you can copytrade me on ByBit, my username is Naamik)
 
 1. **Install install.sh**
    copy and paste content of install.sh into your linux terminal, whether on Window Subsystem for Linux, Linux, or Linux for ChromeBook.
