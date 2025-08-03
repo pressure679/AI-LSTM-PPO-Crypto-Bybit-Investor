@@ -268,14 +268,6 @@ def ADX(df, period=14):
 
     return adx, plus_di, minus_di
 
-def BullsPower(df, period=14):
-    ema = EMA(df['Close'], period)
-    return df['High'] - ema
-
-def BearsPower(df, period=14):
-    ema = EMA(df['Close'], period)
-    return df['Low'] - ema
-
 def get_klines_df(symbol, interval, limit=240):
     if interval == 15:
         limit = 104
