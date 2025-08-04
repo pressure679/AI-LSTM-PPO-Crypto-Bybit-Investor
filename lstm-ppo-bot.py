@@ -1715,11 +1715,13 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     entry_price = None
     response = session.get_positions(category="linear", symbol=bybit_symbol)
     session_positions = response['result']['list']
+    position_size = 0.0
     for pos in session_positions:
         if 'side' in pos and pos['size'] != '0':
             # print(f"{pos}")
             # print(f"Side: {pos['side']}, Size: {pos['size']}")
             position = 1 if pos['side'] == "Buy" else -1 if pos['side'] == "Sell" else 0
+            position_size = float(pos['size'])
         if 'avgPrice' in pos and pos['size'] != '0':
             entry_price = float(pos['avgPrice'])
     invest = 0.0
