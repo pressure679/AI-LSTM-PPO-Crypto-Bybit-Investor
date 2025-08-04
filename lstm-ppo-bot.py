@@ -39,8 +39,11 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 
 capital = 1000
 
-api_key = ""
-api_secret = ""
+# Bybit Demo API Key and Secret - K2OW1k9LlnjeQWYHUK - y3TZKS6KV6Yt5Y4SqdmN6NO8y6htZXiAmUeV
+# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
+# Bybit SubAccount API Key and Secret - UwZ6Br6QwinYJeDcf6 - Nai4QZfKVOU9756IsRpbm1d7gh70RAEwFd4K
+api_key = "UwZ6Br6QwinYJeDcf6"
+api_secret = "Nai4QZfKVOU9756IsRpbm1d7gh70RAEwFd4K"
 session = HTTP(
     api_key=api_key,
     api_secret=api_secret,
@@ -1231,7 +1234,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
     position = 0
     sl_price = 0.0
     tp_price = 0.0
-    entry_price = 1
+    entry_price = 0.0
     price = 0.0
     leverage = 50
     position_size = 0.0
@@ -1414,8 +1417,8 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
             # if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
             # if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and minus_di < plus_di and ema_crossover == 1:
-            # if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and df['signal'].iloc[t] == 1:
             if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and df['signal'].iloc[t] == 1:
+            # if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and df['signal'].iloc[t] == 1:
             # if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
                 entry_state = state_seq
                 entry_price = price
@@ -1425,19 +1428,19 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # if invest < 15:
                 #     print(f"investment amount under minimum, ${invest:.2f}, waiting until amount is free")
                 #     break
-                invest = max(capital * 0.05, 5)
+                invest = max(capital * 0.05, 15)
                 position_size = invest
                 # leverage = get_max_leverage(position_size, bybit_symbol)
                 # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
                 # print(f"position size: {position_size}")
                 # position_size /= leverage
                 # print(f"position size: {position_size}, entry price: {entry_price}, min_qty: {min_qty}, qty_step: {qty_step}")
-                position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
+                # position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
                 entry_price = price
-                # capital -= positions_size * 0.00075
-                capital -= positions_size * 0.003
+                capital -= positions_size * 0.00075
+                # capital -= positions_size * 0.003
                 position = 1
-                partial_tp_hit = [False, False, False]
+                partial_tp_hit = [False, False, False, False]
                 position_pct_left = 1.0
                 in_position = True
                 # daily_trades += 1
@@ -1456,7 +1459,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # if invest < 15:
                 #     print(f"Free investment amount under minimum, {invest:.2f}, waiting until amount is free")
                 #     break
-                invest = max(capital * 0.05, 5)
+                invest = max(capital * 0.05, 15)
                 position_size = invest
                 # leverage = get_max_leverage(position_size, bybit_symbol)
                 # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
@@ -1465,20 +1468,20 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # print(f"position size: {position_size}, entry price: {entry_price}, min_qty: {min_qty}, qty_step: {qty_step}")
                 # position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
                 entry_price = price
-                # capital -= position_size * 0.00075
-                capital -= position_size * 0.003
+                capital -= position_size * 0.00075
+                # capital -= position_size * 0.003
                 position = -1
-                partial_tp_hit = [False, False, False]
+                partial_tp_hit = [False, False, False, False]
                 position_pct_left = 1.0
                 in_position = True
 
         if position == 1:
             profit_pct = (price - entry_price) / entry_price
-            if price > entry_price - position_size * 0.003 * 2 - position_size * 0.001 * (1 + trailing_sl_pct):
-            # if price > entry_price - position_size * 0.00075 * 2 - position_size * 0.00025 * (1 + trailing_sl_pct):
+            # if price > entry_price - position_size * 0.003 * 2 - position_size * 0.001 * (1 + trailing_sl_pct):
+            if price > entry_price - position_size * 0.00075 * 2 - position_size * 0.00025 * (1 + trailing_sl_pct):
                 min_price = max(min_price, price)
-                if price <= (min_price + position_size * 0.003 * 2 + position_size * 0.001) * (1 - trailing_sl_pct):
-                # if price <= (min_price + position_size * 0.00075 * 2 + position_size * 0.00025) * (1 - trailing_sl_pct):
+                # if price <= (min_price + position_size * 0.003 * 2 + position_size * 0.001) * (1 - trailing_sl_pct):
+                if price <= (min_price + position_size * 0.00075 * 2 + position_size * 0.00025) * (1 - trailing_sl_pct):
                     # daily_pnl += profit_pct * position_size
                     action = 3
                     trailing_sl_hit = True
@@ -1487,16 +1490,17 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # entry_price + 0.4 * tp_dist,
                 # entry_price + 0.6 * tp_dist,
                 # entry_price + 0.8 * tp_dist,
+                entry_price + 0.236 * tp_dist,
                 entry_price + 0.382 * tp_dist,
                 entry_price + 0.618 * tp_dist,
                 entry_price + 0.786 * tp_dist,
             ]
-            sl_price = entry_price - sl_dist + position_size * 0.003 * 2 + position_size * 0.001
-            # sl_price = entry_price - sl_dist + position_size * 0.00075 * 2 + position_size * 0.00025
+            # sl_price = entry_price - sl_dist + position_size * 0.003 * 2 + position_size * 0.001
+            sl_price = entry_price - sl_dist + position_size * 0.00075 * 2 + position_size * 0.00025
             tp_price = entry_price + tp_dist
-            tp_shares = [0.4, 0.2, 0.2]
+            tp_shares = [0.2, 0.2, 0.2, 0.2]
 
-            for i in range(3):
+            for i in range(4):
                 if not partial_tp_hit[i] and price >= tp_levels[i]:
                     # realized = position_size * tp_shares[i]
                     # pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
@@ -1505,20 +1509,21 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     capital += pnl
                     daily_pnl += pnl
                     # invest -= realized
-                    # invest -= pnl
+                    invest -= pnl
                     position_size -= pnl
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
                     action = 0
+                    reward += 1
 
             if price >= tp_price or price <= sl_price:
-                # if price >= tp_price:
-                #     reward += 1
+                if price >= tp_price:
+                    reward += 1
                 # else:
                 #     reward -= 1 
                 action = 3
             # if df['macd_crossover'].iloc[t] == -1:
-            # if df['signal'].iloc[t] == -1 and action == 2:
+            # # if df['signal'].iloc[t] == -1 and action == 2:
             #     action = 3
                                       
         elif position == -1:
@@ -1527,8 +1532,8 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             if price <= entry_price + position_size * 0.003 * 2 + position_size * 0.001 * (1 - trailing_sl_pct):
             # if price <= entry_price + position_size * 0.00075 * 2 + position_size * 0.00025 * (1 - trailing_sl_pct):
                 max_price = min(max_price, price)
-                if price >= (max_price - position_size * 0.003 * 2 - position_size * 0.001) * (1 + trailing_sl_pct):
-                # if price >= (max_price - position_size * 0.0075 * 2 - position_size * 0.00025) * (1 + trailing_sl_pct):
+                # if price >= (max_price - position_size * 0.003 * 2 - position_size * 0.001) * (1 + trailing_sl_pct):
+                if price >= (max_price - position_size * 0.0075 * 2 - position_size * 0.00025) * (1 + trailing_sl_pct):
                     # daily_pnl += profit_pct * position_size
                     action = 3
                     trailing_sl_hit = True
@@ -1537,17 +1542,18 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # entry_price - 0.4 * tp_dist,
                 # entry_price - 0.6 * tp_dist,
                 # entry_price - 0.8 * tp_dist
+                entry_price - 0.236 * tp_dist,
                 entry_price - 0.382 * tp_dist,
                 entry_price - 0.618 * tp_dist,
                 entry_price - 0.786 * tp_dist
             ]
-            sl_price = entry_price + sl_dist - position_size * 0.003 * 2 - position_size * 0.001
-            # sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
+            # sl_price = entry_price + sl_dist - position_size * 0.003 * 2 - position_size * 0.001
+            sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
             # sl_price = entry_price + sl_dist
             tp_price = entry_price - tp_dist
-            tp_shares = [0.4, 0.2, 0.2]
+            tp_shares = [0.2, 0.2, 0.2, 0.2]
 
-            for i in range(3):
+            for i in range(4):
                 if not partial_tp_hit[i] and price <= tp_levels[i]:
                     # realized = position_size * tp_shares[i]
                     # pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
@@ -1556,11 +1562,12 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     capital += pnl
                     daily_pnl += pnl
                     # invest -= realized
-                    # invest -= pnl
+                    invest -= pnl
                     position_size -= pnl
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
                     action = 0
+                    reward += 1
 
             if price <= tp_price or price >= sl_price:
                 # final_pct = (entry_price - price) / entry_price
@@ -1572,31 +1579,34 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # position = 0
                 # position_pct_left = 1.0
                 # partial_tp_hit = [False, False, False, False]
-                # if price >= tp_price:
-                #     reward += 1
+                if price <= tp_price:
+                    reward += 1
                 # else:
                 #     reward -= 1
                 action = 3
             # if df['macd_crossover'].iloc[t] == 1:
-            # if df['signal'].iloc[t] == 1 and action == 3:
+            # # if df['signal'].iloc[t] == 1 and action == 3:
             #     action = 3
 
-        if action == 3 and (position == 1 and df['signal'].iloc[t] == -1) or trailing_sl_hit:
+        if action == 3 and df['signal'].iloc[t] == -1 and position == 1 and entry_price != 0:
+        # if action == 3 and entry_price != 0:
         # if action == 3 and position == 1:
             final_pct = 0.0
-            if trailing_sl_hit:
-                # final_pct = (min_price + position_size * 0.003 * 2 + position_size * 0.001)  * (1 - trailing_sl_pct) / entry_price
-                # final_pct = (max_price + position_size * 0.00075 * 2 + position_size * 0.00025) * (1 - trailing_sl_pct) / entry_price
-                if entry_price == 0:
-                    final_pct = (entry_price - min_price) / (entry_price + 1e-6)
-                else:
-                    final_pct = (entry_price - min_price) / entry_price
-            else:
-                final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
-            capital -= position_size * 0.003 * 2
-            # capital -= position_size * 0.00075
-            # pnl = position_size * final_pct - position_size * 0.00075 * 2 - 0.00025 * position_size
-            pnl = position_size * final_pct - position_size * 0.003 * 2 - 0.001 * position_size
+            # if trailing_sl_hit:
+            #     # final_pct = (min_price + position_size * 0.003 * 2 + position_size * 0.001)  * (1 - trailing_sl_pct) / entry_price
+            #     # final_pct = (max_price + position_size * 0.00075 * 2 + position_size * 0.00025) * (1 - trailing_sl_pct) / entry_price
+            #     if entry_price == 0:
+            #         final_pct = (entry_price - min_price) / (entry_price + 1e-6)
+            #     else:
+            #         final_pct = (entry_price - min_price) / entry_price
+            # else:
+            #     final_pct = (price - entry_price) / (entry_price + 1e-6) if position == 1 else (entry_price - price) / (entry_price + 1e-6)
+
+            final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
+            # capital -= position_size * 0.003 * 2
+            capital -= position_size * 0.00075
+            pnl = position_size * final_pct - position_size * 0.00075 * 2 - 0.00025 * position_size
+            # pnl = position_size * final_pct - position_size * 0.003 * 2 - 0.001 * position_size
             # print(f"position size: {position_size}, final pct: {final_pct}, invest: {invest:.2f}, pnl: {pnl:.2f}")
             # if pnl < 2:
             #     reward -= 1
@@ -1604,12 +1614,12 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             #     reward += 1
             capital += pnl
             # reward += pnl / capital
-            # reward = final_pct - 0.00075 * 2 - 0.00025
-            reward = final_pct - 0.003 * 2 - 0.001
+            reward += final_pct - 0.00075 * 2 - 0.00025
+            # reward = final_pct - 0.003 * 2 - 0.001
             daily_pnl += pnl
             daily_trades += 1
-            knn.add(entry_state, is_win=(final_pct - 0.003 * 2 - 0.001 > 0))
-            # knn.add(entry_state, is_win=(final_pct - 0.00075 * 2 - 0.00025 > 0))
+            # knn.add(entry_state, is_win=(final_pct - 0.003 * 2 - 0.001 > 0))
+            knn.add(entry_state, is_win=(final_pct - 0.00075 * 2 - 0.00025 > 0))
             entry_price = 0.0
             position = 0
             in_position = False
@@ -1620,23 +1630,19 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # else:
             #     reward += 1
 
-        if action == 3 and (position == -1 and df['signal'].iloc[t] == 1) or trailing_sl_hit:
+        if action == 3 and df['signal'].iloc[t] == 1 and position == -1 and entry_price != 0:
         # if action == 3 and position == -1:
             final_pct = 0.0
-            if trailing_sl_hit:
+            # if trailing_sl_hit:
                 # final_pct = (max_price + position_size * 0.003 * 2 + position_size * 0.001) * (1 - trailing_sl_pct) / entry_price
                 # final_pct = (max_price + position_size * 0.00075 * 2 + position_size * 0.00025) * (1 - trailing_sl_pct) / entry_price
-                if entry_price == 0:
-                    final_pct = (max_price - entry_price) / (entry_price + 1e-6)
-                else:
-                    final_pct = (max_price - entry_price) / entry_price
-                    
-            else:
-                final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
-            # capital -= position_size * 0.00075
-            capital -= position_size * 0.003
-            # pnl = position_size * final_pct - position_size * 0.00075 * 2 - 0.00025 * position_size
-            pnl = position_size * final_pct - position_size * 0.003 * 2 - 0.001 * position_size
+                # final_pct = (max_price - entry_price) / entry_price 
+            # else:
+            final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
+            capital -= position_size * 0.00075
+            # capital -= position_size * 0.003
+            pnl = position_size * final_pct - position_size * 0.00075 * 2 - 0.00025 * position_size
+            # pnl = position_size * final_pct - position_size * 0.003 * 2 - 0.001 * position_size
             # print(f"position size: {position_size}, final pct: {final_pct}, invest: {invest:.2f}, pnl: {pnl:.2f}")
             # if pnl < 2:
             #     reward -= 1
@@ -1644,12 +1650,12 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             #     reward += 1
             capital += pnl
             # reward += pnl / capital
-            # reward = final_pct - 0.00075 * 2 - 0.00025
-            reward = final_pct - 0.003 * 2 - 0.001
+            reward += final_pct - 0.00075 * 2 - 0.00025
+            # reward = final_pct - 0.003 * 2 - 0.001
             daily_pnl += pnl
             daily_trades += 1
-            # knn.add(entry_state, is_win=(final_pct - 0.00025 * 2 - 0.00075 > 0))
-            knn.add(entry_state, is_win=(final_pct - 0.003 * 2 - 0.001 > 0))
+            knn.add(entry_state, is_win=(final_pct - 0.00025 * 2 - 0.00075 > 0))
+            # knn.add(entry_state, is_win=(final_pct - 0.003 * 2 - 0.001 > 0))
             entry_price = 0.0
             position = 0
             in_position = False
@@ -1666,7 +1672,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # pnl = position_size * profit_pct
             # reward += pnl
             # reward = profit_pct - 0.00075 * 2 - 0.00025
-            reward = profit_pct - 0.003 * 2 - 0.001
+            reward += profit_pct - 0.003 * 2 - 0.001
                 
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
@@ -1738,6 +1744,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     price_precision = int(info['priceScale'])
     df = None
     profit_pct = 0.0
+    partial_tp_hit = []
 
     while True:
         wait_until_next_candle(15)
@@ -1928,12 +1935,13 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     # entry_price + 0.4 * tp_dist,
                     # entry_price + 0.6 * tp_dist,
                     # entry_price + 0.8 * tp_dist
+                    entry_price + 0.236 * tp_dist,
                     entry_price + 0.382 * tp_dist,
                     entry_price + 0.618 * tp_dist,
                     entry_price + 0.786 * tp_dist
                 ]
-                tp_shares = [0.4, 0.2, 0.2]
-                for i in range(3):
+                tp_shares = [0.2, 0.2, 0.2, 0.2]
+                for i in range(4):
                     realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
                     # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
                     # if pnl == 0:
@@ -1949,7 +1957,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                         price=str(round(tp_levels[i], price_precision)),
                         # reduce_only=True,
                     )
-                    partial_tp_hit = [False, False, False]
+                    partial_tp_hit = [False, False, False, False]
                     # position_pct_left = 1.0
                 #     daily_trades += 1
                             
@@ -2011,11 +2019,12 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     # entry_price - 0.4 * tp_dist,
                     # entry_price - 0.6 * tp_dist,
                     # entry_price - 0.8 * tp_dist
+                    entry_price - 0.236 * tp_dist,
                     entry_price - 0.382 * tp_dist,
                     entry_price - 0.618 * tp_dist,
                     entry_price - 0.786 * tp_dist
                 ]
-                tp_shares = [0.4, 0.2, 0.2]
+                tp_shares = [0.2, 0.2, 0.2, 0.2]
                 for i in range(3):
                     realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
                     # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
@@ -2034,15 +2043,130 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                         buyLeverage=leverage,
                         sellLeverage=leverage,
                     )
-                    partial_tp_hit = [False, False, False]
+                    partial_tp_hit = [False, False, False, False]
                     position_pct_left = 1.0
-                #      daily_trades += 1
+                    # daily_trades += 1
 
-        if action == 3 and (position == 1 and df['signal'].iloc[-1] == -1):
+        if action == 0 and position != 0:
+            if entry_price == 0.00:
+                profit_pct = 0.00
+            else:
+                profit_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
+                reward += profit_pct
+
+        if position == 1:
+            tp_levels = [
+                # entry_price - 0.4 * tp_dist,
+                # entry_price - 0.6 * tp_dist,
+                # entry_price - 0.8 * tp_dist
+                entry_price - 0.236 * tp_dist,
+                entry_price - 0.382 * tp_dist,
+                entry_price - 0.618 * tp_dist,
+                entry_price - 0.786 * tp_dist
+            ]
+            # sl_price = entry_price - sl_dist + position_size * 0.003 * 2 + position_size * 0.001
+            sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
+            # sl_price = entry_price + sl_dist
+            tp_price = entry_price + tp_dist
+            tp_shares = [0.2, 0.2, 0.2, 0.2]
+
+            for i in range(4):
+                if not partial_tp_hit[i] and price >= tp_levels[i]:
+                    # realized = position_size * tp_shares[i]
+                    # pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
+                    pnl = position_size * tp_shares[i]
+                    # pnl = realized * profit_pct
+                    # capital += pnl
+                    daily_pnl += pnl
+                    # invest -= realized
+                    # invest -= pnl
+                    position_size -= pnl
+                    position_pct_left -= tp_shares[i]
+                    partial_tp_hit[i] = True
+                    action = 0
+                    reward += 1
+
+            if price <= tp_price or price >= sl_price:
+                partial_tp_hit = [False, False, False, False]
+                # final_pct = (entry_price - price) / entry_price
+                # pnl = position_size * final_pct
+                # capital += pnl
+                # reward += pnl / capital
+                # daily_pnl += pnl
+                # invest = 0
+                # position = 0
+                # position_pct_left = 1.0
+                # partial_tp_hit = [False, False, False, False]
+                if price <= tp_price:
+                    reward += 1
+                    # else:
+                    #     reward -= 1
+                    action = 3
+                if df['macd_crossover'].iloc[t] == 1:
+                        # if df['signal'].iloc[t] == 1 and action == 3:
+                        action = 3
+
+        if position == -1:
+            tp_levels = [
+                # entry_price - 0.4 * tp_dist,
+                # entry_price - 0.6 * tp_dist,
+                # entry_price - 0.8 * tp_dist
+                entry_price - 0.236 * tp_dist,
+                entry_price - 0.382 * tp_dist,
+                entry_price - 0.618 * tp_dist,
+                entry_price - 0.786 * tp_dist
+            ]
+            # sl_price = entry_price + sl_dist - position_size * 0.003 * 2 - position_size * 0.001
+            sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
+            # sl_price = entry_price + sl_dist
+            tp_price = entry_price - tp_dist
+            tp_shares = [0.2, 0.2, 0.2, 0.2]
+
+            for i in range(4):
+                if not partial_tp_hit[i] and price <= tp_levels[i]:
+                    # realized = position_size * tp_shares[i]
+                    # pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
+                    pnl = position_size * tp_shares[i]
+                    # pnl = realized * profit_pct
+                    capital += pnl
+                    daily_pnl += pnl
+                    # invest -= realized
+                    invest -= pnl
+                    position_size -= pnl
+                    position_pct_left -= tp_shares[i]
+                    partial_tp_hit[i] = True
+                    action = 0
+                    reward += 1
+
+            if price <= tp_price or price >= sl_price:
+                partial_tp_hit = [False, False, False, False]
+                # final_pct = (entry_price - price) / entry_price
+                # pnl = position_size * final_pct
+                # capital += pnl
+                # reward += pnl / capital
+                # daily_pnl += pnl
+                # invest = 0
+                # position = 0
+                # position_pct_left = 1.0
+                # partial_tp_hit = [False, False, False, False]
+                if price <= tp_price:
+                    reward += 1
+                    # else:
+                    #     reward -= 1
+                    action = 3
+            # if df['macd_crossover'].iloc[t] == 1:
+            #     # if df['signal'].iloc[t] == 1 and action == 3:
+            #     action = 3
+
+            # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
+            # reward = profit_pct - 0.00075 * 2 - 0.00025
+            # reward += profit_pct - 0.003 * 2 - 0.001
+
+        if action == 3 and position == 1 and df['signal'].iloc[-1] == -1 and entry_price != 0:
         # if action == 3 and position == 1:
             final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
             # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
-            reward = profit_pct - 0.00075 * 2 - 0.00025
+            reward += profit_pct - 0.00075 * 2 - 0.00025
             # if pnl < 2:
             #     reward -= 1
             # if pnl > 2:
@@ -2051,33 +2175,27 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
             knn.add(entry_state, is_win=(final_pct - 0.00075 * 2 - 0.00025 > 0))
             close_old_orders(bybit_symbol)
             in_position = False
+            entry_price = 0
             # print(f"profit_pct: {profit_pct}, pnl: {profit_pct * position_size - position_size * 0.00075 * 2 - position_size * 0.00025}")
 
-        if action == 3 and (position == -1 and df['signal'].iloc[t] == 1):
+        if action == 3 and position == -1 and df['signal'].iloc[t] == 1 and entry_price != 0:
         # if action == 3 and position == -1:
             final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
             # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
-            # reward = profit_pct - 0.00075 * 2 - 0.00025
-            reward = profit_pct - 0.003 * 2 - 0.001
+            reward += profit_pct - 0.00075 * 2 - 0.00025
+            # reward = profit_pct - 0.003 * 2 - 0.001
             # if pnl < 2:
             #     reward -= 1
             # if pnl > 2:
             #     reward += 1
             daily_pnl += profit_pct * position_size - position_size * 0.00075 * 2 - position_size * 0.00025
-            # knn.add(entry_state, is_win=(final_pct - 0.00075 * 2 - 0.00025 > 0))
-            knn.add(entry_state, is_win=(final_pct - 0.003 * 2 - 0.001 > 0))
+            knn.add(entry_state, is_win=(final_pct - 0.00075 * 2 - 0.00025 > 0))
+            # knn.add(entry_state, is_win=(final_pct - 0.003 * 2 - 0.001 > 0))
             close_old_orders(bybit_symbol)
             in_position = False
+            daily_trades += 1
+            entry_price = 0.0
             # print(f"profit_pct: {profit_pct}, pnl: {profit_pct * position_size - position_size * 0.00075 * 2 - position_size * 0.00025}")
-
-        if action == 0 and position != 0:
-            if entry_price == 0.00:
-                profit_pct = 0.00
-            else:
-                profit_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
-            # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
-            # reward = profit_pct - 0.00075 * 2 - 0.00025
-            reward = profit_pct - 0.003 * 2 - 0.001
 
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
@@ -2114,8 +2232,8 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = False
-    test = True
+    train = True
+    test = False
     counter = 0
     # keep_session_alive()
     threading.Thread(target=keep_session_alive).start()
