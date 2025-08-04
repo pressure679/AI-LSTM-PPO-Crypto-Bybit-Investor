@@ -39,11 +39,8 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 
 capital = 1000
 
-# Bybit Demo API Key and Secret - K2OW1k9LlnjeQWYHUK - y3TZKS6KV6Yt5Y4SqdmN6NO8y6htZXiAmUeV
-# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
-# Bybit SubAccount API Key and Secret - UwZ6Br6QwinYJeDcf6 - Nai4QZfKVOU9756IsRpbm1d7gh70RAEwFd4K
-api_key = "UwZ6Br6QwinYJeDcf6"
-api_secret = "Nai4QZfKVOU9756IsRpbm1d7gh70RAEwFd4K"
+api_key = ""
+api_secret = ""
 session = HTTP(
     api_key=api_key,
     api_secret=api_secret,
