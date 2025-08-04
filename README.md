@@ -1,9 +1,7 @@
 # 🧠 LSTM-PPO AI Trading Bot
 
 A deep reinforcement learning bot that uses a custom **LSTM + PPO** (Proximal Policy Optimization) agent to simulate and learn profitable trading behavior on historical OHLC price data.
-
-It does 5-20 operations with avg profit of 0%-30% per day (after transaction costs) and 0-4 trades per symbol per day and has a sharpe ratio of 0.7-1 and sortino ratio of 25-70. Remember to set leverage in Bybit in each crypto pair and XAUTUSDT if you plan to use this program. I have set them to 50. The bot gets from $1000 to $80k to $5 million without leverage in 3 months of training without leverage.
-
+.
 This project is designed to run efficiently on **low-memory machines** (like older laptops or Chromebooks). It features a **custom PPO agent** with an LSTM network for temporal learning, allowing it to detect profitable patterns over time.
 
 If you want to use this yourself you should edit api_key and api_secret to your bybit api key and secret, further instructions are below.
