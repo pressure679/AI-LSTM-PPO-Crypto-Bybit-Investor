@@ -39,7 +39,7 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 
 capital = 1000
 
-# Bybit Demo API Key and Secret - K2OW1k9LlnjeQWYHUK - y3TZKS6KV6Yt5Y4SqdmN6NO8y6htZXiAmUeV
+# Bybit Demo API Key and Secret - 1khTo0Bme2LA3YL4gU - JkDgEjC4O8pIiu9ysMKMiRVITE0Setwjf1I9
 # Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
 # Bybit SubAccount API Key and Secret - UwZ6Br6QwinYJeDcf6 - Nai4QZfKVOU9756IsRpbm1d7gh70RAEwFd4K
 api_key = "UwZ6Br6QwinYJeDcf6"
@@ -270,6 +270,43 @@ def ADX(df, period=14):
 
     return adx, plus_di, minus_di
 
+def detect_order_blocks(df, lookback=50, move_strength=1.5):
+    df = df.copy()
+    blocks = []
+
+    for i in range(lookback, len(df) - 1):
+        current = df.iloc[i]
+        next_candle = df.iloc[i + 1]
+        
+        body_size = abs(current['Close'] - current['Open'])
+        next_body_size = abs(next_candle['Close'] - next_candle['Open'])
+
+        # Bullish order block (red candle followed by strong green move)
+        if current['Close'] < current['Open'] and next_candle['Close'] > next_candle['Open']:
+            if next_body_size > move_strength * body_size:
+                blocks.append({
+                    'Type': 1,
+                    'Index': i,
+                    'Open': current['Open'],
+                    'Close': current['Close'],
+                    'High': current['High'],
+                    'Low': current['Low']
+                })
+
+        # Bearish order block (green candle followed by strong red move)
+        elif current['Close'] > current['Open'] and next_candle['Close'] < next_candle['Open']:
+            if next_body_size > move_strength * body_size:
+                blocks.append({
+                    'Type': -1,
+                    'Index': i,
+                    'Open': current['Open'],
+                    'Close': current['Close'],
+                    'High': current['High'],
+                    'Low': current['Low']
+                })
+
+    return blocks
+
 def get_klines_df(symbol, interval, limit=240):
     if interval == 15:
         limit = 104
@@ -453,9 +490,24 @@ def add_indicators(df):
     # df["Low"]   = df["Low"] / df["Close"] - 1
     # df["Close"] = df["Close"].pct_change().fillna(0)  # as return
 
+    # order_blocks = detect_order_blocks(df)
+    # # print(f"[add_indicators] detected order blocks: {order_blocks}")
+    # df["order_block"] = None
+    # df["order_block_type"] = None
+    # for block in order_blocks:
+    #     # print("Processing block:", block)
+    #     idx = int(block["Index"])
+    #     # if idx not in df.index:
+    #     #     print(f"WARNING: Index {idx} not in DataFrame!")
+    #     #     continue
+    #     df.iloc[idx, df.columns.get_loc('order_block')] = True
+    #     df.iloc[idx, df.columns.get_loc('order_block_type')] = block['Type']
+    # # print(f"[add_indicators] added order blocks to df, len(df): {len(df)}")
+
     # df = df[["Open", "High", "Low", "Close", "EMA_crossover", "EMA_7_28_crossover", "macd_zone", "macd_direction", "BB_SMA", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
     # df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR", "Body_pct_range_z", "Upper_Wick_z", "Lower_Wick_z"]].copy()
     df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR"]].copy()
+    # df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR"]].copy()
     # df = df[["Open", "High", "Low", "Close", "Body_pct_range_z", "Upper_Wick_z", "Lower_Wick_z"]].copy()
 
     df.dropna(inplace=True)
@@ -1263,6 +1315,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
 
     # print(f"Columns in df before slicing: {df.columns.tolist()}")
     # print(f"Number of columns: {df.shape[1]}")
+    print(f"[{symbol}] length of df: {len(df)}")
     for t in range(window_size, len(df) - 1):
         state_seq = df[t - window_size:t].values.astype(np.float32)
         # print(f"XAUUSD df shape: {df.shape}")
@@ -1278,7 +1331,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
         invest = max(capital * 0.05, 15)
 
         position_size = invest
-        leverage = get_max_leverage(position_size, bybit_symbol)
+        # leverage = get_max_leverage(position_size, bybit_symbol)
 
         # tp_raw, sl_raw = agent.sl_tp_forward(state_seq)
         # tp_pct, sl_pct = agent.scale_action(tp_raw, sl_raw, leverage)
@@ -1340,16 +1393,16 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
         # sl_dist = atr * 5
         tp_dist = 0.0
         sl_dist = 0.0
-        if symbol == "XAUUSD":
-            tp_dist = atr * 10
-            sl_dist = atr * 3
-        else:
-            tp_dist = atr * 4.5
-            sl_dist = atr * 1.5
+        # if symbol == "XAUUSD":
+        #     tp_dist = atr * 10
+        #     sl_dist = atr * 3
+        # else:
+        tp_dist = atr * 4.5
+        sl_dist = atr * 1.5
         # sl_dist = atr * 1.5 + position_size * 0.003 * 2 + position_size * 0.001
         # trailing_sl_pct = (atr * 2.25 + position_size * 0.003 * 2 + position_size * 0.001) / price
         # trailing_sl_pct = (atr * 2.25 + position_size * 0.00075 * 2 + position_size * 0.00025) / price
-        trailing_sl_pct = (atr * 2.25) / price
+        trailing_sl_pct = (atr * 1.5) / price
         trailing_sl_hit = False
         # tp_dist = df.iloc[t]['Close'] * 0.0035
         # sl_dist = df.iloc[t]['Close'] * 0.00175
@@ -1362,6 +1415,16 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
         min_price = 0.0
 
         profit_pct = 0.0
+
+        # # Filter only rows where an order block exists
+        # order_blocks = df[df['order_block_type'].notnull()]
+        # Check if there are any order blocks detected
+        # if not order_blocks.empty:
+        #     last_block_type = order_blocks.iloc[t]['order_block_type']
+        #     if last_block_type == 1:
+        #         action = 1  # Buy
+        #     elif last_block_type == -1:
+        #         action = 2 # Sell
 
         # last_ema_crossover == ema_crossover
 
@@ -1445,7 +1508,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # print(f"position size: {position_size}, entry price: {entry_price}, min_qty: {min_qty}, qty_step: {qty_step}")
                 # position_size = calc_order_qty(position_size, entry_price, min_qty, qty_step)
                 entry_price = price
-                capital -= positions_size * 0.00075
+                capital -= position_size * 0.00075
                 # capital -= positions_size * 0.003
                 position = 1
                 partial_tp_hit = [False, False, False, False]
@@ -1522,11 +1585,11 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
                     action = 0
-                    reward += 1
+                    # reward += 1
 
             if price >= tp_price or price <= sl_price:
-                if price >= tp_price:
-                    reward += 1
+                # if price >= tp_price:
+                #     reward += 1
                 # else:
                 #     reward -= 1 
                 action = 3
@@ -1575,7 +1638,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
                     action = 0
-                    reward += 1
+                    # reward += 1
 
             if price <= tp_price or price >= sl_price:
                 # final_pct = (entry_price - price) / entry_price
@@ -1587,8 +1650,8 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # position = 0
                 # position_pct_left = 1.0
                 # partial_tp_hit = [False, False, False, False]
-                if price <= tp_price:
-                    reward += 1
+                # if price <= tp_price:
+                #     reward += 1
                 # else:
                 #     reward -= 1
                 action = 3
@@ -1596,7 +1659,9 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # # if df['signal'].iloc[t] == 1 and action == 3:
             #     action = 3
 
+        # if action == 3 and position == 1 and entry_price != 0:
         if action == 3 and df['signal'].iloc[t] == -1 and position == 1 and entry_price != 0:
+        # if action == 3 and df['signal'].iloc[t] == -1 and position == 1:
         # if action == 3 and entry_price != 0:
         # if action == 3 and position == 1:
             final_pct = 0.0
@@ -1622,7 +1687,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             #     reward += 1
             capital += pnl
             # reward += pnl / capital
-            reward += final_pct - 0.00075 * 2 - 0.00025
+            reward = final_pct - 0.00075 * 2 - 0.00025
             # reward = final_pct - 0.003 * 2 - 0.001
             daily_pnl += pnl
             daily_trades += 1
@@ -1631,13 +1696,14 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             entry_price = 0.0
             position = 0
             in_position = False
-            daily_trades += 1
+            # daily_trades += 1
             # print(f"profit_pct: {final_pct}, pnl: {pnl}, position size: {position_size}")
             # if profit_pct < 0.1 / leverage:
             #     reward -= 1
             # else:
             #     reward += 1
 
+        # if action == 3 and position == -1 and entry_price != 0:
         if action == 3 and df['signal'].iloc[t] == 1 and position == -1 and entry_price != 0:
         # if action == 3 and position == -1:
             final_pct = 0.0
@@ -1658,7 +1724,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             #     reward += 1
             capital += pnl
             # reward += pnl / capital
-            reward += final_pct - 0.00075 * 2 - 0.00025
+            reward = final_pct - 0.00075 * 2 - 0.00025
             # reward = final_pct - 0.003 * 2 - 0.001
             daily_pnl += pnl
             daily_trades += 1
@@ -1679,8 +1745,8 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
             # pnl = position_size * profit_pct
             # reward += pnl
-            # reward = profit_pct - 0.00075 * 2 - 0.00025
-            reward += profit_pct - 0.003 * 2 - 0.001
+            reward = profit_pct - 0.00075 * 2 - 0.00025
+            # reward = profit_pct - 0.003 * 2 - 0.001
                 
         # === Store reward and update step ===
         agent.store_transition(state_seq, action, logprob, value, reward)
@@ -1702,7 +1768,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
     knn._fit()
     knn.save()
     print(f"[{symbol}] [INFO] Saved checkpoint at step {save_counter}")
-    print(f"✅ [{symbol}] PPO training complete. Final capital: {capital:.2f}, Total accumulation: {capital/100:.2f}x")
+    print(f"✅ [{symbol}] PPO training complete. Final capital: {capital:.2f}, Total accumulation: {capital/1000:.2f}x")
 
 def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     capital_lock = threading.Lock()
@@ -1728,8 +1794,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     total_qty = 0.0
     sl_price = 0.0
     tp_price = 0.0
-    leverage = 25
-    qty_step, min_qty = get_qty_step(bybit_symbol)
+    leverage = 10
+    # qty_step, min_qty = get_qty_step(bybit_symbol)
     current_day = None
     reward = 0.0
     save_counter = 0
@@ -1755,6 +1821,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     df = None
     profit_pct = 0.0
     partial_tp_hit = []
+    position_pct_left = 1.0
 
     while True:
         wait_until_next_candle(15)
@@ -1806,12 +1873,21 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # print(f"{pos}")
             # print(f"Side: {pos['side']}, Size: {pos['size']}")
 
-
         result = agent.select_action(state_seq, in_position)
         if result is None:
             continue
 
         action, logprob, value = result
+
+                # # Filter only rows where an order block exists
+        # order_blocks = df[df['order_block_type'].notnull()]
+        # # Check if there are any order blocks detected
+        # if not order_blocks.empty:
+        #     last_block_type = order_blocks.iloc[-1]['order_block_type']
+        #     if last_block_type == 1:
+        #         action = 1  # Buy
+        #     elif last_block_type == -1:
+        #         action = 2 # Sell
 
         price = df.iloc[-1]["Close"]
         day = str(df.index[-1]).split(' ')[0]
@@ -1833,8 +1909,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
             current_day = day
             # capital += daily_pnl
 
-            daily_pnl = 0.0
-            daily_trades = 0
+            # daily_pnl = 0.0
+            # daily_trades = 0
             
         # Force close if ADX zone becomes 0
         if df["ADX_zone"].iloc[-1] == 0 and position != 0:
@@ -1862,14 +1938,15 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         # sl_dist = df.iloc[-1]['Close'] * 0.00175
         # trailing_sl_dist = df.iloc[-1]['Close'] * 0.000875
         # trailing_sl_pct = df.iloc[-1]['Close'] * 0.000875 / df.iloc[-1]['Close']
-        tp_dist = 0.0
-        sl_dist = 0.0
-        if symbol == "XAUUSD":
-            tp_dist = atr * 10
-            sl_dist = atr * 3
-        else:
-            tp_dist = atr * 4.5
-            sl_dist = atr * 1.5
+        # tp_dist = 0.0
+        # sl_dist = 0.0
+        # if symbol == "XAUUSD":
+        #     tp_dist = atr * 10
+        #     sl_dist = atr * 3
+        # else:
+        tp_dist = atr * 4.5
+        sl_dist = atr * 1.5
+        # sl_dist = atr * 1.5
         # trailing_sl_dist = atr * 1.5
         trailing_sl_pct = atr * 1.5 / price
 
@@ -2120,7 +2197,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
                     action = 0
-                    reward += 1
+                    # reward += 1
 
             if price >= tp_price or price <= sl_price:
                 partial_tp_hit = [False, False, False, False]
@@ -2134,13 +2211,13 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # position_pct_left = 1.0
                 # partial_tp_hit = [False, False, False, False]
                 if price >= tp_price:
-                    reward += 1
+                    # reward += 1
                     # else:
                     #     reward -= 1
                     action = 3
                 if df['macd_crossover'].iloc[t] == 1:
-                        # if df['signal'].iloc[t] == 1 and action == 3:
-                        action = 3
+                    # if df['signal'].iloc[t] == 1 and action == 3:
+                    action = 3
 
         if position == -1:
             tp_levels = [
@@ -2172,7 +2249,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
                     action = 0
-                    reward += 1
+                    # reward += 1
 
             if price <= tp_price or price >= sl_price:
                 partial_tp_hit = [False, False, False, False]
@@ -2186,7 +2263,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # position_pct_left = 1.0
                 # partial_tp_hit = [False, False, False, False]
                 if price <= tp_price:
-                    reward += 1
+                    # reward += 1
                     # else:
                     #     reward -= 1
                     action = 3
@@ -2202,7 +2279,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         # if action == 3 and position == 1:
             final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
             # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
-            reward += profit_pct - 0.00075 * 2 - 0.00025
+            reward = final_pct - 0.00075 * 2 - 0.00025
             # if pnl < 2:
             #     reward -= 1
             # if pnl > 2:
@@ -2218,7 +2295,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         # if action == 3 and position == -1:
             final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
             # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
-            reward += profit_pct - 0.00075 * 2 - 0.00025
+            reward = final_pct - 0.00075 * 2 - 0.00025
             # reward = profit_pct - 0.003 * 2 - 0.001
             # if pnl < 2:
             #     reward -= 1
@@ -2268,8 +2345,8 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = False
-    test = True
+    train = True
+    test = False
     counter = 0
     # keep_session_alive()
     threading.Thread(target=keep_session_alive).start()
@@ -2289,6 +2366,7 @@ def main():
                 # df = yf_get_ohlc_df(yf_symbol)
             # df = df[['Open', "High", "Low", "Close"]]
             df = add_indicators(df)
+            # print(f"[main] length of df: {len(df)}")
             df['signal'] = generate_signals(df)
             lstm_ppo_agent = LSTMPPOAgent(state_size=23, hidden_size=64, action_size=4)
             counter += 1
