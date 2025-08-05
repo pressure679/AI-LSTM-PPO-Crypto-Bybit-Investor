@@ -1,6 +1,6 @@
 # 🧠 LSTM-PPO AI Trading Bot
 
-A deep reinforcement learning bot that uses a custom **LSTM + PPO** (Proximal Policy Optimization) agent to simulate and learn profitable trading behavior on historical OHLC price data.
+A deep reinforcement learning bot that uses a custom **LSTM + PPO** (Long Short-Term Memory + Proximal Policy Optimization) agent to simulate and learn profitable trading behavior on historical OHLC price data.
 .
 This project is designed to run efficiently on **low-memory machines** (like older laptops or Chromebooks). It features a **custom PPO agent** with an LSTM network for temporal learning, allowing it to detect profitable patterns over time.
 
