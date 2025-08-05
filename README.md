@@ -71,7 +71,8 @@ This bot is based on a **custom LSTM-based PPO agent**, making it suitable for s
    ```bash
    cd AI-LSTM-PPO-Crypto-Bybit-Investor; python lstm-ppo.py
    ```
-
+7. **Stop program**
+   Press Ctrl-C 2-3 times or close the terminal
 ---
 
 ## 🧪 Optional: KNN Reward Filter
