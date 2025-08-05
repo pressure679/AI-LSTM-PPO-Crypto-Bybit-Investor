@@ -82,6 +82,11 @@ A `WinRateKNN` module is included (commented out by default). It filters actions
 ---
 
 ## ✅ Example Output
+```
+[XRPUSD] Day 2025-05-16 - Trades: 2 - Avg Profit: 1868.28, 10.98% - PnL: 1.09% - Balance: 344045.75 - Sharpe: 0.88 - Sortino: 11.27
+[ETHUSD] Day 2025-05-27 - Trades: 6 - Avg Profit: 480.47, 2.68% - PnL: 0.80% - Balance: 360953.31 - Sharpe: 0.83 - Sortino: 8.24
+[XAUUSD] Day 2025-06-12 - Trades: 0 - Avg Profit: 0.00, 0.00% - PnL: 0.00% - Balance: 375799.80 - Sharpe: 1.11 - Sortino: 36.00
+```
 
 ```
 === [BNBUSDT] stats at 2025-08-03 20:45:00 ===
