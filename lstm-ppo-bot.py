@@ -17,6 +17,7 @@ from pybit.unified_trading import WebSocket
 from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics.pairwise import cosine_similarity
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import subprocess
 
 ready_event = threading.Event()
 process_counter = 0
@@ -2133,6 +2134,11 @@ def main():
     test = True
     counter = 0
     threading.Thread(target=keep_session_alive).start()
+
+    subprocess.run(["git", "clone", "https://github.com/pressure679/AI-LSTM-PPO-Crypto-Bybit-Investor.git"])
+    # Pull latest changes in an existing repo
+    subprocess.run(["git", "-C", "~/", "pull"])
+    subprocess.run(["cd AI-LSTM-PPO-Crypto-Bybit-Investor; mkdir LSTM-PPO-saves; mv *XAUUSD.win_rate_knn.pkl LSTM-PPO-saves; mv *XAUUSD.checkpoint.lstm-ppo.pkl LSTM-PPO-saves; mv *XRPUSD.win_rate_knn.pkl LSTM-PPO-saves; mv *XRPUSD.checkpoint.lstm-ppo.pkl LSTM-PPO-saves; mv *BNBUSD.win_rate_knn.pkl LSTM-PPO-saves; mv *BNBUSD.checkpoint.lstm-ppo.pkl LSTM-PPO-saves; mv *ETHUSD.win_rate_knn.pkl LSTM-PPO-saves; mv *ETHUSD.checkpoint.lstm-ppo.pkl LSTM-PPO-saves; mv *BTCUSD.win_rate_knn.pkl LSTM-PPO-saves; mv *BTCUSD.checkpoint.lstm-ppo.pkl LSTM-PPO-saves"])
     
     if train:
         print("Starting training phase...")
