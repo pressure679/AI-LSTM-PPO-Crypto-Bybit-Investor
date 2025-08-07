@@ -2470,8 +2470,8 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = True
-    test = False
+    train = False
+    test = True
     counter = 0
     # keep_session_alive()
     threading.Thread(target=keep_session_alive).start()
