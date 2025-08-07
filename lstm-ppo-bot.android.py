@@ -1751,7 +1751,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     tp_shares = []
     daily_pnl = 0.0
     df = None
-    partial_tp_hit = []
+    partial_tp_hit = [False, False, False]
     position_size = 0.0
     in_position = False
     entry_state = None
@@ -1766,7 +1766,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     price_precision = int(info['priceScale'])
     df = None
     profit_pct = 0.0
-    partial_tp_hit = []
+    partial_tp_hit = [False, False, False]
     position_pct_left = 1.0
     done = False
 
