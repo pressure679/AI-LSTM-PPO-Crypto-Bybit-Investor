@@ -2012,7 +2012,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     # side="Buy",
                     # active_price=str(round(entry_price, price_precision)),
                     # active_price=str(round(entry_price + sl_dist + invest * 0.00075 * 2 + position_size * 0.00025, price_precision)),
-                    active_price=str(round(entry_price, price_precision)),
+                    active_price=str(round(entry_price + entry_price * 0.001, price_precision)),
                     # active_price=str(round(entry_price + sl_dist + position_size * 0.003 * 2 + position_size * 0.001, price_precision)),
                     position_idx=0
                 )
@@ -2100,7 +2100,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     # base_price=str(round(entry_price, price_precision)),
                     # active_price=str(round(entry_price - trailing_sl_dist, price_precision)),
                     # active_price=str(round(entry_price - sl_dist - invest * 0.00075 * 2 - position_size * 0.00025, price_precision)),
-                    active_price=str(round(entry_price, price_precision)),
+                    active_price=str(round(entry_price - entry_price * 0.001, price_precision)),
                     # active_price=str(round(entry_price - sl_dist - position_size * 0.003 * 2 - position_size * 0.001, price_precision)),
                     position_idx=0
                 )
@@ -2332,8 +2332,8 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = True
-    test = False
+    train = False
+    test = True
     counter = 0
     # keep_session_alive()
     threading.Thread(target=keep_session_alive).start()
@@ -2350,17 +2350,17 @@ def main():
             else:
                 df = load_last_mb(symbols[i])
                 # continue
-                # df = yf_get_ohlc_df(yf_symbol)
-                # df = df[['Open', "High", "Low", "Close"]]
-                df = add_indicators(df)
-                # print(f"[main] length of df: {len(df)}")
-                df['signal'] = generate_signals(df)
-                lstm_ppo_agent = LSTMPPOAgent(state_size=24, hidden_size=64, action_size=4)
-                counter += 1
-                # futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
-                t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
-                t.start()
-                test_threads.append(t)
+            # df = yf_get_ohlc_df(yf_symbol)
+            # df = df[['Open', "High", "Low", "Close"]]
+            df = add_indicators(df)
+            # print(f"[main] length of df: {len(df)}")
+            df['signal'] = generate_signals(df)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=24, hidden_size=64, action_size=4)
+            counter += 1
+            # futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            t.start()
+            test_threads.append(t)
         # for future in as_completed(futures):
         #     try:
         #         future.result()
