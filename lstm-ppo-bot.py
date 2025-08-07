@@ -8,6 +8,7 @@ from collections import deque
 from datetime import datetime, timedelta
 import requests
 import threading
+from multiprocessing import Process
 import time
 from decimal import Decimal
 from pybit.unified_trading import HTTP
@@ -16,6 +17,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ready_event = threading.Event()
+process_counter = 0
 
 # import warnings
 # import yfinance as yf
@@ -1382,6 +1384,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
     # agent.loadcheckpoint(symbol)
     capital_lock = threading.Lock()
     global capital
+    global process_counter
     peak_capital = capital
     invest = 0.0
     all_trade_pcts = []
@@ -1469,6 +1472,10 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             if capital < 0:
                 daily_pnl *= -1
             print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.2f}, {avg_profit_per_trade/position_size*100:.2f}% - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.2f} - Sortino: {sor:.2f}")
+            process_counter += 1
+            if process_counter % 5 == 0:
+                print(f"Above is day {process_counter / 5}")
+                print()
             
             current_day = day
 
@@ -2151,46 +2158,46 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 )
                 print(f"[{bybit_symbol}] Entered Buy order")
                 # print(f"trailing sl - entry price: {entry_price}, base price: {entry_price * (1 + 0.000875)}, trailing sl: {entry_price * 0.000875:.2f}")
-                response = session.set_trading_stop(
-                    category="linear",  # or "inverse", depending on your market
-                    symbol=bybit_symbol,
-                    trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
-                    # side="Buy",
-                    # active_price=str(round(entry_price, price_precision)),
-                    # active_price=str(round(entry_price + sl_dist + invest * 0.00075 * 2 + position_size * 0.00025, price_precision)),
-                    active_price=str(round(entry_price + entry_price * 0.001, price_precision)),
-                    # active_price=str(round(entry_price + sl_dist + position_size * 0.003 * 2 + position_size * 0.001, price_precision)),
-                    position_idx=0
-                )
-                tp_levels = [
-                    # entry_price + 0.4 * tp_dist,
-                    # entry_price + 0.6 * tp_dist,
-                    # entry_price + 0.8 * tp_dist
-                    # entry_price + 0.236 * tp_dist,
-                    entry_price + 0.382 * tp_dist,
-                    entry_price + 0.618 * tp_dist,
-                    entry_price + 0.786 * tp_dist
-                ]
-                tp_shares = [0.4, 0.2, 0.2]
-                for i in range(3):
-                    realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
-                    # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
-                    # if pnl == 0:
-                    #     continue
-                    close_side = "Sell" if position == 1 else "Buy"
-                    response = session.place_order(
-                        category="linear",
-                        symbol=bybit_symbol,
-                        side=close_side,  # opposite side to close position
-                        order_type="Limit",
-                        # qty=str(round(pnl, price_precision)),
-                        qty=str(round(realized, price_precision)),
-                        price=str(round(tp_levels[i], price_precision)),
-                        # reduce_only=True,
-                    )
-                    partial_tp_hit = [False, False, False]
-                    # position_pct_left = 1.0
-                #     daily_trades += 1
+                # response = session.set_trading_stop(
+                #     category="linear",  # or "inverse", depending on your market
+                #     symbol=bybit_symbol,
+                #     trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
+                #     # side="Buy",
+                #     # active_price=str(round(entry_price, price_precision)),
+                #     # active_price=str(round(entry_price + sl_dist + invest * 0.00075 * 2 + position_size * 0.00025, price_precision)),
+                #     active_price=str(round(entry_price + entry_price * 0.001, price_precision)),
+                #     # active_price=str(round(entry_price + sl_dist + position_size * 0.003 * 2 + position_size * 0.001, price_precision)),
+                #     position_idx=0
+                # )
+                # tp_levels = [
+                #     # entry_price + 0.4 * tp_dist,
+                #     # entry_price + 0.6 * tp_dist,
+                #     # entry_price + 0.8 * tp_dist
+                #     # entry_price + 0.236 * tp_dist,
+                #     entry_price + 0.382 * tp_dist,
+                #     entry_price + 0.618 * tp_dist,
+                #     entry_price + 0.786 * tp_dist
+                # ]
+                # tp_shares = [0.4, 0.2, 0.2]
+                # for i in range(3):
+                #     realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
+                #     # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                #     # if pnl == 0:
+                #     #     continue
+                #     close_side = "Sell" if position == 1 else "Buy"
+                #     response = session.place_order(
+                #         category="linear",
+                #         symbol=bybit_symbol,
+                #         side=close_side,  # opposite side to close position
+                #         order_type="Limit",
+                #         # qty=str(round(pnl, price_precision)),
+                #         qty=str(round(realized, price_precision)),
+                #         price=str(round(tp_levels[i], price_precision)),
+                #         # reduce_only=True,
+                #     )
+                #     partial_tp_hit = [False, False, False]
+                #     # position_pct_left = 1.0
+                # #     daily_trades += 1
                             
             # if action == 2 and macd_direction == -1 and minus_di > plus_di and bears > 0 and knn.predict_win_rate(state_seq) > 0.9:
             # if action == 2 and knn.predict_win_rate(state_seq) > 0.9 and minus_di > plus_di and bears < 0 and ema_crossover == -1:
@@ -2238,49 +2245,49 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 )
                 print(f"[{bybit_symbol}] Entered Sell order")
                 # print(f"trailing sl - entry price: {entry_price}, base price: {entry_price * (1 - 0.000875)}, trailing sl: {entry_price * 0.000875:.2f}")
-                response = session.set_trading_stop(
-                    category="linear",  # or "inverse", depending on your market
-                    symbol=bybit_symbol,
-                    trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
-                    # base_price=str(round(entry_price - atr * 2.5, price_precision)),
-                    # base_price=str(round(entry_price, price_precision)),
-                    # active_price=str(round(entry_price - trailing_sl_dist, price_precision)),
-                    # active_price=str(round(entry_price - sl_dist - invest * 0.00075 * 2 - position_size * 0.00025, price_precision)),
-                    active_price=str(round(entry_price - entry_price * 0.001, price_precision)),
-                    # active_price=str(round(entry_price - sl_dist - position_size * 0.003 * 2 - position_size * 0.001, price_precision)),
-                    position_idx=0
-                )
-                tp_levels = [
-                    # entry_price - 0.4 * tp_dist,
-                    # entry_price - 0.6 * tp_dist,
-                    # entry_price - 0.8 * tp_dist
-                    # entry_price - 0.236 * tp_dist,
-                    entry_price - 0.382 * tp_dist,
-                    entry_price - 0.618 * tp_dist,
-                    entry_price - 0.786 * tp_dist
-                ]
-                tp_shares = [0.4, 0.2, 0.2]
-                for i in range(3):
-                    realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
-                    # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
-                    # if pnl == 0:
-                    #     continue
-                    close_side = "Sell" if position == 1 else "Buy"
-                    response = session.place_order(
-                        category="linear",
-                        symbol=bybit_symbol,
-                        side=close_side,  # opposite side to close position
-                        order_type="Limit",
-                        # qty=str(round(pnl, price_precision)),
-                        qty=str(round(realized, price_precision)),
-                        price=str(round(tp_levels[i], price_precision)),
-                        # reduce_only=True,
-                        buyLeverage=leverage,
-                        sellLeverage=leverage,
-                    )
-                    partial_tp_hit = [False, False, False]
-                    position_pct_left = 1.0
-                    # daily_trades += 1
+                # response = session.set_trading_stop(
+                #     category="linear",  # or "inverse", depending on your market
+                #     symbol=bybit_symbol,
+                #     trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
+                #     # base_price=str(round(entry_price - atr * 2.5, price_precision)),
+                #     # base_price=str(round(entry_price, price_precision)),
+                #     # active_price=str(round(entry_price - trailing_sl_dist, price_precision)),
+                #     # active_price=str(round(entry_price - sl_dist - invest * 0.00075 * 2 - position_size * 0.00025, price_precision)),
+                #     active_price=str(round(entry_price - entry_price * 0.001, price_precision)),
+                #     # active_price=str(round(entry_price - sl_dist - position_size * 0.003 * 2 - position_size * 0.001, price_precision)),
+                #     position_idx=0
+                # )
+                # tp_levels = [
+                #     # entry_price - 0.4 * tp_dist,
+                #     # entry_price - 0.6 * tp_dist,
+                #     # entry_price - 0.8 * tp_dist
+                #     # entry_price - 0.236 * tp_dist,
+                #     entry_price - 0.382 * tp_dist,
+                #     entry_price - 0.618 * tp_dist,
+                #     entry_price - 0.786 * tp_dist
+                # ]
+                # tp_shares = [0.4, 0.2, 0.2]
+                # for i in range(3):
+                #     realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
+                #     # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                #     # if pnl == 0:
+                #     #     continue
+                #     close_side = "Sell" if position == 1 else "Buy"
+                #     response = session.place_order(
+                #         category="linear",
+                #         symbol=bybit_symbol,
+                #         side=close_side,  # opposite side to close position
+                #         order_type="Limit",
+                #         # qty=str(round(pnl, price_precision)),
+                #         qty=str(round(realized, price_precision)),
+                #         price=str(round(tp_levels[i], price_precision)),
+                #         # reduce_only=True,
+                #         buyLeverage=leverage,
+                #         sellLeverage=leverage,
+                #     )
+                #     partial_tp_hit = [False, False, False]
+                #     position_pct_left = 1.0
+                #     # daily_trades += 1
 
         if action == 0 and position != 0:
             if entry_price == 0.00:
@@ -2477,7 +2484,8 @@ MAX_WORKERS = 5
 def main():
     # global lstm_ppo_agent
     counter = 0
-    test_threads = []
+    threads = []
+    processes = []
     train = False
     test = True
     counter = 0
@@ -2505,19 +2513,34 @@ def main():
             counter += 1
             # futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
             t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            # p = Process(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            # processes.append(p)
+            # p.start()
             t.start()
-            test_threads.append(t)
+            threads.append(t)
+            # p.join()
         # for future in as_completed(futures):
         #     try:
         #         future.result()
         #     except Exception as e:
         #         print(f"Training thread error: {e}")
-    for t in test_threads:
+    for t in threads:
         t.join()
+    # processes[0].start()
+    # processes[1].start()
+    # processes[2].start()
+    # processes[3].start()
+    # processes[4].start()
+    # processes[0].join()
+    # processes[1].join()
+    # processes[2].join()
+    # processes[3].join()
+    # processes[4].join()
 
     # Reset for test phase
     counter = 0
-    test_threads = []
+    # threads = []
+    processes = []
     # check if weekend
     # today = datetime.utcnow().weekday()  # Monday=0 ... Sunday=6
     # is_weekend = today >= 5  # 5 = Saturday, 6 = Sunday
@@ -2533,14 +2556,28 @@ def main():
             lstm_ppo_agent = LSTMPPOAgent(state_size=24, hidden_size=64, action_size=4)
             # futures.append(executor.submit(test_bot, df, lstm_ppo_agent, symbols[i], bybit_symbol))
             t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            # t.start()
             t.start()
-            test_threads.append(t)
+            threads.append(t)
+            # p = Process(target=test_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            # processes.append(p)
         # for future in as_completed(futures):
         #     try:
         #         future.result()
         #     except Exception as e:
         #         print(f"Test thread error: {e}")
-    for t in test_threads:
+    # processes[0].start()
+    # processes[1].start()
+    # processes[2].start()
+    # processes[3].start()
+    # processes[4].start()
+    # processes[0].join()
+    # processes[1].join()
+    # processes[2].join()
+    # processes[3].join()
+    # processes[4].join()
+
+    for t in threads:
         t.join()
 
 main()
