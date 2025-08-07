@@ -69,9 +69,13 @@ This bot is based on a **custom LSTM-based PPO agent**, making it suitable for s
 
 6. **Run training or test**
    ```bash
-   cd AI-LSTM-PPO-Crypto-Bybit-Investor; python lstm-ppo.py
+   cd AI-LSTM-PPO-Crypto-Bybit-Investor; python lstm-ppo-bot.py
    ```
-7. **Stop program**
+   or if on Android:
+   ```
+   cd AI-LSTM-PPO-Crypto-Bybit-Investor; python lstm-ppo-bot.py
+   ```
+8. **Stop program**
    Press Ctrl-C 2-3 times or close the terminal
 ---
 
