@@ -39,8 +39,11 @@ ACTIONS = ['hold', 'long', 'short', 'close']
 
 capital = 1000
 
-api_key = ""
-api_secret = ""
+# Bybit Demo API Key and Secret - 1khTo0Bme2LA3YL4gU - JkDgEjC4O8pIiu9ysMKMiRVITE0Setwjf1I9
+# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
+# Bybit SubAccount API Key and Secret - UwZ6Br6QwinYJeDcf6 - Nai4QZfKVOU9756IsRpbm1d7gh70RAEwFd4K
+api_key = "PoP1ud3PuWajwecc4S"
+api_secret = "z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU"
 session = HTTP(
     api_key=api_key,
     api_secret=api_secret,
@@ -267,42 +270,113 @@ def ADX(df, period=14):
 
     return adx, plus_di, minus_di
 
-def detect_order_blocks(df, lookback=50, move_strength=1.5):
+def Momentum(df, period=14):
+    """
+    Adds a 'momentum' column to the DataFrame based on Rate of Change (ROC).
+
+    Args:
+        df (pd.DataFrame): DataFrame with at least a 'close' column.
+        period (int): Number of periods to calculate momentum over.
+
+    Returns:
+        pd.DataFrame: Original DataFrame with an added 'momentum' column.
+    """
     df = df.copy()
-    blocks = []
+    df['Momentum'] = ((df['Close'] - df['Close'].shift(period)) / df['Close'].shift(period)) * 100
+    return df
+# def detect_order_blocks(df, lookback=50, move_strength=1.5, influence_window=10):
+#     df = df.copy()
+#     df['order_block'] = 0  # Neutral by default
 
-    for i in range(lookback, len(df) - 1):
-        current = df.iloc[i]
-        next_candle = df.iloc[i + 1]
-        
-        body_size = abs(current['Close'] - current['Open'])
-        next_body_size = abs(next_candle['Close'] - next_candle['Open'])
+#     for i in range(lookback, len(df) - 1):
+#         current = df.iloc[i]
+#         next_candle = df.iloc[i + 1]
 
-        # Bullish order block (red candle followed by strong green move)
-        if current['Close'] < current['Open'] and next_candle['Close'] > next_candle['Open']:
-            if next_body_size > move_strength * body_size:
-                blocks.append({
-                    'Type': 1,
-                    'Index': i,
-                    'Open': current['Open'],
-                    'Close': current['Close'],
-                    'High': current['High'],
-                    'Low': current['Low']
-                })
+#         body_size = abs(current['Close'] - current['Open'])
+#         next_body_size = abs(next_candle['Close'] - next_candle['Open'])
 
-        # Bearish order block (green candle followed by strong red move)
-        elif current['Close'] > current['Open'] and next_candle['Close'] < next_candle['Open']:
-            if next_body_size > move_strength * body_size:
-                blocks.append({
-                    'Type': -1,
-                    'Index': i,
-                    'Open': current['Open'],
-                    'Close': current['Close'],
-                    'High': current['High'],
-                    'Low': current['Low']
-                })
+#         # Bullish Order Block
+#         if current['Close'] < current['Open'] and next_candle['Close'] > next_candle['Open']:
+#             if next_body_size > move_strength * body_size:
+#                 for j in range(i + 1, min(i + 1 + influence_window, len(df))):
+#                     df.at[df.index[j], 'order_block'] = 1
 
-    return blocks
+#         # Bearish Order Block
+#         elif current['Close'] > current['Open'] and next_candle['Close'] < next_candle['Open']:
+#             if next_body_size > move_strength * body_size:
+#                 for j in range(i + 1, min(i + 1 + influence_window, len(df))):
+#                     df.at[df.index[j], 'order_block'] = -1
+
+#     return df
+
+# def detect_fvg(df, max_lookback=50):
+#     """
+#     Detects bullish and bearish FVGs in the dataframe and stores:
+#     - fvg_upper
+#     - fvg_lower
+#     - fvg_direction (1 for bullish, -1 for bearish)
+#     - fvg_active (1 if currently in an FVG zone)
+#     """
+#     df['fvg_upper'] = None
+#     df['fvg_lower'] = None
+#     df['fvg_direction'] = 0
+#     df['fvg_active'] = 0
+
+#     for i in range(2, len(df)):
+#         # Bullish FVG: candle2.low > candle0.high
+#         if df['Low'].iloc[i - 1] > df['High'].iloc[i - 3]:
+#             lower = df['High'].iloc[i - 3]
+#             upper = df['Low'].iloc[i - 1]
+
+#             for j in range(i, min(i + max_lookback, len(df))):
+#                 current_low = df['Low'].iloc[j]
+#                 if current_low <= lower:
+#                     break  # gap filled
+
+#                 df.loc[j, 'fvg_upper'] = upper
+#                 df.loc[j, 'fvg_lower'] = lower
+#                 df.loc[j, 'fvg_direction'] = 1
+#                 df.loc[j, 'fvg_active'] = 1
+
+#         # Bearish FVG: candle2.high < candle0.low
+#         elif df['High'].iloc[i - 1] < df['Low'].iloc[i - 3]:
+#             upper = df['Low'].iloc[i - 3]
+#             lower = df['High'].iloc[i - 1]
+
+#             for j in range(i, min(i + max_lookback, len(df))):
+#                 current_high = df['High'].iloc[j]
+#                 if current_high >= upper:
+#                     break  # gap filled
+
+#                 df.loc[j, 'fvg_upper'] = upper
+#                 df.loc[j, 'fvg_lower'] = lower
+#                 df.loc[j, 'fvg_direction'] = -1
+#                 df.loc[j, 'fvg_active'] = 1
+
+#     return df
+
+# def detect_bos(df, lookback=20):
+#     """
+#     Detect Break of Structure (BoS) where price breaks last swing high/low.
+#     Bullish BoS: closes above last swing high
+#     Bearish BoS: closes below last swing low
+#     """
+#     df['bos'] = 0  # 1 = bullish BoS, -1 = bearish BoS
+
+#     for i in range(lookback, len(df)):
+#         recent_highs = df['High'].iloc[i - lookback:i]
+#         recent_lows = df['Low'].iloc[i - lookback:i]
+#         swing_high = recent_highs.max()
+#         swing_low = recent_lows.min()
+
+#         close = df.loc[i, 'Close']
+
+#         if close > swing_high:
+#             df.loc[i, 'bos'] = 1  # Bullish BoS
+#         elif close < swing_low:
+#             df.loc[i, 'bos'] = -1  # Bearish BoS
+
+#     return df
 
 def get_klines_df(symbol, interval, limit=240):
     if interval == 15:
@@ -358,23 +432,23 @@ def add_indicators(df):
     df['EMA_14'] = df['Close'].ewm(span=14).mean()
     df['EMA_28'] = df['Close'].ewm(span=28).mean()
 
-    df['log_return'] = np.log(df['Close'] / df['Close'].shift(1) + 1e-6)
+    # df['log_return'] = np.log(df['Close'] / df['Close'].shift(1) + 1e-6)
 
-    df['Body'] = df['Close'] - df['Open']
-    df['Range'] = df['High'] - df['Low'] + 1e-6  # prevent divide by zero
+    # df['Body'] = df['Close'] - df['Open']
+    # df['Range'] = df['High'] - df['Low'] + 1e-6  # prevent divide by zero
 
-    df['Body_pct_range'] = df['Body'] / df['Range']
+    # df['Body_pct_range'] = df['Body'] / df['Range']
 
-    df['Upper_Wick'] = df['High'] - df[['Open', 'Close']].max(axis=1)
-    df['Lower_Wick'] = df[['Open', 'Close']].min(axis=1) - df['Low']
+    # df['Upper_Wick'] = df['High'] - df[['Open', 'Close']].max(axis=1)
+    # df['Lower_Wick'] = df[['Open', 'Close']].min(axis=1) - df['Low']
 
-    def zscore(series, window=50):
-        return (series - series.rolling(window).mean()) / (series.rolling(window).std() + 1e-6)
+    # def zscore(series, window=50):
+    #     return (series - series.rolling(window).mean()) / (series.rolling(window).std() + 1e-6)
 
-    df['log_return_z'] = zscore(df['log_return'])
-    df['Body_pct_range_z'] = zscore(df['Body_pct_range'])
-    df['Upper_Wick_z'] = zscore(df['Upper_Wick'])
-    df['Lower_Wick_z'] = zscore(df['Lower_Wick'])
+    # df['log_return_z'] = zscore(df['log_return'])
+    # df['Body_pct_range_z'] = zscore(df['Body_pct_range'])
+    # df['Upper_Wick_z'] = zscore(df['Upper_Wick'])
+    # df['Lower_Wick_z'] = zscore(df['Lower_Wick'])
 
     # df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_signal_diff", "macd_histogram", "BB_SMA", "RSI", "ADX", "Bulls", "Bears", "+DI", "-DI", "ATR"]].copy()
     # df = df[["Open", "High", "Low", "Close", "EMA_7", "EMA_14", "EMA_28", "macd_line", "macd_signal", "macd_osma", "bb_sma", "bb_upper", "bb_lower", "RSI", "ADX", "+DI", "-DI", "ATR", "Body_pct_range_z", "Upper_Wick_z", "Lower_Wick_z"]].copy()
@@ -487,25 +561,13 @@ def add_indicators(df):
     # df["Low"]   = df["Low"] / df["Close"] - 1
     # df["Close"] = df["Close"].pct_change().fillna(0)  # as return
 
-    # order_blocks = detect_order_blocks(df)
-    # # print(f"[add_indicators] detected order blocks: {order_blocks}")
-    # df["order_block"] = None
-    # df["order_block_type"] = None
-    # for block in order_blocks:
-    #     # print("Processing block:", block)
-    #     idx = int(block["Index"])
-    #     # if idx not in df.index:
-    #     #     print(f"WARNING: Index {idx} not in DataFrame!")
-    #     #     continue
-    #     df.iloc[idx, df.columns.get_loc('order_block')] = True
-    #     df.iloc[idx, df.columns.get_loc('order_block_type')] = block['Type']
-    # # print(f"[add_indicators] added order blocks to df, len(df): {len(df)}")
+    # df = detect_order_blocks(df)
+    # df = detect_fvg(df)
+    # df = detect_bos(df)
+    df = Momentum(df)
 
-    # df = df[["Open", "High", "Low", "Close", "EMA_crossover", "EMA_7_28_crossover", "macd_zone", "macd_direction", "BB_SMA", "RSI_zone", "ADX_zone", "Bulls", "Bears", "+DI_val", "-DI_val", "ATR"]].copy()
-    # df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR", "Body_pct_range_z", "Upper_Wick_z", "Lower_Wick_z"]].copy()
-    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR"]].copy()
-    # df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR"]].copy()
-    # df = df[["Open", "High", "Low", "Close", "Body_pct_range_z", "Upper_Wick_z", "Lower_Wick_z"]].copy()
+    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR", "Momentum"]].copy()
+    # df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR", "order_block_type"]].copy()
 
     df.dropna(inplace=True)
     ready_event.set()
@@ -534,8 +596,8 @@ def generate_signals(df):
     )
 
     for i in range(len(df)):
-        # if i < 10:        # need at least 10 bars for range filter
-        #     continue
+        if i < 10:        # need at least 10 bars for range filter
+            continue
 
         latest = df.iloc[i]
 
@@ -546,8 +608,8 @@ def generate_signals(df):
         #     continue
 
         # -------------- trend strength check --------------------------
-        # if latest.ADX_zone == 0:
-        #     continue
+        if latest.ADX_zone == 0:
+            continue
 
         # -------------- MACD angle filter -----------------------------
         angle_ok = abs(macd_slope.iloc[i]) > abs(macd_slope_ma_5.iloc[i])
@@ -558,12 +620,20 @@ def generate_signals(df):
         if macd_hook.iloc[i]:
             continue
 
-        if df['macd_crossover'].iloc[i] == 1:
+        # if df['macd_crossover'].iloc[i] == 1:
+        #    signals[i] = 1
+        # df['EMA_crossover'].iloc[i] == 1:
+        if df['macd_signal_diff'].iloc[i] == 1:
+        # if df['order_block'].iloc[i] == 1:
            signals[i] = 1
-        elif df['macd_crossover'].iloc[i] == -1:
+        # elif df['macd_crossover'].iloc[i] == -1:
+        # df['EMA_crossover'].iloc[i] == -1:
+        elif df['macd_signal_diff'].iloc[i] == -1:
+        # elif df['order_block'].iloc[i] == -1:
             signals[i] = -1
         else:
             signals[i] = 0
+
 
         # -------------- directional logic -----------------------------
         # if latest.macd_signal_diff > 0:
@@ -640,10 +710,12 @@ def keep_session_alive():
             break  # If success, break out of loop
         except requests.exceptions.ReadTimeout:
             print(f"[WARN] Timeout on attempt {attempt+1}, retrying...")
-            time.sleep(2)  # wait before retry
+            time.sleep(30)  # wait before retry
+        except requests.exceptions.RequestException as e:
+            print("Request failed:", e)
         finally:
             session = HTTP(api_key=api_key, api_secret=api_secret, demo=False, recv_window=5000, timeout=60)
-            threading.Timer(1500, keep_session_alive).start()
+            threading.Timer(120, keep_session_alive).start()
 
 def get_balance():
     """
@@ -801,6 +873,17 @@ def close_old_orders(symbol):
 
         # tiny pause to let Bybit settle before we yank orders
         time.sleep(0.2)
+def compute_gae(rewards, values, dones, gamma=0.99, lam=0.95):
+    advantages = []
+    gae = 0
+    values = np.append(values, 0)  # Bootstrap value after last step
+
+    for step in reversed(range(len(rewards))):
+        delta = rewards[step] + gamma * values[step + 1] * (1 - dones[step]) - values[step]
+        gae = delta + gamma * lam * (1 - dones[step]) * gae
+        advantages.insert(0, gae)
+    return np.array(advantages)
+
 class LSTMPPOAgent:
     def __init__(self, state_size, hidden_size, action_size, lr=1e-3, gamma=0.95, clip_ratio=0.2):
         self.state_size = state_size
@@ -809,6 +892,9 @@ class LSTMPPOAgent:
         self.lr = lr
         self.gamma = gamma
         self.clip_ratio = clip_ratio
+        self.train_epochs = 5
+        self.batch_size = 32
+        self.entropy_coef = 0.01
 
         # Initialize weights
         self.model = {
@@ -896,7 +982,7 @@ class LSTMPPOAgent:
 
             # Handle invalid probabilities
             if np.any(np.isnan(probs)) or np.sum(probs) == 0:
-                print("⚠️ Warning: NaN or zero-sum probabilities. Using uniform distribution.")
+                # print("⚠️ Warning: NaN or zero-sum probabilities. Using uniform distribution.")
                 probs = np.ones(self.action_size) / self.action_size
 
             probs = probs / np.sum(probs)  # Normalize again just in case
@@ -936,8 +1022,8 @@ class LSTMPPOAgent:
             # print(f"❌ select_action error: {e}")
             return None
 
-    def store_transition(self, state_seq, action, logprob, value, reward):
-        self.trajectory.append((state_seq, action, logprob, value, reward))
+    def store_transition(self, state_seq, action, logprob, value, reward, done):
+        self.trajectory.append((state_seq, action, logprob, value, reward, done))
 
     def store_reward(self, reward):
         if self.trajectory:
@@ -952,35 +1038,132 @@ class LSTMPPOAgent:
             discounted.insert(0, R)
         return discounted
 
-    def train(self):
-            # print("🚨 Trajectory buffer is empty, skipping training step.")
-        # Unpack trajectory
-        # states, actions, logprobs_old, values, rewards = None, None, None, None, None
+    def update_policy_and_value(self, states_seq, actions, old_action_probs, advantages, returns, lr=1e-3, epsilon=0.1):
+        for i in range(len(states_seq)):
+            state_seq = states_seq[i]
+            action = actions[i]
+            old_prob = old_action_probs[i]
+            advantage = advantages[i]
+            target_value = returns[i]
+
+            # Initialize LSTM hidden state
+            h = np.zeros((self.hidden_size, 1))
+
+            # Forward pass through LSTM for the state sequence
+            for x in state_seq:
+                x = np.array(x, dtype=np.float32).reshape(self.state_size, 1)
+                z = np.dot(self.model['Wx'], x) + np.dot(self.model['Wh'], h) + self.model['b'].reshape(-1, 1)
+                # LSTM gates split
+                i_gate = self.sigmoid(z[0:self.hidden_size])
+                f_gate = self.sigmoid(z[self.hidden_size:2*self.hidden_size])
+                o_gate = self.sigmoid(z[2*self.hidden_size:3*self.hidden_size])
+                g_gate = np.tanh(z[3*self.hidden_size:4*self.hidden_size])
+
+                # LSTM cell state update (you might want to maintain c state if you have it, here simplified)
+                c = f_gate * np.zeros_like(h) + i_gate * g_gate  # Assume c initialized as zeros for simplicity
+                h = o_gate * np.tanh(c)
+
+            # Policy logits and probabilities
+            logits = np.dot(self.model['W_policy'], h) + self.model['b_policy'].reshape(-1, 1)
+            probs = self.softmax(logits.flatten())
+            new_prob = probs[action]
+
+            # Value prediction
+            value = (np.dot(self.model['W_value'], h) + self.model['b_value']).item()
+
+            # Value loss gradient
+            v_error = value - target_value
+            grad_W_value = v_error * h.T
+            grad_b_value = v_error
+
+            # PPO policy loss gradient
+            ratio = new_prob / (old_prob + 1e-10)
+            clipped_ratio = np.clip(ratio, 1 - epsilon, 1 + epsilon)
+            policy_grad_coef = -min(ratio * advantage, clipped_ratio * advantage)
+
+            grad_logits = probs.copy()
+            grad_logits[action] -= 1  # dSoftmax cross-entropy grad
+            grad_logits *= policy_grad_coef
+
+            grad_W_policy = np.dot(grad_logits.reshape(-1, 1), h.T)
+            grad_b_policy = grad_logits.reshape(-1, 1)
+
+            # Gradient descent update
+            self.model['W_policy'] -= lr * grad_W_policy
+            self.model['b_policy'] -= lr * grad_b_policy.flatten()
+            self.model['W_value'] -= lr * grad_W_value
+            self.model['b_value'] -= lr * grad_b_value
+
+    def ppo_policy_loss(self, old_probs, new_probs, advantages, epsilon=0.1):
+        old_probs = np.array(old_probs)
+        new_probs = np.array(new_probs)
+        advantages = np.array(advantages)
+        
+        ratios = new_probs / (old_probs + 1e-10)
+        clipped = np.clip(ratios, 1 - epsilon, 1 + epsilon)
+        loss = -np.mean(np.minimum(ratios * advantages, clipped * advantages))
+        return loss
+    def value_loss(self, values, returns):
+        values = np.array(values)
+        returns = np.array(returns)
+        return 0.5 * np.mean((returns - values) ** 2)
+
+    def train(self, epochs=4):
         if self.trajectory:
-            states, actions, logprobs_old, values, rewards = zip(*self.trajectory)
-            # states, actions, logprobs_old, values = zip(*self.trajectory)
-            # self.trajectory.clear()
+            # Unpack trajectory
+            states, actions, logprobs_old, values, rewards, dones = zip(*self.trajectory)
 
-            # Compute advantages
-            returns = self._discount_rewards(rewards)
-            advantages = np.array(returns) - np.array(values)
+            # Convert to arrays
+            values = np.array(values)
+            rewards = np.array(rewards)
 
-            # PPO update (simplified without real gradients)
-            for i in range(len(states)):
-                state_seq = states[i]
-                action = actions[i]
-                old_logprob = logprobs_old[i]
-                advantage = advantages[i]
+            # Normalize rewards
+            rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
 
-                probs, _ = self.forward(state_seq)
-                logprob = np.log(probs[action] + 1e-8)
-                ratio = np.exp(logprob - old_logprob)
-                clipped = np.clip(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio)
-                loss = -min(ratio * advantage, clipped * advantage)
+            # Compute GAE
+            advantages = compute_gae(rewards, values, dones, gamma=0.95, lam=0.95)
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)  # Normalize advantages
+            returns = advantages + values
 
-                # Simple weight update (pretend gradient descent)
-                for k in self.model:
-                    self.model[k] -= self.lr * loss  # This is just placeholder logic
+            # Clip returns and values
+            returns = np.clip(returns, -1000, 1000)
+            values = np.clip(values, -1000, 1000)
+            advantages = np.clip(advantages, -10, 10)
+
+            # Train for multiple epochs (optional)
+            for _ in range(epochs):
+                for i in range(len(states)):
+                    state_seq = states[i]
+                    action = actions[i]
+                    old_logprob = logprobs_old[i]
+                    advantage = advantages[i]
+                    target_value = returns[i]
+
+                    # Forward pass
+                    probs, value = self.forward(state_seq)
+
+                    # Entropy bonus
+                    entropy = -np.sum(probs * np.log(probs + 1e-8))
+
+                    # Policy loss
+                    logprob = np.log(probs[action] + 1e-8)
+                    ratio = np.exp(logprob - old_logprob)
+                    clipped_ratio = np.clip(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio)
+                    policy_loss = -min(ratio * advantage, clipped_ratio * advantage)
+
+                    # Value loss
+                    v_loss = 0.5 * ((target_value - value) ** 2)
+
+                    # Total loss
+                    loss = policy_loss + 0.5 * v_loss - 0.01 * entropy
+
+                    # Gradient descent step (simplified)
+                    for k in self.model:
+                        self.model[k] -= self.lr * loss
+                        self.model[k] = np.clip(self.model[k], -1000, 1000)  # Clamp weights
+
+                self.trajectory.clear()
+
 
     def savecheckpoint(self, symbol):
         os.makedirs("LSTM-PPO-saves", exist_ok=True)
@@ -998,80 +1181,6 @@ class LSTMPPOAgent:
         latest = os.path.join("LSTM-PPO-saves", files[-1])
         with open(latest, "rb") as f:
             self.model = pickle.load(f)
-
-def update_policy_and_value(agent, states_seq, actions, old_action_probs, advantages, returns, lr=1e-3, epsilon=0.1):
-    for i in range(len(states_seq)-1):
-        if i >= len(advantages):
-            continue
-        state_seq = states_seq[i]
-        action = actions[i]
-        old_prob = old_action_probs[i]
-        advantage = advantages[i]
-        target_value = returns[i]
-
-        # Forward pass
-        h = np.zeros((agent.hidden_size, 1))
-        for x in state_seq:
-            if isinstance(x, float): continue
-            x = x.reshape(agent.state_size, 1)
-            h = np.tanh(np.dot(agent.model['Wx'], x) + np.dot(agent.model['Wh'], h) + agent.model['b'])
-
-        logits = np.dot(agent.model['Why_pi'], h) + agent.model['by_pi']
-        probs = agent._softmax(logits).flatten()
-        new_prob = probs[action]
-
-        value = np.dot(agent.model['Why_v'], h) + agent.model['by_v']
-        value = value.item()
-
-        # Compute gradients for value loss
-        v_error = value - target_value
-        grad_Why_v = v_error * h.T
-        grad_by_v = v_error
-
-        # Compute gradients for policy loss
-        ratio = new_prob / (old_prob + 1e-10)
-        clipped_ratio = np.clip(ratio, 1 - epsilon, 1 + epsilon)
-        policy_grad_coef = -min(ratio * advantage, clipped_ratio * advantage)
-
-        grad_logits = probs.copy()
-        grad_logits[action] -= 1  # dSoftmax cross-entropy
-        grad_logits *= policy_grad_coef
-
-        grad_Why_pi = np.dot(grad_logits.reshape(-1, 1), h.T)
-        grad_by_pi = grad_logits.reshape(-1, 1)
-
-        # Update parameters
-        agent.model['Why_pi'] -= lr * grad_Why_pi
-        agent.model['by_pi'] -= lr * grad_by_pi
-        agent.model['Why_v'] -= lr * grad_Why_v
-        agent.model['by_v'] -= lr * grad_by_v
-
-def compute_gae(rewards, values, gamma=0.95, lam=0.95):
-    advantages = []
-    returns = []
-    gae = 0
-    next_value = 0  # Value after the last step (bootstrap)
-    
-    for t in reversed(range(len(rewards))):
-        delta = rewards[t] + gamma * next_value - values[t]
-        gae = delta + gamma * lam * gae
-        advantages.insert(0, gae)
-        next_value = values[t]
-        returns.insert(0, gae + values[t])
-    
-    # Normalize advantages
-    advantages = np.array(advantages)
-    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-    
-    return np.array(advantages), np.array(returns)
-
-def ppo_policy_loss(old_probs, new_probs, advantages, epsilon=0.1):
-    ratios = new_probs / (old_probs + 1e-10)  # Avoid div by zero
-    clipped = np.clip(ratios, 1 - epsilon, 1 + epsilon)
-    loss = -np.mean(np.minimum(ratios * advantages, clipped * advantages))
-    return loss
-def value_loss(values, returns):
-    return 0.5 * np.mean((returns - values) ** 2)
 
 
 class WinRateKNN:
@@ -1135,7 +1244,7 @@ class WinRateKNN:
         # Safety check
         k_neighbors = max(1, min(self.k, len(self.states)))
 
-        self.model = NearestNeighbors(n_neighbors=k_neighbors)
+        self.model = NearestNeighbors(n_neighbors=k_neighbors, algorithm="kd_tree")
         self.model.fit(self.states)
 
     def predict_win_rate(self, state_seq, k_near=5, k_far=5):
@@ -1234,15 +1343,6 @@ def sortino_ratio(returns, risk_free_rate=0.0):
     
     return (mean_ret - risk_free_rate) / downside_std
 
-# def sortino_ratio(returns, risk_free_rate=0.0):
-#     mean_ret = np.mean(returns)
-#     downside_returns = [r for r in returns if r < risk_free_rate]
-#     if len(downside_returns) == 0:
-#         return 0
-#     downside_std = np.std(downside_returns)
-#     if downside_std == 0:
-#         return 0
-#     return (mean_ret - risk_free_rate) / downside_std
 def calculate_position_size(balance, risk_pct, sl_dist, leverage, min_qty):
     risk_amount = max(balance * risk_pct, 15)
     position_size = risk_amount * leverage / sl_dist
@@ -1309,10 +1409,11 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
     qty_step = float(info['lotSizeFilter']['qtyStep'])  # Minimum qty increment
     min_qty = float(info['lotSizeFilter']['minOrderQty'])  # Minimum allowed qty
     price_precision = int(info['priceScale'])
+    done = False
 
     # print(f"Columns in df before slicing: {df.columns.tolist()}")
     # print(f"Number of columns: {df.shape[1]}")
-    print(f"[{symbol}] length of df: {len(df)}")
+    # print(f"[{symbol}] length of df: {len(df)}")
     for t in range(window_size, len(df) - 1):
         state_seq = df[t - window_size:t].values.astype(np.float32)
         # print(f"XAUUSD df shape: {df.shape}")
@@ -1388,19 +1489,22 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 
         # tp_dist = atr * 10
         # sl_dist = atr * 5
-        tp_dist = 0.0
-        sl_dist = 0.0
+        # tp_dist = 0.0
+        # sl_dist = 0.0
         # if symbol == "XAUUSD":
         #     tp_dist = atr * 10
         #     sl_dist = atr * 3
         # else:
-        tp_dist = atr * 4.5
-        sl_dist = atr * 1.5
+        # tp_dist = atr * 4.5
+        # sl_dist = atr * 1.5
+        tp_dist = price * 0.05
+        sl_dist = price * 0.025
         # sl_dist = atr * 1.5 + position_size * 0.003 * 2 + position_size * 0.001
         # trailing_sl_pct = (atr * 2.25 + position_size * 0.003 * 2 + position_size * 0.001) / price
         # trailing_sl_pct = (atr * 2.25 + position_size * 0.00075 * 2 + position_size * 0.00025) / price
-        trailing_sl_pct = (atr * 1.5) / price
-        trailing_sl_hit = False
+        # trailing_sl_pct = (atr * 1.5) / price
+        trailing_sl_pct = price * 0.025
+        # trailing_sl_hit = False
         # tp_dist = df.iloc[t]['Close'] * 0.0035
         # sl_dist = df.iloc[t]['Close'] * 0.00175
         # trailing_sl_dist = df.iloc[t]['Close'] * 0.000875
@@ -1485,8 +1589,9 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
             # if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
             # if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and minus_di < plus_di and ema_crossover == 1:
+            # if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and df['signal'].iloc[t] == 1 and df['Momentum'].iloc[t] < 0.1:
             if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and df['signal'].iloc[t] == 1:
-            # if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and df['signal'].iloc[t] == 1:
+            # if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and df['macd_signal_diff'].iloc[t] == 1:
             # if action == 1 and knn.predict_win_rate(state_seq) > 0.9:
                 entry_state = state_seq
                 entry_price = price
@@ -1497,7 +1602,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 #     print(f"investment amount under minimum, ${invest:.2f}, waiting until amount is free")
                 #     break
                 invest = max(capital * 0.05, 15)
-                position_size = invest
+                position_size = invest * 10
                 # leverage = get_max_leverage(position_size, bybit_symbol)
                 # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
                 # print(f"position size: {position_size}")
@@ -1508,7 +1613,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 capital -= position_size * 0.00075
                 # capital -= positions_size * 0.003
                 position = 1
-                partial_tp_hit = [False, False, False, False]
+                partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
                 in_position = True
                 # daily_trades += 1
@@ -1517,6 +1622,8 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # elif action == 2 and macd_direction == -1 and minus_di > plus_di and bears > 0  and knn.predict_win_rate(state_seq) > 0.9:
             # if action == 2 and knn.predict_win_rate(state_seq) > 0.9:
             # if action == 2 and knn.predict_win_rate(state_seq) > 0.9 and minus_di > plus_di and ema_crossover == -1:
+            # if action == 2 and knn.predict_win_rate(state_seq) > 0.9 and df['macd_signal_diff'].iloc[t] == -1:
+            # if action == 2 and knn.predict_win_rate(state_seq) > 0.9 and df['signal'].iloc[t] == -1 and df['Momentum'].iloc[t] > 0.9:
             if action == 2 and knn.predict_win_rate(state_seq) > 0.9 and df['signal'].iloc[t] == -1:
             # if action == 2 and knn.predict_win_rate(state_seq) > 0.9:
                 entry_state = state_seq
@@ -1539,7 +1646,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 capital -= position_size * 0.00075
                 # capital -= position_size * 0.003
                 position = -1
-                partial_tp_hit = [False, False, False, False]
+                partial_tp_hit = [False, False, False]
                 position_pct_left = 1.0
                 in_position = True
 
@@ -1558,17 +1665,17 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # entry_price + 0.4 * tp_dist,
                 # entry_price + 0.6 * tp_dist,
                 # entry_price + 0.8 * tp_dist,
-                entry_price + 0.236 * tp_dist,
                 entry_price + 0.382 * tp_dist,
                 entry_price + 0.618 * tp_dist,
                 entry_price + 0.786 * tp_dist,
             ]
             # sl_price = entry_price - sl_dist + position_size * 0.003 * 2 + position_size * 0.001
-            sl_price = entry_price - sl_dist + position_size * 0.00075 * 2 + position_size * 0.00025
+            # sl_price = entry_price - sl_dist + position_size * 0.00075 * 2 + position_size * 0.00025
+            sl_price = entry_price - sl_dist
             tp_price = entry_price + tp_dist
-            tp_shares = [0.2, 0.2, 0.2, 0.2]
+            tp_shares = [0.4, 0.2, 0.2]
 
-            for i in range(4):
+            for i in range(3):
                 if not partial_tp_hit[i] and price >= tp_levels[i]:
                     # realized = position_size * tp_shares[i]
                     # pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
@@ -1577,16 +1684,16 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     capital += pnl
                     daily_pnl += pnl
                     # invest -= realized
-                    invest -= pnl
+                    # invest -= pnl
                     position_size -= pnl
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
                     action = 0
-                    # reward += 1
+                    reward += 1
 
             if price >= tp_price or price <= sl_price:
-                # if price >= tp_price:
-                #     reward += 1
+                if price >= tp_price:
+                    reward += 1
                 # else:
                 #     reward -= 1 
                 action = 3
@@ -1610,7 +1717,6 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # entry_price - 0.4 * tp_dist,
                 # entry_price - 0.6 * tp_dist,
                 # entry_price - 0.8 * tp_dist
-                entry_price - 0.236 * tp_dist,
                 entry_price - 0.382 * tp_dist,
                 entry_price - 0.618 * tp_dist,
                 entry_price - 0.786 * tp_dist
@@ -1619,9 +1725,9 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
             # sl_price = entry_price + sl_dist
             tp_price = entry_price - tp_dist
-            tp_shares = [0.2, 0.2, 0.2, 0.2]
+            tp_shares = [0.4, 0.2, 0.2]
 
-            for i in range(4):
+            for i in range(3):
                 if not partial_tp_hit[i] and price <= tp_levels[i]:
                     # realized = position_size * tp_shares[i]
                     # pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
@@ -1630,12 +1736,12 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     capital += pnl
                     daily_pnl += pnl
                     # invest -= realized
-                    invest -= pnl
+                    # invest -= pnl
                     position_size -= pnl
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
                     action = 0
-                    # reward += 1
+                    reward += 1
 
             if price <= tp_price or price >= sl_price:
                 # final_pct = (entry_price - price) / entry_price
@@ -1647,8 +1753,8 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # position = 0
                 # position_pct_left = 1.0
                 # partial_tp_hit = [False, False, False, False]
-                # if price <= tp_price:
-                #     reward += 1
+                if price <= tp_price:
+                    reward += 1
                 # else:
                 #     reward -= 1
                 action = 3
@@ -1663,16 +1769,15 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
         # if action == 3 and position == 1:
             final_pct = 0.0
             # if trailing_sl_hit:
-            #     # final_pct = (min_price + position_size * 0.003 * 2 + position_size * 0.001)  * (1 - trailing_sl_pct) / entry_price
+            #     final_pct = (min_price + position_size * 0.00075 * 2 + position_size * 0.00025)  * (1 - trailing_sl_pct) / entry_price
+            # else:
+            final_pct = (entry_price - price) / entry_price
             #     # final_pct = (max_price + position_size * 0.00075 * 2 + position_size * 0.00025) * (1 - trailing_sl_pct) / entry_price
             #     if entry_price == 0:
             #         final_pct = (entry_price - min_price) / (entry_price + 1e-6)
-            #     else:
-            #         final_pct = (entry_price - min_price) / entry_price
             # else:
             #     final_pct = (price - entry_price) / (entry_price + 1e-6) if position == 1 else (entry_price - price) / (entry_price + 1e-6)
-
-            final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
+            # final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
             # capital -= position_size * 0.003 * 2
             capital -= position_size * 0.00075
             pnl = position_size * final_pct - position_size * 0.00075 * 2 - 0.00025 * position_size
@@ -1684,15 +1789,17 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             #     reward += 1
             capital += pnl
             # reward += pnl / capital
-            reward = final_pct - 0.00075 * 2 - 0.00025
+            reward += final_pct - 0.00075 * 2 - 0.00025
+            # print(f"[{symbol}] final pct: {final_pct}")
             # reward = final_pct - 0.003 * 2 - 0.001
             daily_pnl += pnl
             daily_trades += 1
             # knn.add(entry_state, is_win=(final_pct - 0.003 * 2 - 0.001 > 0))
-            knn.add(entry_state, is_win=(final_pct - 0.00075 * 2 - 0.00025 > 0))
+            knn.add(entry_state, is_win=(final_pct - 0.00075 * 2 - 0.00025 > 0.00))
             entry_price = 0.0
             position = 0
             in_position = False
+            done = True
             # daily_trades += 1
             # print(f"profit_pct: {final_pct}, pnl: {pnl}, position size: {position_size}")
             # if profit_pct < 0.1 / leverage:
@@ -1701,15 +1808,16 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             #     reward += 1
 
         # if action == 3 and position == -1 and entry_price != 0:
+        # if action == 3 and df['macd_signal_diff'].iloc[t] == 1 and position == -1 and entry_price != 0:
         if action == 3 and df['signal'].iloc[t] == 1 and position == -1 and entry_price != 0:
         # if action == 3 and position == -1:
             final_pct = 0.0
             # if trailing_sl_hit:
-                # final_pct = (max_price + position_size * 0.003 * 2 + position_size * 0.001) * (1 - trailing_sl_pct) / entry_price
-                # final_pct = (max_price + position_size * 0.00075 * 2 + position_size * 0.00025) * (1 - trailing_sl_pct) / entry_price
-                # final_pct = (max_price - entry_price) / entry_price 
+            #     final_pct = (max_price + position_size * 0.003 * 2 + position_size * 0.001) * (1 - trailing_sl_pct) / entry_price
             # else:
             final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
+                # final_pct = (max_price + position_size * 0.00075 * 2 + position_size * 0.00025) * (1 - trailing_sl_pct) / entry_price
+                # final_pct = (max_price - entry_price) / entry_price 
             capital -= position_size * 0.00075
             # capital -= position_size * 0.003
             pnl = position_size * final_pct - position_size * 0.00075 * 2 - 0.00025 * position_size
@@ -1721,16 +1829,18 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             #     reward += 1
             capital += pnl
             # reward += pnl / capital
-            reward = final_pct - 0.00075 * 2 - 0.00025
+            reward += final_pct - 0.00075 * 2 - 0.00025
+            # print(f"[{symbol}] final pct: {final_pct}")
             # reward = final_pct - 0.003 * 2 - 0.001
             daily_pnl += pnl
             daily_trades += 1
-            knn.add(entry_state, is_win=(final_pct - 0.00025 * 2 - 0.00075 > 0))
+            knn.add(entry_state, is_win=(final_pct - 0.00025 * 2 - 0.00075 > 0.00))
             # knn.add(entry_state, is_win=(final_pct - 0.003 * 2 - 0.001 > 0))
             entry_price = 0.0
             position = 0
             in_position = False
             daily_trades += 1
+            done = True
             # print(f"profit_pct: {final_pct}, pnl: {pnl}, position size: {position_size}")
             # if profit_pct < 0.1 / leverage:
             #     reward -= 1
@@ -1742,14 +1852,15 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
             # pnl = position_size * profit_pct
             # reward += pnl
-            reward = profit_pct - 0.00075 * 2 - 0.00025
+            reward += profit_pct - 0.00075 * 2 - 0.00025
             # reward = profit_pct - 0.003 * 2 - 0.001
                 
         # === Store reward and update step ===
-        agent.store_transition(state_seq, action, logprob, value, reward)
+        agent.store_transition(state_seq, action, logprob, value, reward, done)
         save_counter += 1
         reward = 0
         trailing_sl_hit = False
+        done = False
         # if save_counter % 10080 == 0:
         if save_counter % 672 == 0:
             # begun = True
@@ -1819,6 +1930,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     profit_pct = 0.0
     partial_tp_hit = []
     position_pct_left = 1.0
+    done = False
 
     while True:
         wait_until_next_candle(15)
@@ -1941,11 +2053,14 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         #     tp_dist = atr * 10
         #     sl_dist = atr * 3
         # else:
-        tp_dist = atr * 4.5
-        sl_dist = atr * 1.5
+        # tp_dist = atr * 4.5
+        # sl_dist = atr * 1.5
+        tp_dist = price * 0.05
+        sl_dist = price * 0.025
         # sl_dist = atr * 1.5
         # trailing_sl_dist = atr * 1.5
-        trailing_sl_pct = atr * 1.5 / price
+        # trailing_sl_pct = atr * 1.5 / price
+        trailing_sl_pct = price * 0.025
 
         # if df['EMA_7_28_crossover'].iloc[-1] == 1 and df['EMA_7_28_crossover'].iloc[-2] == -1:
         #     position_size = calculate_position_size(capital, 0.05, entry_price, df.iloc[-1]['Close'] * 0.0005, 50)
@@ -2020,7 +2135,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     symbol=bybit_symbol,
                     side="Buy",
                     order_type="Market",
-                    qty=str(round(position_size, price_precision)),
+                    qty=str(round(position_size, 6)),
                     reduce_only=False,
                     buyLeverage=leverage,
                     sellLeverage=leverage,
@@ -2034,7 +2149,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
                     # side="Buy",
                     # active_price=str(round(entry_price, price_precision)),
-                    active_price=str(round(entry_price + sl_dist + position_size * 0.00075 * 2 + position_size * 0.00025, price_precision)),
+                    # active_price=str(round(entry_price + sl_dist + invest * 0.00075 * 2 + position_size * 0.00025, price_precision)),
+                    active_price=str(round(entry_price, price_precision)),
                     # active_price=str(round(entry_price + sl_dist + position_size * 0.003 * 2 + position_size * 0.001, price_precision)),
                     position_idx=0
                 )
@@ -2042,13 +2158,13 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     # entry_price + 0.4 * tp_dist,
                     # entry_price + 0.6 * tp_dist,
                     # entry_price + 0.8 * tp_dist
-                    entry_price + 0.236 * tp_dist,
+                    # entry_price + 0.236 * tp_dist,
                     entry_price + 0.382 * tp_dist,
                     entry_price + 0.618 * tp_dist,
                     entry_price + 0.786 * tp_dist
                 ]
-                tp_shares = [0.2, 0.2, 0.2, 0.2]
-                for i in range(4):
+                tp_shares = [0.4, 0.2, 0.2]
+                for i in range(3):
                     realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
                     # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
                     # if pnl == 0:
@@ -2064,7 +2180,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                         price=str(round(tp_levels[i], price_precision)),
                         # reduce_only=True,
                     )
-                    partial_tp_hit = [False, False, False, False]
+                    partial_tp_hit = [False, False, False]
                     # position_pct_left = 1.0
                 #     daily_trades += 1
                             
@@ -2106,7 +2222,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     symbol=bybit_symbol,
                     side="Sell",
                     order_type="Market",
-                    qty=str(round(position_size, price_precision)),
+                    qty=str(round(position_size, 6)),
                     reduce_only=False,
                     buyLeverage=leverage,
                     sellLeverage=leverage,
@@ -2121,7 +2237,8 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     # base_price=str(round(entry_price - atr * 2.5, price_precision)),
                     # base_price=str(round(entry_price, price_precision)),
                     # active_price=str(round(entry_price - trailing_sl_dist, price_precision)),
-                    active_price=str(round(entry_price - sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025, price_precision)),
+                    # active_price=str(round(entry_price - sl_dist - invest * 0.00075 * 2 - position_size * 0.00025, price_precision)),
+                    active_price=str(round(entry_price, price_precision)),
                     # active_price=str(round(entry_price - sl_dist - position_size * 0.003 * 2 - position_size * 0.001, price_precision)),
                     position_idx=0
                 )
@@ -2129,12 +2246,12 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     # entry_price - 0.4 * tp_dist,
                     # entry_price - 0.6 * tp_dist,
                     # entry_price - 0.8 * tp_dist
-                    entry_price - 0.236 * tp_dist,
+                    # entry_price - 0.236 * tp_dist,
                     entry_price - 0.382 * tp_dist,
                     entry_price - 0.618 * tp_dist,
                     entry_price - 0.786 * tp_dist
                 ]
-                tp_shares = [0.2, 0.2, 0.2, 0.2]
+                tp_shares = [0.4, 0.2, 0.2]
                 for i in range(3):
                     realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
                     # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
@@ -2153,7 +2270,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                         buyLeverage=leverage,
                         sellLeverage=leverage,
                     )
-                    partial_tp_hit = [False, False, False, False]
+                    partial_tp_hit = [False, False, False]
                     position_pct_left = 1.0
                     # daily_trades += 1
 
@@ -2169,22 +2286,23 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # entry_price - 0.4 * tp_dist,
                 # entry_price - 0.6 * tp_dist,
                 # entry_price - 0.8 * tp_dist
-                entry_price - 0.236 * tp_dist,
+                # entry_price - 0.236 * tp_dist,
                 entry_price - 0.382 * tp_dist,
                 entry_price - 0.618 * tp_dist,
                 entry_price - 0.786 * tp_dist
             ]
             # sl_price = entry_price - sl_dist + position_size * 0.003 * 2 + position_size * 0.001
-            sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
+            # sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
+            sl_price = price + sl_dist
             # sl_price = entry_price + sl_dist
             tp_price = entry_price + tp_dist
-            tp_shares = [0.2, 0.2, 0.2, 0.2]
+            tp_shares = [0.4, 0.2, 0.2]
 
-            for i in range(4):
+            for i in range(3):
                 if not partial_tp_hit[i] and price >= tp_levels[i]:
                     # realized = position_size * tp_shares[i]
-                    # pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
-                    pnl = position_size * tp_shares[i]
+                    pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
+                    # pnl = position_size * tp_shares[i]
                     # pnl = realized * profit_pct
                     # capital += pnl
                     daily_pnl += pnl
@@ -2194,11 +2312,11 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
                     action = 0
-                    # reward += 1
+                    reward += 1
 
             if price >= tp_price or price <= sl_price:
-                partial_tp_hit = [False, False, False, False]
-                # final_pct = (entry_price - price) / entry_price
+                # partial_tp_hit = [False, False, False, False]
+                final_pct = (entry_price - price) / entry_price
                 # pnl = position_size * final_pct
                 # capital += pnl
                 # reward += pnl / capital
@@ -2208,7 +2326,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # position_pct_left = 1.0
                 # partial_tp_hit = [False, False, False, False]
                 if price >= tp_price:
-                    # reward += 1
+                    reward += 1
                     # else:
                     #     reward -= 1
                     action = 3
@@ -2221,22 +2339,23 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # entry_price - 0.4 * tp_dist,
                 # entry_price - 0.6 * tp_dist,
                 # entry_price - 0.8 * tp_dist
-                entry_price - 0.236 * tp_dist,
+                # entry_price - 0.236 * tp_dist,
                 entry_price - 0.382 * tp_dist,
                 entry_price - 0.618 * tp_dist,
                 entry_price - 0.786 * tp_dist
             ]
             # sl_price = entry_price + sl_dist - position_size * 0.003 * 2 - position_size * 0.001
-            sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
+            # sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
+            sl_price = price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
             # sl_price = entry_price + sl_dist
             tp_price = entry_price - tp_dist
-            tp_shares = [0.2, 0.2, 0.2, 0.2]
+            tp_shares = [0.4, 0.2, 0.2]
 
-            for i in range(4):
+            for i in range(3):
                 if not partial_tp_hit[i] and price <= tp_levels[i]:
                     # realized = position_size * tp_shares[i]
-                    # pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
-                    pnl = position_size * tp_shares[i]
+                    pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
+                    # pnl = position_size * tp_shares[i]
                     # pnl = realized * profit_pct
                     capital += pnl
                     daily_pnl += pnl
@@ -2246,10 +2365,10 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     position_pct_left -= tp_shares[i]
                     partial_tp_hit[i] = True
                     action = 0
-                    # reward += 1
+                    reward += 1
 
             if price <= tp_price or price >= sl_price:
-                partial_tp_hit = [False, False, False, False]
+                partial_tp_hit = [False, False, False]
                 # final_pct = (entry_price - price) / entry_price
                 # pnl = position_size * final_pct
                 # capital += pnl
@@ -2260,7 +2379,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 # position_pct_left = 1.0
                 # partial_tp_hit = [False, False, False, False]
                 if price <= tp_price:
-                    # reward += 1
+                    reward += 1
                     # else:
                     #     reward -= 1
                     action = 3
@@ -2276,41 +2395,50 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         # if action == 3 and position == 1:
             final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
             # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
-            reward = final_pct - 0.00075 * 2 - 0.00025
+            reward += final_pct - 0.00075 * 2 - 0.00025
             # if pnl < 2:
             #     reward -= 1
             # if pnl > 2:
             #     reward += 1
             daily_pnl += profit_pct * position_size - position_size * 0.00075 * 2 - position_size * 0.00025
-            knn.add(entry_state, is_win=(final_pct - 0.00075 * 2 - 0.00025 > 0))
+            knn.add(entry_state, is_win=(final_pct - 0.00075 * 2 - 0.00025 > 0.00))
             close_old_orders(bybit_symbol)
             in_position = False
             entry_price = 0
+            done = True
             # print(f"profit_pct: {profit_pct}, pnl: {profit_pct * position_size - position_size * 0.00075 * 2 - position_size * 0.00025}")
 
         if action == 3 and position == -1 and df['signal'].iloc[t] == 1 and entry_price != 0:
         # if action == 3 and position == -1:
             final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
             # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
-            reward = final_pct - 0.00075 * 2 - 0.00025
+            reward += final_pct - 0.00075 * 2 - 0.00025
             # reward = profit_pct - 0.003 * 2 - 0.001
             # if pnl < 2:
             #     reward -= 1
             # if pnl > 2:
             #     reward += 1
             daily_pnl += profit_pct * position_size - position_size * 0.00075 * 2 - position_size * 0.00025
-            knn.add(entry_state, is_win=(final_pct - 0.00075 * 2 - 0.00025 > 0))
+            knn.add(entry_state, is_win=(final_pct - 0.00075 * 2 - 0.00025 > 0.00))
             # knn.add(entry_state, is_win=(final_pct - 0.003 * 2 - 0.001 > 0))
             close_old_orders(bybit_symbol)
             in_position = False
             daily_trades += 1
             entry_price = 0.0
+            done = True
             # print(f"profit_pct: {profit_pct}, pnl: {profit_pct * position_size - position_size * 0.00075 * 2 - position_size * 0.00025}")
+        if action == 0:
+            if entry_price != 0.00:
+                profit_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
+            else:
+                profit_pct = 0.00
+            reward += profit_pct - 0.00075 * 2 - 0.00025
 
         # === Store reward and update step ===
-        agent.store_transition(state_seq, action, logprob, value, reward)
+        agent.store_transition(state_seq, action, logprob, value, reward, done)
         save_counter += 1
         reward = 0
+        done = False
         # if not started:
         #     started = True
         # if not begun:
@@ -2342,8 +2470,8 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = False
-    test = True
+    train = True
+    test = False
     counter = 0
     # keep_session_alive()
     threading.Thread(target=keep_session_alive).start()
@@ -2361,16 +2489,16 @@ def main():
                 df = load_last_mb(symbols[i])
                 # continue
                 # df = yf_get_ohlc_df(yf_symbol)
-            # df = df[['Open', "High", "Low", "Close"]]
-            df = add_indicators(df)
-            # print(f"[main] length of df: {len(df)}")
-            df['signal'] = generate_signals(df)
-            lstm_ppo_agent = LSTMPPOAgent(state_size=23, hidden_size=64, action_size=4)
-            counter += 1
-            # futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
-            t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
-            t.start()
-            test_threads.append(t)
+                # df = df[['Open', "High", "Low", "Close"]]
+                df = add_indicators(df)
+                # print(f"[main] length of df: {len(df)}")
+                df['signal'] = generate_signals(df)
+                lstm_ppo_agent = LSTMPPOAgent(state_size=24, hidden_size=64, action_size=4)
+                counter += 1
+                # futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+                t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+                t.start()
+                test_threads.append(t)
         # for future in as_completed(futures):
         #     try:
         #         future.result()
@@ -2394,8 +2522,8 @@ def main():
             df = get_klines_df(bybit_symbol, 96)
             df = add_indicators(df)
             df['signal'] = generate_signals(df)
-            lstm_ppo_agent = LSTMPPOAgent(state_size=23, hidden_size=64, action_size=4)
-            # futures.append(executor.submit(test_bot, df, agent, symbols[i], bybit_symbol))
+            lstm_ppo_agent = LSTMPPOAgent(state_size=24, hidden_size=64, action_size=4)
+            # futures.append(executor.submit(test_bot, df, lstm_ppo_agent, symbols[i], bybit_symbol))
             t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
             t.start()
             test_threads.append(t)
