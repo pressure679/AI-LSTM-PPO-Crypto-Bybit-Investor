@@ -1781,6 +1781,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     partial_tp_hit = [False, False, False]
     position_pct_left = 1.0
     done = False
+    daily_trades = 0
 
     orderbook_features = {}
     orderbook_lock = threading.Lock()
