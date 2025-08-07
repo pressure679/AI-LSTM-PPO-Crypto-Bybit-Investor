@@ -2121,20 +2121,20 @@ def main():
     counter = 0
     threading.Thread(target=keep_session_alive).start()
 
-    subprocess.run(["git", "clone", "https://github.com/pressure679/AI-LSTM-PPO-Crypto-Bybit-Investor.git"])
+    # subprocess.run(["git", "clone", "https://github.com/pressure679/AI-LSTM-PPO-Crypto-Bybit-Investor.git"])
     # Pull latest changes in an existing repo
-    subprocess.run(["git", "-C", "~/", "pull"])
+    # subprocess.run(["git", "-C", "~/", "pull"])
     # subprocess.run(["cd AI-LSTM-PPO-Crypto-Bybit-Investor; mkdir LSTM-PPO-saves; mv *XAUUSD.win_rate_knn.pkl LSTM-PPO-saves; mv *XAUUSD.checkpoint.lstm-ppo.pkl LSTM-PPO-saves; mv *XRPUSD.win_rate_knn.pkl LSTM-PPO-saves; mv *XRPUSD.checkpoint.lstm-ppo.pkl LSTM-PPO-saves; mv *BNBUSD.win_rate_knn.pkl LSTM-PPO-saves; mv *BNBUSD.checkpoint.lstm-ppo.pkl LSTM-PPO-saves; mv *ETHUSD.win_rate_knn.pkl LSTM-PPO-saves; mv *ETHUSD.checkpoint.lstm-ppo.pkl LSTM-PPO-saves; mv *BTCUSD.win_rate_knn.pkl LSTM-PPO-saves; mv *BTCUSD.checkpoint.lstm-ppo.pkl LSTM-PPO-saves"])
 
     # Pattern to match today's file or similar
-    files = glob.glob("*pkl")
+    # files = glob.glob("*pkl")
     
     # Destination folder
-    destination = "LSTM-PPO-saves"
+    # destination = "LSTM-PPO-saves"
     
     # Move matching files
-    for file in files:
-        shutil.move(file, destination)
+    # for file in files:
+    #     shutil.move(file, destination)
     
     if train:
         print("Starting training phase...")
