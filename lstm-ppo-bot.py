@@ -873,17 +873,6 @@ def close_old_orders(symbol):
 
         # tiny pause to let Bybit settle before we yank orders
         time.sleep(0.2)
-def compute_gae(rewards, values, dones, gamma=0.99, lam=0.95):
-    advantages = []
-    gae = 0
-    values = np.append(values, 0)  # Bootstrap value after last step
-
-    for step in reversed(range(len(rewards))):
-        delta = rewards[step] + gamma * values[step + 1] * (1 - dones[step]) - values[step]
-        gae = delta + gamma * lam * (1 - dones[step]) * gae
-        advantages.insert(0, gae)
-    return np.array(advantages)
-
 class LSTMPPOAgent:
     def __init__(self, state_size, hidden_size, action_size, lr=1e-3, gamma=0.95, clip_ratio=0.2):
         self.state_size = state_size
@@ -1108,7 +1097,20 @@ class LSTMPPOAgent:
         returns = np.array(returns)
         return 0.5 * np.mean((returns - values) ** 2)
 
-    def train(self, epochs=4):
+    def compute_gae(self, rewards, values, dones, gamma=0.95, lam=0.95):
+        advantages = []
+        gae = 0
+        values = np.append(values, 0)  # Bootstrap value after last step
+        
+        for step in reversed(range(len(rewards))):
+            delta = rewards[step] + gamma * values[step + 1] * (1 - dones[step]) - values[step]
+            gae = delta + gamma * lam * (1 - dones[step]) * gae
+            advantages.insert(0, gae)
+        return np.array(advantages)
+
+    def train(self):
+        # if len(self.trajectory) < 2:
+        #     return  # Not enough data to train
         if self.trajectory:
             # Unpack trajectory
             states, actions, logprobs_old, values, rewards, dones = zip(*self.trajectory)
@@ -1121,7 +1123,7 @@ class LSTMPPOAgent:
             rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
 
             # Compute GAE
-            advantages = compute_gae(rewards, values, dones, gamma=0.95, lam=0.95)
+            advantages = self.compute_gae(rewards, values, dones, gamma=0.95, lam=0.95)
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)  # Normalize advantages
             returns = advantages + values
 
@@ -1131,11 +1133,18 @@ class LSTMPPOAgent:
             advantages = np.clip(advantages, -10, 10)
 
             # Train for multiple epochs (optional)
-            for _ in range(epochs):
+            for _ in range(self.train_epochs):
                 for i in range(len(states)):
                     state_seq = states[i]
                     action = actions[i]
                     old_logprob = logprobs_old[i]
+                    # print(f"len(states): {len(states)}")
+                    # print(f"len(actions): {len(actions)}")
+                    # print(f"len(logprobs_old): {len(logprobs_old)}")
+                    # print(f"len(values): {len(values)}")
+                    # print(f"len(rewards): {len(rewards)}")
+                    # print(f"len(dones): {len(dones)}")
+                    # print(f"length of advantages: {len(advantages)}, i: {i}, length of states: {len(states)}")
                     advantage = advantages[i]
                     target_value = returns[i]
 
@@ -1163,7 +1172,6 @@ class LSTMPPOAgent:
                         self.model[k] = np.clip(self.model[k], -1000, 1000)  # Clamp weights
 
                 self.trajectory.clear()
-
 
     def savecheckpoint(self, symbol):
         os.makedirs("LSTM-PPO-saves", exist_ok=True)
@@ -1387,7 +1395,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
     tp_price = 0.0
     entry_price = 0.0
     price = 0.0
-    leverage = 50
+    leverage = 10
     position_size = 0.0
     daily_trades = 0
     daily_returns = []
@@ -1602,7 +1610,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 #     print(f"investment amount under minimum, ${invest:.2f}, waiting until amount is free")
                 #     break
                 invest = max(capital * 0.05, 15)
-                position_size = invest * 10
+                position_size = invest
                 # leverage = get_max_leverage(position_size, bybit_symbol)
                 # position_size = calculate_position_size(capital, 0.05, sl_dist, leverage, min_qty)
                 # print(f"position size: {position_size}")
@@ -2470,8 +2478,8 @@ def main():
     # global lstm_ppo_agent
     counter = 0
     test_threads = []
-    train = False
-    test = True
+    train = True
+    test = False
     counter = 0
     # keep_session_alive()
     threading.Thread(target=keep_session_alive).start()
