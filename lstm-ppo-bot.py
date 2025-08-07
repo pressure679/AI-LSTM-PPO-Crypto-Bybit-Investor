@@ -2185,7 +2185,7 @@ def main():
     processes = []
 
     if test:
-        print("Starting test phase...")
+        print("Starting trading phase...")
         # with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         #     futures = []
         for i, bybit_symbol in enumerate(bybit_symbols):
