@@ -25,21 +25,16 @@ import shutil
 ready_event = threading.Event()
 process_counter = 0
 
-
-yf_symbols = ["BTC-USD", "BNB-USD", "ETH-USD", "XRP-USD"]
+yf_symbols = ["BTC-USD", "BNB-USD", "ETH-USD", "XRP-USD", "XAUUSD=X"]
 bybit_symbols = ["BTCUSDT", "BNBUSDT", "ETHUSDT", "XRPUSDT", "XAUTUSDT"]
 symbols = ["BTCUSD", "BNBUSD", "ETHUSD", "XRPUSD", "XAUUSD"]
-# yf_symbols = ["BNB-USD", "ETH-USD", "XRP-USD", "XAUUSD=X"]
 
 ACTIONS = ['hold', 'long', 'short', 'close']
 
 capital = 1000
 
-# Bybit Demo API Key and Secret - 1khTo0Bme2LA3YL4gU - JkDgEjC4O8pIiu9ysMKMiRVITE0Setwjf1I9
-# Bybit API Key and Secret - PoP1ud3PuWajwecc4S - z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU
-# Bybit SubAccount API Key and Secret - UwZ6Br6QwinYJeDcf6 - Nai4QZfKVOU9756IsRpbm1d7gh70RAEwFd4K
-api_key = "PoP1ud3PuWajwecc4S"
-api_secret = "z9RXVMWpiOoE3TubtAQ0UtGx8I5SOiRp1KPU"
+api_key = ""
+api_secret = ""
 session = HTTP(
     api_key=api_key,
     api_secret=api_secret,
