@@ -8,6 +8,7 @@ from collections import deque
 from datetime import datetime, timedelta
 import requests
 import threading
+from multiprocessing import Process
 import time
 from decimal import Decimal
 from pybit.unified_trading import HTTP
@@ -16,6 +17,7 @@ from pybit.unified_trading import HTTP
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ready_event = threading.Event()
+process_counter = 0
 
 # import warnings
 # import yfinance as yf
@@ -93,7 +95,7 @@ def load_last_mb(symbol, filepath="/mnt/chromeos/removable/sd_card/1m dataframes
     ready_event.set()
     return df
 
-def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/1m dataframes/XAUUSD_1m_data.csv", mb=2*2, delimiter=';', col_names=None):
+def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/1m dataframes/XAUUSD_1m_data.csv", mb=3*2, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
     
@@ -1097,7 +1099,7 @@ class LSTMPPOAgent:
         returns = np.array(returns)
         return 0.5 * np.mean((returns - values) ** 2)
 
-    def compute_gae(self, rewards, values, dones, gamma=0.99, lam=0.95):
+    def compute_gae(self, rewards, values, dones, gamma=0.95, lam=0.95):
         advantages = []
         gae = 0
         values = np.append(values, 0)  # Bootstrap value after last step
@@ -1138,6 +1140,13 @@ class LSTMPPOAgent:
                     state_seq = states[i]
                     action = actions[i]
                     old_logprob = logprobs_old[i]
+                    # print(f"len(states): {len(states)}")
+                    # print(f"len(actions): {len(actions)}")
+                    # print(f"len(logprobs_old): {len(logprobs_old)}")
+                    # print(f"len(values): {len(values)}")
+                    # print(f"len(rewards): {len(rewards)}")
+                    # print(f"len(dones): {len(dones)}")
+                    # print(f"length of advantages: {len(advantages)}, i: {i}, length of states: {len(states)}")
                     advantage = advantages[i]
                     target_value = returns[i]
 
@@ -1184,6 +1193,144 @@ class LSTMPPOAgent:
             self.model = pickle.load(f)
 
 
+# class WinRateKNN:
+#     def __init__(self, symbol, k=10):
+#         self.k = k
+#         self.symbol = symbol
+#         self.states = []
+#         self.labels = []  # 1 = win, 0 = loss
+#         self.model = None
+
+#     def add(self, state, is_win):
+#         try:
+#             state = np.array(state, dtype=np.float32).flatten()  # Force all elements to float
+#         except Exception as e:
+#             # print("❌ Could not convert state to float:", state, "| Error:", e)
+#             return
+
+#         if not np.all(np.isfinite(state)):
+#             # print("⚠️ Skipping state with NaN or Inf:", state)
+#             return
+
+#         self.states.append(state)
+#         self.labels.append(1 if is_win else 0)
+
+#         if len(self.states) >= 100:
+#             self._remove_redundant_neighbor()
+#             # self.states.pop(0)
+#             # self.labels.pop(0)
+
+#         if len(self.states) >= self.k:
+#             self._fit()
+
+#     def _remove_redundant_neighbor(self):
+#         if len(self.states) < 2:
+#             return  # Nothing to remove
+
+#         X = np.array(self.states)
+
+#         # Compute pairwise similarity (cosine, or use euclidean if you prefer)
+#         sim_matrix = cosine_similarity(X)
+
+#         # Zero out diagonal (self-similarity)
+#         np.fill_diagonal(sim_matrix, 0)
+
+#         # Compute average similarity for each row (how redundant each entry is)
+#         redundancy_scores = sim_matrix.mean(axis=1)
+
+#         # Remove the most redundant (highest avg similarity)
+#         idx_to_remove = np.argmax(redundancy_scores)
+
+#         del self.states[idx_to_remove]
+#         del self.labels[idx_to_remove]
+#     def _fit(self):
+#         """
+#         Fit the KNN model with stored data.
+#         """
+#         if len(self.states) < 1:
+#             # print("⚠️ Not enough data to fit KNN.")
+#             return
+
+#         # Safety check
+#         k_neighbors = max(1, min(self.k, len(self.states)))
+
+#         self.model = NearestNeighbors(n_neighbors=k_neighbors, algorithm="kd_tree")
+#         self.model.fit(self.states)
+
+#     def predict_win_rate(self, state_seq, k_near=5, k_far=5):
+#         """
+#         Return the win rate based on k nearest neighbors of the input state.
+#         """
+#         # if not self.model or len(self.states) < self.k:
+#         if len(self.states) < 1000:
+#             # return True  # Not enough data
+#             return 1  # Not enough data
+
+#         # Find the 100 nearest neighbors
+#         distances, indices = self.model.kneighbors(state.reshape(1, -1), n_neighbors=50)
+#         distances = distances[0]
+#         indices = indices[0]
+
+#         # Split into nearest and farthest groups
+#         nearest_idx = indices[:k_near]
+#         nearest_dist = distances[:k_near]
+
+#         farthest_idx = indices[-k_far:]
+#         farthest_dist = distances[-k_far:]
+
+#         # Combine indices and distances
+#         combined_idx = np.concatenate([nearest_idx, farthest_idx])
+#         combined_dist = np.concatenate([nearest_dist, farthest_dist])
+
+#         # Get win/loss labels for selected neighbors
+#         selected_labels = np.array([self.labels[i] for i in combined_idx])
+
+#         # Calculate weights (closer gets higher weight)
+#         weights = 1 / (combined_dist + 1e-6)  # Add epsilon to avoid div-by-zero
+
+#         # Normalize weights
+#         weights /= weights.sum()
+
+#         # Compute weighted win rate
+#         win_rate = np.dot(selected_labels, weights)
+
+#         return win_rate
+#     def save(self):
+#         """
+#         Save the KNN model to disk.
+#         """
+#         path = f"LSTM-PPO-saves/{datetime.now().strftime('%Y-%m-%d')}-{self.symbol}.win_rate_knn.pkl"
+#         os.makedirs(os.path.dirname(path), exist_ok=True)
+#         with open(path, "wb") as f:
+#             pickle.dump({
+#                 "states": self.states,
+#                 "labels": self.labels,
+#                 "model": self.model
+#             }, f)
+
+#     def load(self):
+#         """
+#         Load the KNN model from disk.
+#         """
+#         # path = f"LSTM-PPO-saves/win_rate_knn-{self.symbol}.pkl"
+#         files = sorted(os.listdir("LSTM-PPO-saves"))
+#         files = [f for f in files if f.endswith(".win_rate_knn.pkl") and self.symbol in f]
+#         if not files:
+#             print(f"[!] No checkpoint found for {self.symbol}")
+#             return
+
+#         latest = os.path.join("LSTM-PPO-saves", files[-1])
+
+#         try:
+#             with open(latest, "rb") as f:
+#                 data = pickle.load(f)
+#                 self.states = data["states"]
+#                 self.labels = data["labels"]
+#                 self.model = data["model"]
+#                 # print(f"✅ Loaded WinRateKNN from {latest}")
+#         except FileNotFoundError:
+#             print(f"⚠️ No saved KNN found at {path}. Starting fresh.")
+    
 def sharpe_ratio(returns, risk_free_rate=0.0):
     mean_ret = np.mean(returns)
     std_ret = np.std(returns)
@@ -1237,6 +1384,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
     # agent.loadcheckpoint(symbol)
     capital_lock = threading.Lock()
     global capital
+    global process_counter
     peak_capital = capital
     invest = 0.0
     all_trade_pcts = []
@@ -1259,6 +1407,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
     save_counter = 0
     atr = 0.0
     # trailing_sl_pct = 0.000875
+    # knn = WinRateKNN(symbol)
     entry_state = None
     trade_reward = 0
     in_position = False
@@ -1323,6 +1472,10 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             if capital < 0:
                 daily_pnl *= -1
             print(f"[{symbol}] Day {current_day} - Trades: {daily_trades} - Avg Profit: {avg_profit_per_trade:.2f}, {avg_profit_per_trade/position_size*100:.2f}% - PnL: {daily_pnl/capital*100:.2f}% - Balance: {capital:.2f} - Sharpe: {sr:.2f} - Sortino: {sor:.2f}")
+            process_counter += 1
+            if process_counter % 5 == 0:
+                print(f"Above is day {process_counter / 5}")
+                print()
             
             current_day = day
 
@@ -1735,8 +1888,8 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
             # print()
     agent.train()
     agent.savecheckpoint(symbol)
-    knn._fit()
-    knn.save()
+    # knn._fit()
+    # knn.save()
     print(f"[{symbol}] [INFO] Saved checkpoint at step {save_counter}")
     print(f"✅ [{symbol}] PPO training complete. Final capital: {capital:.2f}, Total accumulation: {capital/1000:.2f}x")
 
@@ -2005,46 +2158,46 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 )
                 print(f"[{bybit_symbol}] Entered Buy order")
                 # print(f"trailing sl - entry price: {entry_price}, base price: {entry_price * (1 + 0.000875)}, trailing sl: {entry_price * 0.000875:.2f}")
-                response = session.set_trading_stop(
-                    category="linear",  # or "inverse", depending on your market
-                    symbol=bybit_symbol,
-                    trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
-                    # side="Buy",
-                    # active_price=str(round(entry_price, price_precision)),
-                    # active_price=str(round(entry_price + sl_dist + invest * 0.00075 * 2 + position_size * 0.00025, price_precision)),
-                    active_price=str(round(entry_price + entry_price * 0.001, price_precision)),
-                    # active_price=str(round(entry_price + sl_dist + position_size * 0.003 * 2 + position_size * 0.001, price_precision)),
-                    position_idx=0
-                )
-                tp_levels = [
-                    # entry_price + 0.4 * tp_dist,
-                    # entry_price + 0.6 * tp_dist,
-                    # entry_price + 0.8 * tp_dist
-                    # entry_price + 0.236 * tp_dist,
-                    entry_price + 0.382 * tp_dist,
-                    entry_price + 0.618 * tp_dist,
-                    entry_price + 0.786 * tp_dist
-                ]
-                tp_shares = [0.4, 0.2, 0.2]
-                for i in range(3):
-                    realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
-                    # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
-                    # if pnl == 0:
-                    #     continue
-                    close_side = "Sell" if position == 1 else "Buy"
-                    response = session.place_order(
-                        category="linear",
-                        symbol=bybit_symbol,
-                        side=close_side,  # opposite side to close position
-                        order_type="Limit",
-                        # qty=str(round(pnl, price_precision)),
-                        qty=str(round(realized, price_precision)),
-                        price=str(round(tp_levels[i], price_precision)),
-                        # reduce_only=True,
-                    )
-                    partial_tp_hit = [False, False, False]
-                    # position_pct_left = 1.0
-                #     daily_trades += 1
+                # response = session.set_trading_stop(
+                #     category="linear",  # or "inverse", depending on your market
+                #     symbol=bybit_symbol,
+                #     trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
+                #     # side="Buy",
+                #     # active_price=str(round(entry_price, price_precision)),
+                #     # active_price=str(round(entry_price + sl_dist + invest * 0.00075 * 2 + position_size * 0.00025, price_precision)),
+                #     active_price=str(round(entry_price + entry_price * 0.001, price_precision)),
+                #     # active_price=str(round(entry_price + sl_dist + position_size * 0.003 * 2 + position_size * 0.001, price_precision)),
+                #     position_idx=0
+                # )
+                # tp_levels = [
+                #     # entry_price + 0.4 * tp_dist,
+                #     # entry_price + 0.6 * tp_dist,
+                #     # entry_price + 0.8 * tp_dist
+                #     # entry_price + 0.236 * tp_dist,
+                #     entry_price + 0.382 * tp_dist,
+                #     entry_price + 0.618 * tp_dist,
+                #     entry_price + 0.786 * tp_dist
+                # ]
+                # tp_shares = [0.4, 0.2, 0.2]
+                # for i in range(3):
+                #     realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
+                #     # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                #     # if pnl == 0:
+                #     #     continue
+                #     close_side = "Sell" if position == 1 else "Buy"
+                #     response = session.place_order(
+                #         category="linear",
+                #         symbol=bybit_symbol,
+                #         side=close_side,  # opposite side to close position
+                #         order_type="Limit",
+                #         # qty=str(round(pnl, price_precision)),
+                #         qty=str(round(realized, price_precision)),
+                #         price=str(round(tp_levels[i], price_precision)),
+                #         # reduce_only=True,
+                #     )
+                #     partial_tp_hit = [False, False, False]
+                #     # position_pct_left = 1.0
+                # #     daily_trades += 1
                             
             # if action == 2 and macd_direction == -1 and minus_di > plus_di and bears > 0 and knn.predict_win_rate(state_seq) > 0.9:
             # if action == 2 and knn.predict_win_rate(state_seq) > 0.9 and minus_di > plus_di and bears < 0 and ema_crossover == -1:
@@ -2092,49 +2245,49 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 )
                 print(f"[{bybit_symbol}] Entered Sell order")
                 # print(f"trailing sl - entry price: {entry_price}, base price: {entry_price * (1 - 0.000875)}, trailing sl: {entry_price * 0.000875:.2f}")
-                response = session.set_trading_stop(
-                    category="linear",  # or "inverse", depending on your market
-                    symbol=bybit_symbol,
-                    trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
-                    # base_price=str(round(entry_price - atr * 2.5, price_precision)),
-                    # base_price=str(round(entry_price, price_precision)),
-                    # active_price=str(round(entry_price - trailing_sl_dist, price_precision)),
-                    # active_price=str(round(entry_price - sl_dist - invest * 0.00075 * 2 - position_size * 0.00025, price_precision)),
-                    active_price=str(round(entry_price - entry_price * 0.001, price_precision)),
-                    # active_price=str(round(entry_price - sl_dist - position_size * 0.003 * 2 - position_size * 0.001, price_precision)),
-                    position_idx=0
-                )
-                tp_levels = [
-                    # entry_price - 0.4 * tp_dist,
-                    # entry_price - 0.6 * tp_dist,
-                    # entry_price - 0.8 * tp_dist
-                    # entry_price - 0.236 * tp_dist,
-                    entry_price - 0.382 * tp_dist,
-                    entry_price - 0.618 * tp_dist,
-                    entry_price - 0.786 * tp_dist
-                ]
-                tp_shares = [0.4, 0.2, 0.2]
-                for i in range(3):
-                    realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
-                    # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
-                    # if pnl == 0:
-                    #     continue
-                    close_side = "Sell" if position == 1 else "Buy"
-                    response = session.place_order(
-                        category="linear",
-                        symbol=bybit_symbol,
-                        side=close_side,  # opposite side to close position
-                        order_type="Limit",
-                        # qty=str(round(pnl, price_precision)),
-                        qty=str(round(realized, price_precision)),
-                        price=str(round(tp_levels[i], price_precision)),
-                        # reduce_only=True,
-                        buyLeverage=leverage,
-                        sellLeverage=leverage,
-                    )
-                    partial_tp_hit = [False, False, False]
-                    position_pct_left = 1.0
-                    # daily_trades += 1
+                # response = session.set_trading_stop(
+                #     category="linear",  # or "inverse", depending on your market
+                #     symbol=bybit_symbol,
+                #     trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
+                #     # base_price=str(round(entry_price - atr * 2.5, price_precision)),
+                #     # base_price=str(round(entry_price, price_precision)),
+                #     # active_price=str(round(entry_price - trailing_sl_dist, price_precision)),
+                #     # active_price=str(round(entry_price - sl_dist - invest * 0.00075 * 2 - position_size * 0.00025, price_precision)),
+                #     active_price=str(round(entry_price - entry_price * 0.001, price_precision)),
+                #     # active_price=str(round(entry_price - sl_dist - position_size * 0.003 * 2 - position_size * 0.001, price_precision)),
+                #     position_idx=0
+                # )
+                # tp_levels = [
+                #     # entry_price - 0.4 * tp_dist,
+                #     # entry_price - 0.6 * tp_dist,
+                #     # entry_price - 0.8 * tp_dist
+                #     # entry_price - 0.236 * tp_dist,
+                #     entry_price - 0.382 * tp_dist,
+                #     entry_price - 0.618 * tp_dist,
+                #     entry_price - 0.786 * tp_dist
+                # ]
+                # tp_shares = [0.4, 0.2, 0.2]
+                # for i in range(3):
+                #     realized = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
+                #     # pnl = calc_order_qty(realized, entry_price, min_qty, qty_step)
+                #     # if pnl == 0:
+                #     #     continue
+                #     close_side = "Sell" if position == 1 else "Buy"
+                #     response = session.place_order(
+                #         category="linear",
+                #         symbol=bybit_symbol,
+                #         side=close_side,  # opposite side to close position
+                #         order_type="Limit",
+                #         # qty=str(round(pnl, price_precision)),
+                #         qty=str(round(realized, price_precision)),
+                #         price=str(round(tp_levels[i], price_precision)),
+                #         # reduce_only=True,
+                #         buyLeverage=leverage,
+                #         sellLeverage=leverage,
+                #     )
+                #     partial_tp_hit = [False, False, False]
+                #     position_pct_left = 1.0
+                #     # daily_trades += 1
 
         if action == 0 and position != 0:
             if entry_price == 0.00:
@@ -2331,7 +2484,8 @@ MAX_WORKERS = 5
 def main():
     # global lstm_ppo_agent
     counter = 0
-    test_threads = []
+    threads = []
+    processes = []
     train = False
     test = True
     counter = 0
@@ -2348,10 +2502,10 @@ def main():
             if symbols[i] == "XAUUSD":
                 df = load_last_mb_xauusd()
             else:
-                df = load_last_mb(symbols[i])
                 # continue
-            # df = yf_get_ohlc_df(yf_symbol)
-            # df = df[['Open', "High", "Low", "Close"]]
+                df = load_last_mb(symbols[i])
+                # df = yf_get_ohlc_df(yf_symbol)
+                # df = df[['Open', "High", "Low", "Close"]]
             df = add_indicators(df)
             # print(f"[main] length of df: {len(df)}")
             df['signal'] = generate_signals(df)
@@ -2359,19 +2513,34 @@ def main():
             counter += 1
             # futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
             t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            # p = Process(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            # processes.append(p)
+            # p.start()
             t.start()
-            test_threads.append(t)
+            threads.append(t)
+            # p.join()
         # for future in as_completed(futures):
         #     try:
         #         future.result()
         #     except Exception as e:
         #         print(f"Training thread error: {e}")
-    for t in test_threads:
+    for t in threads:
         t.join()
+    # processes[0].start()
+    # processes[1].start()
+    # processes[2].start()
+    # processes[3].start()
+    # processes[4].start()
+    # processes[0].join()
+    # processes[1].join()
+    # processes[2].join()
+    # processes[3].join()
+    # processes[4].join()
 
     # Reset for test phase
     counter = 0
-    test_threads = []
+    # threads = []
+    processes = []
     # check if weekend
     # today = datetime.utcnow().weekday()  # Monday=0 ... Sunday=6
     # is_weekend = today >= 5  # 5 = Saturday, 6 = Sunday
@@ -2387,14 +2556,28 @@ def main():
             lstm_ppo_agent = LSTMPPOAgent(state_size=24, hidden_size=64, action_size=4)
             # futures.append(executor.submit(test_bot, df, lstm_ppo_agent, symbols[i], bybit_symbol))
             t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            # t.start()
             t.start()
-            test_threads.append(t)
+            threads.append(t)
+            # p = Process(target=test_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            # processes.append(p)
         # for future in as_completed(futures):
         #     try:
         #         future.result()
         #     except Exception as e:
         #         print(f"Test thread error: {e}")
-    for t in test_threads:
+    # processes[0].start()
+    # processes[1].start()
+    # processes[2].start()
+    # processes[3].start()
+    # processes[4].start()
+    # processes[0].join()
+    # processes[1].join()
+    # processes[2].join()
+    # processes[3].join()
+    # processes[4].join()
+
+    for t in threads:
         t.join()
 
 main()
