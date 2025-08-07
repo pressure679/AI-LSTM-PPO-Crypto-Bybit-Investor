@@ -13,7 +13,7 @@ It trains on 3 months and data and should be updated every once in a while with 
 ## 🚀 Features
 
 - ✅ Custom LSTM-PPO implementation
-- ✅ Rule-based entry and exit with **MACD signal line** and **MACD line** and profit/loss evaluation
+- ✅ Rule-based entry and exit with **MACD signal line** and profit/loss evaluation
 - ✅ Uses **pandas**-based technical indicators for state encoding
 - ✅ Compatible with multi-symbol training (BTC, ETH, BNB, XRP, XAU)
 - ✅ Supports save/load checkpoint functionality
