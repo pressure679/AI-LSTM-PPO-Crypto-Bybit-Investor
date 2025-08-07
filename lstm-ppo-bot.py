@@ -1831,7 +1831,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
             position = 1 if float(session_position["size"]) > 0 else -1 if float(session_position["size"]) < 0 else 0
             in_position = True
             if 'side' in pos and pos['size'] != '0':
-                position = pos['side']
+                position = 1 if pos['side'] == "Buy" else -1 if pos['side'] == "Sell" else 0
             else:
                 position = 0
             if 'avgPrice' in pos and pos['size'] != '0':
