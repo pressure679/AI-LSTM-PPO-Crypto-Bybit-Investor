@@ -93,7 +93,7 @@ def load_last_mb(symbol, filepath="/mnt/chromeos/removable/sd_card/1m dataframes
     ready_event.set()
     return df
 
-def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/1m dataframes/XAUUSD_1m_data.csv", mb=2*2, delimiter=';', col_names=None):
+def load_last_mb_xauusd(file_path="/mnt/chromeos/removable/sd_card/1m dataframes/XAUUSD_1m_data.csv", mb=3*2, delimiter=';', col_names=None):
     file_size = os.path.getsize(file_path)
     offset = max(file_size - mb * 1024 * 1024, 0)  # start position
     
@@ -2158,7 +2158,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     # side="Buy",
                     # active_price=str(round(entry_price, price_precision)),
                     # active_price=str(round(entry_price + sl_dist + invest * 0.00075 * 2 + position_size * 0.00025, price_precision)),
-                    active_price=str(round(entry_price, price_precision)),
+                    active_price=str(round(entry_price + entry_price * 0.001, price_precision)),
                     # active_price=str(round(entry_price + sl_dist + position_size * 0.003 * 2 + position_size * 0.001, price_precision)),
                     position_idx=0
                 )
@@ -2246,7 +2246,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     # base_price=str(round(entry_price, price_precision)),
                     # active_price=str(round(entry_price - trailing_sl_dist, price_precision)),
                     # active_price=str(round(entry_price - sl_dist - invest * 0.00075 * 2 - position_size * 0.00025, price_precision)),
-                    active_price=str(round(entry_price, price_precision)),
+                    active_price=str(round(entry_price - entry_price * 0.001, price_precision)),
                     # active_price=str(round(entry_price - sl_dist - position_size * 0.003 * 2 - position_size * 0.001, price_precision)),
                     position_idx=0
                 )
@@ -2494,19 +2494,19 @@ def main():
             if symbols[i] == "XAUUSD":
                 df = load_last_mb_xauusd()
             else:
-                df = load_last_mb(symbols[i])
                 # continue
+                df = load_last_mb(symbols[i])
                 # df = yf_get_ohlc_df(yf_symbol)
                 # df = df[['Open', "High", "Low", "Close"]]
-                df = add_indicators(df)
-                # print(f"[main] length of df: {len(df)}")
-                df['signal'] = generate_signals(df)
-                lstm_ppo_agent = LSTMPPOAgent(state_size=24, hidden_size=64, action_size=4)
-                counter += 1
-                # futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
-                t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
-                t.start()
-                test_threads.append(t)
+            df = add_indicators(df)
+            # print(f"[main] length of df: {len(df)}")
+            df['signal'] = generate_signals(df)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=24, hidden_size=64, action_size=4)
+            counter += 1
+            # futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
+            t.start()
+            test_threads.append(t)
         # for future in as_completed(futures):
         #     try:
         #         future.result()
