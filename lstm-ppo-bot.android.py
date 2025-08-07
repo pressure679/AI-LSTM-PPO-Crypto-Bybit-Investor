@@ -10,8 +10,10 @@ import requests
 import threading
 from multiprocessing import Process
 import time
+from time import timezone
 from decimal import Decimal
 from pybit.unified_trading import HTTP
+from pybit.unified_trading import WebSocket
 # from sklearn.neighbors import NearestNeighbors
 # from sklearn.metrics.pairwise import cosine_similarity
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -50,7 +52,7 @@ session = HTTP(
     api_key=api_key,
     api_secret=api_secret,
     demo=False,  # or False for mainnet
-    recv_window=5000,
+    recv_window=15000,
     timeout=60
 )
 
@@ -286,6 +288,91 @@ def Momentum(df, period=14):
     df = df.copy()
     df['Momentum'] = ((df['Close'] - df['Close'].shift(period)) / df['Close'].shift(period)) * 100
     return df
+def process_orderbook(message):
+    """
+    Parses the order book update message from Bybit and extracts key features.
+
+    Parameters:
+        message (dict): The order book update message from Bybit WebSocket.
+
+    Returns:
+        dict: A dictionary of processed order book features.
+    """
+    bids = message['data']['b']  # format: [['price', 'size'], ...]
+    asks = message['data']['a']  # format: [['price', 'size'], ...]
+
+    # Convert top 10 levels to floats and sum their volumes
+    top_bid_price = float(bids[0][0])
+    top_ask_price = float(asks[0][0])
+    spread = top_ask_price - top_bid_price
+
+    bid_volume = sum(float(bid[1]) for bid in bids[:10])
+    ask_volume = sum(float(ask[1]) for ask in asks[:10])
+
+    # Market imbalance: +1 = heavy buy pressure, -1 = heavy sell pressure
+    imbalance = (bid_volume - ask_volume) / (bid_volume + ask_volume + 1e-9)
+
+    # Detect bid wall (adjust threshold as needed)
+    wall_flag = 1 if any(float(bid[1]) > 500000 for bid in bids[:10]) else 0
+
+    return {
+        'top_bid': top_bid_price,
+        'top_ask': top_ask_price,
+        'spread': spread,
+        'bid_vol': bid_volume,
+        'ask_vol': ask_volume,
+        'imbalance': imbalance,
+        'wall_flag': wall_flag
+    }
+def update_orderbook(symbol, shared_features, lock):
+    def handle_message(message):
+        if message["topic"] == f"orderbook.50.{symbol}":
+            features = process_orderbook(message)
+            with lock:
+                shared_features.clear()
+                shared_features.update(features)
+
+    ws = WebSocket(
+        testnet=False,
+        channel_type="linear",
+        trace_logging=False
+    )
+    ws.orderbook_stream(depth="50", symbol=symbol, callback=handle_message)
+
+    while True:
+        time.sleep(0.5)  # Keep the thread alive
+# def fetch_daily_crypto_sentiment_diff(api_key, currencies=["BTC","ETH","XRP","BNB"]):
+#     base_url = "https://cryptopanic.com/api/v1/posts/"
+# 
+#     def fetch_news(filter_str):
+#         params = {
+#             "auth_token": api_key,
+#             "currencies": ",".join(currencies),
+#             "filter": filter_str,
+#             "kind": "news",
+#             "public": "true",
+#             "regions": "en"
+#         }
+#         resp = requests.get(base_url, params=params)
+#         resp.raise_for_status()
+#         return resp.json().get("results", [])
+# 
+#     # Helper to count today's news for a filter
+#     def count_today_news(filter_str):
+#         news = fetch_news(filter_str)
+#         today_utc = datetime.now(timezone.utc).date()
+#         count = 0
+#         for item in news:
+#             published_at = datetime.fromisoformat(item["published_at"].replace("Z", "+00:00")).date()
+#             if published_at == today_utc:
+#                 count += 1
+#         return count
+# 
+#     bullish_count = count_today_news("bullish")
+#     bearish_count = count_today_news("bearish")
+# 
+#     sentiment_diff = bullish_count - bearish_count
+#     return sentiment_diff
 # def detect_order_blocks(df, lookback=50, move_strength=1.5, influence_window=10):
 #     df = df.copy()
 #     df['order_block'] = 0  # Neutral by default
@@ -568,7 +655,11 @@ def add_indicators(df):
     # df = detect_bos(df)
     df = Momentum(df)
 
-    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR", "Momentum"]].copy()
+    df['spread'] = 0
+    df['imbalance'] = 0
+    df['wall_flag'] = 0
+
+    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR", "Momentum", "spread", "imbalance", "wall_flag"]].copy()
     # df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR", "order_block_type"]].copy()
 
     df.dropna(inplace=True)
@@ -712,11 +803,11 @@ def keep_session_alive():
             break  # If success, break out of loop
         except requests.exceptions.ReadTimeout:
             print(f"[WARN] Timeout on attempt {attempt+1}, retrying...")
-            time.sleep(30)  # wait before retry
+            time.sleep(5)  # wait before retry
         except requests.exceptions.RequestException as e:
             print("Request failed:", e)
         finally:
-            session = HTTP(api_key=api_key, api_secret=api_secret, demo=False, recv_window=5000, timeout=60)
+            session = HTTP(api_key=api_key, api_secret=api_secret, demo=False, recv_window=15000, timeout=60)
             threading.Timer(120, keep_session_alive).start()
 
 def get_balance():
@@ -1191,7 +1282,6 @@ class LSTMPPOAgent:
         latest = os.path.join("LSTM-PPO-saves", files[-1])
         with open(latest, "rb") as f:
             self.model = pickle.load(f)
-
 
 # class WinRateKNN:
 #     def __init__(self, symbol, k=10):
@@ -1947,6 +2037,15 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     position_pct_left = 1.0
     done = False
 
+    orderbook_features = {}
+    orderbook_lock = threading.Lock()
+    orderbook_thread = threading.Thread(
+        target=update_orderbook,
+        args=(bybit_symbol, orderbook_features, orderbook_lock)
+    )
+    orderbook_thread.daemon = True
+    orderbook_thread.start()
+
     while True:
         wait_until_next_candle(15)
         # if not started:
@@ -1974,6 +2073,12 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         bias_DI_DIff = "bullish" if df['+DI_val'].iloc[-1] > df['-DI_val'].iloc[-1] else "bearish" if df['+DI_val'].iloc[-1] < df['-DI_val'].iloc[-1] else "neutral"
         print(f"+DI_val/-DI_val: {df['+DI_val'].iloc[-1]:.2f}/{df['-DI_val'].iloc[-1]:.2f} ({bias_DI_DIff})")
         print()
+
+        df['spread'] = orderbook_features.get('spread', 0.0)
+        df['imbalance'] = orderbook_features.get('imbalance', 0.0)
+        df['wall_flag'] = orderbook_features.get('wall_flag', 0)
+
+        # df['news_sentiment'] = fetch_daily_crypto_sentiment_diff()
     
         state_seq = df[-window_size:].values.astype(np.float32)
         if state_seq.shape != (window_size, agent.state_size):
@@ -1996,7 +2101,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 entry_price = 0.0
             # print(f"{pos}")
             # print(f"Side: {pos['side']}, Size: {pos['size']}")
-
+            
         result = agent.select_action(state_seq, in_position)
         if result is None:
             continue
@@ -2296,115 +2401,115 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 profit_pct = (entry_price - price) / entry_price if position == 1 else (price - entry_price) / entry_price
                 reward += profit_pct
 
-        if position == 1:
-            tp_levels = [
-                # entry_price - 0.4 * tp_dist,
-                # entry_price - 0.6 * tp_dist,
-                # entry_price - 0.8 * tp_dist
-                # entry_price - 0.236 * tp_dist,
-                entry_price - 0.382 * tp_dist,
-                entry_price - 0.618 * tp_dist,
-                entry_price - 0.786 * tp_dist
-            ]
-            # sl_price = entry_price - sl_dist + position_size * 0.003 * 2 + position_size * 0.001
-            # sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
-            sl_price = price + sl_dist
-            # sl_price = entry_price + sl_dist
-            tp_price = entry_price + tp_dist
-            tp_shares = [0.4, 0.2, 0.2]
+        # if position == 1:
+        #     tp_levels = [
+        #         # entry_price - 0.4 * tp_dist,
+        #         # entry_price - 0.6 * tp_dist,
+        #         # entry_price - 0.8 * tp_dist
+        #         # entry_price - 0.236 * tp_dist,
+        #         entry_price - 0.382 * tp_dist,
+        #         entry_price - 0.618 * tp_dist,
+        #         entry_price - 0.786 * tp_dist
+        #     ]
+        #     # sl_price = entry_price - sl_dist + position_size * 0.003 * 2 + position_size * 0.001
+        #     # sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
+        #     sl_price = price + sl_dist
+        #     # sl_price = entry_price + sl_dist
+        #     tp_price = entry_price + tp_dist
+        #     tp_shares = [0.4, 0.2, 0.2]
 
-            for i in range(3):
-                if not partial_tp_hit[i] and price >= tp_levels[i]:
-                    # realized = position_size * tp_shares[i]
-                    pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
-                    # pnl = position_size * tp_shares[i]
-                    # pnl = realized * profit_pct
-                    # capital += pnl
-                    daily_pnl += pnl
-                    # invest -= realized
-                    # invest -= pnl
-                    position_size -= pnl
-                    position_pct_left -= tp_shares[i]
-                    partial_tp_hit[i] = True
-                    action = 0
-                    reward += 1
+        #     for i in range(3):
+        #         if not partial_tp_hit[i] and price >= tp_levels[i]:
+        #             # realized = position_size * tp_shares[i]
+        #             pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
+        #             # pnl = position_size * tp_shares[i]
+        #             # pnl = realized * profit_pct
+        #             # capital += pnl
+        #             daily_pnl += pnl
+        #             # invest -= realized
+        #             # invest -= pnl
+        #             position_size -= pnl
+        #             position_pct_left -= tp_shares[i]
+        #             partial_tp_hit[i] = True
+        #             action = 0
+        #             reward += 1
 
-            if price >= tp_price or price <= sl_price:
-                # partial_tp_hit = [False, False, False, False]
-                final_pct = (entry_price - price) / entry_price
-                # pnl = position_size * final_pct
-                # capital += pnl
-                # reward += pnl / capital
-                # daily_pnl += pnl
-                # invest = 0
-                # position = 0
-                # position_pct_left = 1.0
-                # partial_tp_hit = [False, False, False, False]
-                if price >= tp_price:
-                    reward += 1
-                    # else:
-                    #     reward -= 1
-                    action = 3
-                if df['macd_crossover'].iloc[t] == 1:
-                    # if df['signal'].iloc[t] == 1 and action == 3:
-                    action = 3
+        #     if price >= tp_price or price <= sl_price:
+        #         # partial_tp_hit = [False, False, False, False]
+        #         final_pct = (entry_price - price) / entry_price
+        #         # pnl = position_size * final_pct
+        #         # capital += pnl
+        #         # reward += pnl / capital
+        #         # daily_pnl += pnl
+        #         # invest = 0
+        #         # position = 0
+        #         # position_pct_left = 1.0
+        #         # partial_tp_hit = [False, False, False, False]
+        #         if price >= tp_price:
+        #             reward += 1
+        #             # else:
+        #             #     reward -= 1
+        #             action = 3
+        #         if df['macd_crossover'].iloc[t] == 1:
+        #             # if df['signal'].iloc[t] == 1 and action == 3:
+        #             action = 3
 
-        if position == -1:
-            tp_levels = [
-                # entry_price - 0.4 * tp_dist,
-                # entry_price - 0.6 * tp_dist,
-                # entry_price - 0.8 * tp_dist
-                # entry_price - 0.236 * tp_dist,
-                entry_price - 0.382 * tp_dist,
-                entry_price - 0.618 * tp_dist,
-                entry_price - 0.786 * tp_dist
-            ]
-            # sl_price = entry_price + sl_dist - position_size * 0.003 * 2 - position_size * 0.001
-            # sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
-            sl_price = price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
-            # sl_price = entry_price + sl_dist
-            tp_price = entry_price - tp_dist
-            tp_shares = [0.4, 0.2, 0.2]
+        # if position == -1:
+        #     tp_levels = [
+        #         # entry_price - 0.4 * tp_dist,
+        #         # entry_price - 0.6 * tp_dist,
+        #         # entry_price - 0.8 * tp_dist
+        #         # entry_price - 0.236 * tp_dist,
+        #         entry_price - 0.382 * tp_dist,
+        #         entry_price - 0.618 * tp_dist,
+        #         entry_price - 0.786 * tp_dist
+        #     ]
+        #     # sl_price = entry_price + sl_dist - position_size * 0.003 * 2 - position_size * 0.001
+        #     # sl_price = entry_price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
+        #     sl_price = price + sl_dist - position_size * 0.00075 * 2 - position_size * 0.00025
+        #     # sl_price = entry_price + sl_dist
+        #     tp_price = entry_price - tp_dist
+        #     tp_shares = [0.4, 0.2, 0.2]
 
-            for i in range(3):
-                if not partial_tp_hit[i] and price <= tp_levels[i]:
-                    # realized = position_size * tp_shares[i]
-                    pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
-                    # pnl = position_size * tp_shares[i]
-                    # pnl = realized * profit_pct
-                    capital += pnl
-                    daily_pnl += pnl
-                    # invest -= realized
-                    invest -= pnl
-                    position_size -= pnl
-                    position_pct_left -= tp_shares[i]
-                    partial_tp_hit[i] = True
-                    action = 0
-                    reward += 1
+        #     for i in range(3):
+        #         if not partial_tp_hit[i] and price <= tp_levels[i]:
+        #             # realized = position_size * tp_shares[i]
+        #             pnl = calc_order_qty(position_size * tp_shares[i], entry_price, min_qty, qty_step)
+        #             # pnl = position_size * tp_shares[i]
+        #             # pnl = realized * profit_pct
+        #             capital += pnl
+        #             daily_pnl += pnl
+        #             # invest -= realized
+        #             invest -= pnl
+        #             position_size -= pnl
+        #             position_pct_left -= tp_shares[i]
+        #             partial_tp_hit[i] = True
+        #             action = 0
+        #             reward += 1
 
-            if price <= tp_price or price >= sl_price:
-                partial_tp_hit = [False, False, False]
-                # final_pct = (entry_price - price) / entry_price
-                # pnl = position_size * final_pct
-                # capital += pnl
-                # reward += pnl / capital
-                # daily_pnl += pnl
-                # invest = 0
-                # position = 0
-                # position_pct_left = 1.0
-                # partial_tp_hit = [False, False, False, False]
-                if price <= tp_price:
-                    reward += 1
-                    # else:
-                    #     reward -= 1
-                    action = 3
-            # if df['macd_crossover'].iloc[t] == 1:
-            #     # if df['signal'].iloc[t] == 1 and action == 3:
-            #     action = 3
+        #     if price <= tp_price or price >= sl_price:
+        #         partial_tp_hit = [False, False, False]
+        #         # final_pct = (entry_price - price) / entry_price
+        #         # pnl = position_size * final_pct
+        #         # capital += pnl
+        #         # reward += pnl / capital
+        #         # daily_pnl += pnl
+        #         # invest = 0
+        #         # position = 0
+        #         # position_pct_left = 1.0
+        #         # partial_tp_hit = [False, False, False, False]
+        #         if price <= tp_price:
+        #             reward += 1
+        #             # else:
+        #             #     reward -= 1
+        #             action = 3
+        #     # if df['macd_crossover'].iloc[t] == 1:
+        #     #     # if df['signal'].iloc[t] == 1 and action == 3:
+        #     #     action = 3
 
-            # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
-            # reward = profit_pct - 0.00075 * 2 - 0.00025
-            # reward += profit_pct - 0.003 * 2 - 0.001
+        #     # pnl = calc_order_qty(profit_pct * position_size, entry_price, min_qty, qty_step)  # not margin
+        #     # reward = profit_pct - 0.00075 * 2 - 0.00025
+        #     # reward += profit_pct - 0.003 * 2 - 0.001
 
         if action == 3 and position == 1 and df['signal'].iloc[-1] == -1 and entry_price != 0:
         # if action == 3 and position == 1:
@@ -2465,7 +2570,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         #             # print()
         #             print(f"[INFO] Saved checkpoint at step {save_counter}")
         # if save_counter % 10080 == 0:
-        if save_counter % 60 * 24 == 0:
+        if save_counter % 1 == 0:
             print(f"[{bybit_symbol}] [INFO] Training PPO on step {save_counter}...")
             # knn._fit()
             # knn.save()
@@ -2509,7 +2614,7 @@ def main():
             df = add_indicators(df)
             # print(f"[main] length of df: {len(df)}")
             df['signal'] = generate_signals(df)
-            lstm_ppo_agent = LSTMPPOAgent(state_size=24, hidden_size=64, action_size=4)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=28, hidden_size=64, action_size=4)
             counter += 1
             # futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
             t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
@@ -2553,7 +2658,7 @@ def main():
             df = get_klines_df(bybit_symbol, 96)
             df = add_indicators(df)
             df['signal'] = generate_signals(df)
-            lstm_ppo_agent = LSTMPPOAgent(state_size=24, hidden_size=64, action_size=4)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=28, hidden_size=64, action_size=4)
             # futures.append(executor.submit(test_bot, df, lstm_ppo_agent, symbols[i], bybit_symbol))
             t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
             # t.start()
