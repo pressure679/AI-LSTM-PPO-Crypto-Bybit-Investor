@@ -1917,7 +1917,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     category="linear",  # or "inverse", depending on your market
                     symbol=bybit_symbol,
                     trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
-                    active_price=str(round(entry_price, price_precision)),
+                    active_price=str(round(entry_price + entry_price * 0.001, price_precision)),
                     position_idx=0
                 )
                 tp_levels = [
@@ -1973,7 +1973,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     category="linear",  # or "inverse", depending on your market
                     symbol=bybit_symbol,
                     trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
-                    active_price=str(round(entry_price, price_precision)),
+                    active_price=str(round(entry_price - entry_price * 0.001, price_precision)),
                     position_idx=0
                 )
                 tp_levels = [
