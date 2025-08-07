@@ -2571,13 +2571,13 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         #             print(f"[INFO] Saved checkpoint at step {save_counter}")
         # if save_counter % 10080 == 0:
         if save_counter % 1 == 0:
-            print(f"[{bybit_symbol}] [INFO] Training PPO on step {save_counter}...")
+            # print(f"[{bybit_symbol}] [INFO] Training PPO on step {save_counter}...")
             # knn._fit()
             # knn.save()
             agent.train()
             agent.savecheckpoint(symbol)
             # print()
-            print(f"[{bybit_symbol}] [INFO] Saved checkpoint at step {save_counter}")
+            # print(f"[{bybit_symbol}] [INFO] Saved checkpoint at step {save_counter}")
     # rrKNN.train()
     # rrKNN.save()
     # agent.train()
