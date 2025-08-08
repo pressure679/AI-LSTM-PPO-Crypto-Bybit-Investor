@@ -2132,7 +2132,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
             #     if price >= tp_price:
             #         reward += 1
             #         action = 3
-            if df['macd_signal_diff'].iloc[-1] == 1:
+            if df['signal'].iloc[-1] == 1:
                 action = 3
 
         if position == -1:
@@ -2161,7 +2161,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
             #     if price <= tp_price:
             #         reward += 1
             #         action = 3
-            if df['macd_signal_diff'].iloc[-1] == 1:
+            if df['signal'].iloc[-1] == 1:
                 action = 3
 
         if action == 3 and position == 1 and df['signal'].iloc[-1] == -1 and entry_price != 0:
@@ -2174,7 +2174,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
             entry_price = 0
             done = True
 
-        if action == 3 and position == -1 and df['signal'].iloc[t] == 1 and entry_price != 0:
+        if action == 3 and position == -1 and df['signal'].iloc[-1] == 1 and entry_price != 0:
             final_pct = (price - entry_price) / entry_price if position == 1 else (entry_price - price) / entry_price
             reward += final_pct - 0.00075 * 2 - 0.00025
             daily_pnl += profit_pct * position_size - position_size * 0.00075 * 2 - position_size * 0.00025
