@@ -364,14 +364,19 @@ def process_orderbook(message):
     top_ask_price = float(asks[0][0])
     spread = top_ask_price - top_bid_price
 
-    bid_volume = sum(float(bid[1]) for bid in bids[:10])
-    ask_volume = sum(float(ask[1]) for ask in asks[:10])
+    bid_volume = sum(float(bid[1]) for bid in bids)
+    ask_volume = sum(float(ask[1]) for ask in asks)
 
     # Market imbalance: +1 = heavy buy pressure, -1 = heavy sell pressure
     imbalance = (bid_volume - ask_volume) / (bid_volume + ask_volume + 1e-9)
 
     # Detect bid wall (adjust threshold as needed)
-    wall_flag = 1 if any(float(bid[1]) > 500000 for bid in bids[:10]) else 0
+    # wall_flag = 1 if any(float(bid[1]) > 500000 for bid in bids[:10]) else 0
+    wall_flag = 1 if (
+        any(float(bid[1]) > 500000 for bid in bids[:10]) or
+        imbalance > 0 or
+        imbalance < 0
+    ) else 0
 
     return {
         'top_bid': top_bid_price,
@@ -384,22 +389,20 @@ def process_orderbook(message):
     }
 def update_orderbook(symbol, shared_features, lock):
     def handle_message(message):
+        # print(f"orderbook msg: {message}")
         if message["topic"] == f"orderbook.50.{symbol}":
             features = process_orderbook(message)
             with lock:
-                shared_features.clear()
-                shared_features.update(features)
-
+                # shared_features.clear()
+                # shared_features.update(features)
+                for key, value in features.items():
+                    shared_features[key] = shared_features.get(key, 0) + value
     ws = WebSocket(
         testnet=False,
         channel_type="linear",
         trace_logging=False,
-        # ping_interval=20,  # seconds
-        # ping_timeout=10,   # seconds
-        # retry_attempts=5
     )
     ws.orderbook_stream(depth="50", symbol=symbol, callback=handle_message)
-
     while True:
         time.sleep(0.5)  # Keep the thread alive
 # def fetch_daily_crypto_sentiment_diff(api_key, currencies=["BTC","ETH","XRP","BNB"]):
@@ -716,11 +719,18 @@ def add_indicators(df):
     # df = detect_bos(df)
     df = Momentum(df)
 
-    df['spread'] = 0
-    df['imbalance'] = 0
-    df['wall_flag'] = 0
+    df['24h_high'] = df['High'].rolling(window=96, min_periods=1).max()
+    df['24h_low'] = df['Low'].rolling(window=96, min_periods=1).min()
 
-    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR", "Momentum", "spread", "imbalance", "wall_flag", "order_block"]].copy()
+    # df['imbalance'] = 0
+    # df['bid'] = 0
+    # df['ask'] = 0
+    # for i in range(len(imbalance)):
+    #     df['imbalance'].iloc[-i] = imbalance[-i]
+    #     df['bid'].iloc[-i] = bid[-i]
+    #     df['ask'].iloc[-i] = ask[-i]
+
+    df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR", "Momentum", "order_block", "24h_high", "24h_low"]].copy()
     # df = df[["Open", "High", "Low", "Close", "EMA_crossover", "macd_zone", "macd_line", "macd_signal", "macd_line_diff", "macd_signal_diff", "macd_line_slope", "macd_signal_line_slope" , "macd_osma", "macd_crossover", "bb_sma", "bb_upper", "bb_lower", "RSI_zone", "ADX_zone", "+DI_val", "-DI_val", "ATR", "order_block_type"]].copy()
 
     df.dropna(inplace=True)
@@ -1545,7 +1555,7 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
     tp_price = 0.0
     entry_price = 0.0
     price = 0.0
-    leverage = 20
+    leverage = 1
     position_size = 0.0
     daily_trades = 0
     daily_returns = []
@@ -1627,6 +1637,8 @@ def train_bot(df, agent, symbol, bybit_symbol, window_size=20):
                 
         tp_dist = price * 0.1
         sl_dist = price * 0.05
+        # tp_dist = atr * 8
+        # sl_dist = atr * 4
         trailing_sl_pct = price * 0.05
         tp_hit = False
         sl_hit = False
@@ -1853,7 +1865,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     total_qty = 0.0
     sl_price = 0.0
     tp_price = 0.0
-    leverage = 20
+    leverage = 10
     # qty_step, min_qty = get_qty_step(bybit_symbol)
     current_day = None
     reward = 0.0
@@ -1881,19 +1893,32 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
     position_pct_left = 1.0
     done = False
     daily_trades = 0
-
-    orderbook_features = {}
-    orderbook_lock = threading.Lock()
-    orderbook_thread = threading.Thread(
-        target=update_orderbook,
-        args=(bybit_symbol, orderbook_features, orderbook_lock)
-    )
-    orderbook_thread.daemon = True
-    orderbook_thread.start()
+    
+    # orderbook_features = {}
+    # imbalance_array = []
+    # bid_array = []
+    # ask_array = []
+    # orderbook_lock = threading.Lock()
+    # orderbook_thread = threading.Thread(
+    #     target=update_orderbook,
+    #     args=(bybit_symbol, orderbook_features, orderbook_lock)
+    # )
+    # orderbook_thread.daemon = True
+    # orderbook_thread.start()
 
     while True:
         wait_until_next_candle(15)
+        # imbalance_array.append(orderbook_features['imbalance'])
+        # bid_array.append(orderbook_features['bid_vol'])
+        # ask_array.append(orderbook_features['ask_vol'])
+        # if len(imbalance_array) > 20:
+        #     imbalance_array.pop(0)
+        # if len(bid_array) > 20:
+        #     bid_array.pop(0)
+        # if len(ask_array) > 20:
+        #     ask_array.pop(0)
         df = get_klines_df(bybit_symbol, 15)
+        # df = add_indicators(df, spread = orderbook_features['spread'], imbalance = orderbook_features['imbalance'], wall_flag = orderbook_features['wall_flag'])
         df = add_indicators(df)
         df['signal'] = generate_signals(df)
         atr = df['ATR'].iloc[-1]
@@ -1914,10 +1939,9 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         bias_DI_DIff = "bullish" if df['+DI_val'].iloc[-1] > df['-DI_val'].iloc[-1] else "bearish" if df['+DI_val'].iloc[-1] < df['-DI_val'].iloc[-1] else "neutral"
         print(f"+DI_val/-DI_val: {df['+DI_val'].iloc[-1]:.2f}/{df['-DI_val'].iloc[-1]:.2f} ({bias_DI_DIff})")
         print()
-
-        df['spread'] = orderbook_features.get('spread', 0.0)
-        df['imbalance'] = orderbook_features.get('imbalance', 0.0)
-        df['wall_flag'] = orderbook_features.get('wall_flag', 0)
+        # print(f"Order book spread: {df['imbalance'].iloc[-1]:.2f}, imbalance: {df['spread'].iloc[-1]:.2f}, wall flag: {df['wall_flag'].iloc[-1]}")
+        # print(f"Order book spread, imbalance, and wall flag: {orderbook_features['spread']}, {orderbook_features['imbalance']}, {orderbook_features['wall_flag']}")
+        orderbook_features = {}
 
         state_seq = df[-window_size:].values.astype(np.float32)
         if state_seq.shape != (window_size, agent.state_size):
@@ -1980,11 +2004,21 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         atr = df.iloc[-1]['ATR']
         capital = get_balance()
                 
-        tp_dist = price * 0.1
-        sl_dist = price * 0.05
-        trailing_sl_pct = price * 0.05 / price
+        tp_dist = price * 0.05
+        sl_dist = price * 0.02
+        # tp_dist = atr * 8
+        # sl_dist = atr * 4
+        trailing_sl_pct = price * 0.02 / price
+        previous_position = 0
+        previous_action = 0
+
+        if bybit_symbol == "BTCUSDT":
+            sl_dist = price * 0.003
+            # sl_dist = atr * 0.6
 
         if position == 0:
+            if previous_position != 0 and position == 0 and previous_action != 3:
+                done = True
             if action == 1 and knn.predict_win_rate(state_seq) > 0.9 and df['signal'].iloc[-1] == 1:
                 entry_price = price
                 entry_seq = state_seq
@@ -2013,13 +2047,13 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     # take_profit=str(round(entry_price + tp_dist, price_precision))
                 )
                 print(f"[{bybit_symbol}] Entered Buy order")
-                # response = session.set_trading_stop(
-                #     category="linear",  # or "inverse", depending on your market
-                #     symbol=bybit_symbol,
-                #     trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
-                #     # active_price=str(round(entry_price + entry_price * 0.001, price_precision)),
-                #     position_idx=0
-                # )
+                response = session.set_trading_stop(
+                    category="linear",  # or "inverse", depending on your market
+                    symbol=bybit_symbol,
+                    trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
+                    slTriggerBy="MarkPrice",
+                    # active_price=str(round(entry_price + entry_price * 0.001, price_precision)),
+                )
                 # tp_levels = [
                 #     entry_price + 0.382 * tp_dist,
                 #     entry_price + 0.618 * tp_dist,
@@ -2069,13 +2103,13 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
                     take_profit=str(round(entry_price+tp_dist, price_precision))
                 )
                 print(f"[{bybit_symbol}] Entered Sell order")
-                # response = session.set_trading_stop(
-                #     category="linear",  # or "inverse", depending on your market
-                #     symbol=bybit_symbol,
-                #     trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
-                #     # active_price=str(round(entry_price - entry_price * 0.001, price_precision)),
-                #     position_idx=0
-                # )
+                response = session.set_trading_stop(
+                    category="linear",  # or "inverse", depending on your market
+                    symbol=bybit_symbol,
+                    trailing_stop=str(round(sl_dist, price_precision)),  # Trailing stop in USD or quote currency
+                    slTriggerBy="MarkPrice",
+                    # active_price=str(round(entry_price - entry_price * 0.001, price_precision)),
+                )
                 # tp_levels = [
                 #     entry_price - 0.382 * tp_dist,
                 #     entry_price - 0.618 * tp_dist,
@@ -2132,7 +2166,7 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
             #     if price >= tp_price:
             #         reward += 1
             #         action = 3
-            if df['signal'].iloc[-1] == 1:
+            if df['signal'].iloc[-1] == -1:
                 action = 3
 
         if position == -1:
@@ -2197,8 +2231,10 @@ def test_bot(df, agent, symbol, bybit_symbol, window_size=20):
         save_counter += 1
         reward = 0
         done = False
+        previous_position = position
+        previous_action = action
         # if save_counter % 10080 == 0:
-        if save_counter % 1 == 0:
+        if save_counter % 672 == 0:
             knn._fit()
             knn.save()
             agent.train()
@@ -2253,7 +2289,7 @@ def main():
                 # df = yf_get_ohlc_df(yf_symbol)
             df = add_indicators(df)
             df['signal'] = generate_signals(df)
-            lstm_ppo_agent = LSTMPPOAgent(state_size=28, hidden_size=64, action_size=4)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=27, hidden_size=64, action_size=4)
             counter += 1
             # futures.append(executor.submit(train_bot, df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
             t = threading.Thread(target=train_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
@@ -2294,7 +2330,7 @@ def main():
             df = get_klines_df(bybit_symbol, 96)
             df = add_indicators(df)
             df['signal'] = generate_signals(df)
-            lstm_ppo_agent = LSTMPPOAgent(state_size=28, hidden_size=64, action_size=4)
+            lstm_ppo_agent = LSTMPPOAgent(state_size=27, hidden_size=64, action_size=4)
             # futures.append(executor.submit(test_bot, df, lstm_ppo_agent, symbols[i], bybit_symbol))
             t = threading.Thread(target=test_bot, args=(df, lstm_ppo_agent, symbols[i], bybit_symbols[i]))
             # t.start()
